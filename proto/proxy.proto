@@ -1,0 +1,27 @@
+syntax = "proto3";
+
+service ProxyService {
+
+    rpc Dial(DialRequest) returns (DialResponse) {}
+
+    rpc Connect(stream Data) returns (stream Data) {}
+
+    // rpc Close()
+}
+
+message DialRequest {
+    string protocol = 1;
+    string address = 2;
+}
+
+message DialResponse {
+    string error = 1;
+    int32 streamID = 2;
+}
+
+message Data {
+    int32 streamID = 1;
+    string error = 2;
+    bytes data = 3;
+}
+
