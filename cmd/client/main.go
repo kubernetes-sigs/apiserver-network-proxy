@@ -19,6 +19,9 @@ func main() {
 
 	client := proxy.NewProxyServiceClient(conn)
 
+	// Run remote simple http service on server side as
+	// "python -m SimpleHTTPServer"
+
 	dialReq := &proxy.DialRequest{
 		Protocol: "tcp",
 		Address:  "localhost:8000",
@@ -67,38 +70,4 @@ func main() {
 		}
 		fmt.Println(string(dataresp.Data))
 	}
-
-	/*
-		for {
-			msg := &proxy.ConnectRequest{
-				Protocol: "tcp",
-				Address:  "localhost:8000",
-			}
-
-			err := stream.Send(msg)
-			if err != nil {
-				log.Printf("send error: %v", err)
-				break
-			}
-
-			msg = &proxy.ConnectRequest{
-				Protocol: "tcp",
-				Address:  "localhost:9000",
-			}
-
-			err = stream.Send(msg)
-			if err != nil {
-				log.Printf("send error: %v", err)
-				break
-			}
-
-			resp, err := stream.Recv()
-			if err != nil {
-				log.Printf("recv error: %v", err)
-				break
-			}
-
-			log.Printf("resp: %v", resp)
-		}
-	*/
 }
