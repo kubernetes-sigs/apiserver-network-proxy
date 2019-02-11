@@ -1,16 +1,21 @@
 syntax = "proto3";
 
 service ProxyService {
-
+    // Dial a remote address and return a stream id if success
     rpc Dial(DialRequest) returns (DialResponse) {}
 
+    // Connect connects to a remote address by stream id, and establish
+    // a bi-directional stream.
     rpc Connect(stream Data) returns (stream Data) {}
 
     // rpc Close()
 }
 
 message DialRequest {
+    // tcp or udp?
     string protocol = 1;
+
+    // node:port
     string address = 2;
 }
 
@@ -20,8 +25,13 @@ message DialResponse {
 }
 
 message Data {
+    // streamID to connect to
     int32 streamID = 1;
+
+    // error message if error happens
     string error = 2;
+
+    // stream data
     bytes data = 3;
 }
 
