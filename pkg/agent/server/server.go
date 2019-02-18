@@ -26,6 +26,8 @@ func NewProxyServer() *ProxyServer {
 
 // Proxy ...
 func (s *ProxyServer) Proxy(stream agent.ProxyService_ProxyServer) error {
+	glog.Info("proxy request from client")
+
 	sendCh := make(chan *agent.Packet, 10)
 	recvCh := make(chan *agent.Packet, 10)
 	stopCh := make(chan error)
@@ -58,6 +60,7 @@ func (s *ProxyServer) Proxy(stream agent.ProxyService_ProxyServer) error {
 }
 
 func (s *ProxyServer) serveRecv(stream agent.ProxyService_ProxyServer, sendCh chan<- *agent.Packet, recvCh <-chan *agent.Packet) {
+	glog.Info("start serve recv ...")
 	for pkt := range recvCh {
 		switch pkt.Type {
 		case agent.PacketType_DIAL_REQ:
@@ -69,6 +72,8 @@ func (s *ProxyServer) serveRecv(stream agent.ProxyService_ProxyServer, sendCh ch
 			}
 
 			dialReq := pkt.GetDialRequest()
+			resp.GetDialResponse().Random = dialReq.Random
+
 			conn, err := net.Dial(dialReq.Protocol, dialReq.Address)
 			if err != nil {
 				resp.GetDialResponse().Error = err.Error()
@@ -80,7 +85,6 @@ func (s *ProxyServer) serveRecv(stream agent.ProxyService_ProxyServer, sendCh ch
 			s.conns[connID] = conn
 
 			resp.GetDialResponse().ConnectID = connID
-			resp.GetDialResponse().Random = dialReq.Random
 			sendCh <- resp
 
 			go s.pipe(conn, sendCh, connID)
@@ -119,6 +123,7 @@ func (s *ProxyServer) serveRecv(stream agent.ProxyService_ProxyServer, sendCh ch
 }
 
 func (s *ProxyServer) serveSend(stream agent.ProxyService_ProxyServer, sendCh <-chan *agent.Packet) {
+	glog.Info("start serve send ...")
 	for pkt := range sendCh {
 		err := stream.Send(pkt)
 		if err != nil {

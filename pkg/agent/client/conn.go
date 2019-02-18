@@ -4,6 +4,7 @@ import (
 	"errors"
 	"net"
 	"time"
+	"io"
 
 	"github.com/anfernee/proxy-service/proto/agent"
 	"github.com/golang/glog"
@@ -12,36 +13,39 @@ import (
 type conn struct {
 	stream agent.ProxyService_ProxyClient
 	connID int64
+	readCh chan []byte
+	rdata []byte
 }
 
 var _ net.Conn = &conn{}
 
 func (c *conn) Write(data []byte) (n int, err error) {
-	return 0, nil
+	req := &agent.Packet{
+		Type: agent.PacketType_DATA,
+		Payload: &agent.Packet_Data{
+			Data: &agent.Data{
+				ConnectID: c.connID,
+				Data:	 data,
+			},
+		},
+	}
+
+	glog.Infof("[tracing] send req %+v", req)
+
+	err = c.stream.Send(req)
+	if err != nil {
+		return 0, err
+	}
+	return len(data), err
 }
 
 func (c *conn) Read(b []byte) (n int, err error) {
 	var data []byte
 
-	for {
-		pkt, err := c.stream.Recv()
-		if err != nil {
-			return 0, err
-		}
-
-		switch pkt.Type {
-		case agent.PacketType_DATA:
-
-		default:
-			continue
-		}
-	}
-
-	/*
 		if c.rdata != nil {
 			data = c.rdata
 		} else {
-			data = <-c.bufch
+			data = <-c.readCh
 		}
 
 		if data == nil {
@@ -56,7 +60,6 @@ func (c *conn) Read(b []byte) (n int, err error) {
 
 		c.rdata = nil
 		copy(b, data)
-	*/
 
 	return len(data), nil
 }

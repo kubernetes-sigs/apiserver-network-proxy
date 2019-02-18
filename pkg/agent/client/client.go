@@ -30,17 +30,18 @@ type grpcTunnel struct {
 	client      agent.ProxyServiceClient
 	stream      agent.ProxyService_ProxyClient
 	pendingDial map[int64]chan<- dialResult
+	conns map[int64]*conn
 }
 
 // CreateGrpcTunnel creates a grpc based tunnel
 func CreateGrpcTunnel(address string) (Tunnel, error) {
 	// TODO: mTLS
-	conn, err := grpc.Dial(address, grpc.WithInsecure())
+	c, err := grpc.Dial(address, grpc.WithInsecure())
 	if err != nil {
 		return nil, err
 	}
 
-	client := agent.NewProxyServiceClient(conn)
+	client := agent.NewProxyServiceClient(c)
 
 	stream, err := client.Proxy(context.Background())
 	if err != nil {
@@ -48,10 +49,11 @@ func CreateGrpcTunnel(address string) (Tunnel, error) {
 	}
 
 	tunnel := &grpcTunnel{
-		grpcConn:    conn,
+		grpcConn:    c,
 		client:      client,
 		stream:      stream,
 		pendingDial: make(map[int64]chan<- dialResult),
+		conns: make(map[int64]*conn),
 	}
 
 	go tunnel.serve()
@@ -70,16 +72,26 @@ func (t *grpcTunnel) serve() {
 			return
 		}
 
+		glog.Infof("[tracing] recv packet %+v", pkt)
+
 		switch pkt.Type {
 		case agent.PacketType_DIAL_RSP:
 			resp := pkt.GetDialResponse()
 			if ch, ok := t.pendingDial[resp.Random]; !ok {
-				glog.Warning("DialResp not recognized")
+				glog.Warning("DialResp not recognized; dropped")
 			} else {
 				ch <- dialResult{
 					err:    resp.Error,
 					connid: resp.ConnectID,
 				}
+			}
+		case agent.PacketType_DATA:
+			resp := pkt.GetData()
+			// TODO: flow control
+			if conn, ok := t.conns[resp.ConnectID]; ok {
+				conn.readCh <- resp.Data
+			} else {
+				glog.Warningf("connection id %d not recognized", resp.ConnectID)
 			}
 		}
 	}
@@ -103,6 +115,7 @@ func (t *grpcTunnel) Dial(protocol, address string) (net.Conn, error) {
 			},
 		},
 	}
+	glog.Infof("[tracing] send packet %+v", req)
 
 	err := t.stream.Send(req)
 	if err != nil {
@@ -117,6 +130,9 @@ func (t *grpcTunnel) Dial(protocol, address string) (net.Conn, error) {
 			return nil, errors.New(res.err)
 		}
 		c.connID = res.connid
+		c.readCh = make(chan []byte, 10)
+		t.conns[res.connid] = c
+		// TODO: remove connection from the map
 	case <-time.After(30 * time.Second):
 		return nil, errors.New("dial timeout")
 	}

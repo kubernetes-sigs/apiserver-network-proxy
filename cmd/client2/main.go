@@ -1,73 +1,42 @@
 package main
 
 import (
-	"context"
 	"fmt"
 	"io"
-	"log"
 
-	"google.golang.org/grpc"
-
-	proxy "github.com/anfernee/proxy-service/proto/agent"
+	// "github.com/anfernee/proxy-service/proto/agent"
+	"github.com/anfernee/proxy-service/pkg/agent/client"
 )
 
 func main() {
-	conn, err := grpc.Dial("localhost:8090", grpc.WithInsecure())
-	if err != nil {
-		panic(err)
-	}
-
-	client := proxy.NewProxyServiceClient(conn)
-
 	// Run remote simple http service on server side as
 	// "python -m SimpleHTTPServer"
 
-	dialReq := &proxy.DialRequest{
-		Protocol: "tcp",
-		Address:  "localhost:8000",
-	}
-
-	ctx := context.Background()
-
-	resp, err := client.Dial(ctx, dialReq)
+	tunnel, err := client.CreateGrpcTunnel("localhost:8090")
 	if err != nil {
 		panic(err)
 	}
 
-	log.Println(resp)
-
-	stream, err := client.Connect(ctx)
+	conn, err := tunnel.Dial("tcp", "localhost:8000")
 	if err != nil {
 		panic(err)
 	}
 
-	msg := &proxy.Data{
-		StreamID: resp.StreamID,
-	}
-
-	err = stream.Send(msg)
+	_, err = conn.Write([]byte("GET / HTTP/1.1\r\nHost: localhost\r\n\r\n"))
 	if err != nil {
 		panic(err)
 	}
 
-	msg = &proxy.Data{
-		StreamID: resp.StreamID,
-		Data:     []byte("GET / HTTP/1.1\r\nHost: localhost\r\n\r\n"),
-	}
-
-	err = stream.Send(msg)
-	if err != nil {
-		panic(err)
-	}
+	var buf [1 << 12]byte
 
 	for {
-		dataresp, err := stream.Recv()
+		n, err := conn.Read(buf[:])
 		if err == io.EOF {
 			break
 		}
 		if err != nil {
 			panic(err)
 		}
-		fmt.Println(string(dataresp.Data))
+		fmt.Println(string(buf[:n]))
 	}
 }
