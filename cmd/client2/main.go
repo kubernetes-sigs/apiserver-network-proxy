@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"io"
 
-	// "github.com/anfernee/proxy-service/proto/agent"
 	"github.com/anfernee/proxy-service/pkg/agent/client"
 )
 

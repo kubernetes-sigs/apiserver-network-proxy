@@ -8,6 +8,11 @@ service ProxyService {
   rpc Proxy(stream Packet) returns (stream Packet) {}
 }
 
+service AgentService {
+  // Agent Identifier?
+  rpc Connect(stream Packet) returns (stream Packet) {}
+}
+
 enum PacketType {
   DIAL_REQ = 0;
   DIAL_RSP = 1;
