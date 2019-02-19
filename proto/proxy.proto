@@ -1,3 +1,5 @@
+// LEGACY
+
 syntax = "proto3";
 
 service ProxyService {
