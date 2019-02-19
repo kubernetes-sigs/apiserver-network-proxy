@@ -23,7 +23,9 @@ There are 2 modes to run the examples:
 
 ### Client/Server mode
 
+```
 client ==> server(:8090) ==> SimpleHTTPServer(:8000)
+```
 
 - Start SimpleHTTPServer
 ```console
@@ -42,11 +44,12 @@ go run examples/client/main.go
 
 ### Agent dial back mode
 
+```
 client ==> (:8090) agentserver (:8091) <== agentclient ==> SimpleHTTPServer(:8000)
   |                                                                           ^
   |                               Tunnel                                      |
   +---------------------------------------------------------------------------+
-
+```
 
 - Start SimpleHTTPServer
 ```console
