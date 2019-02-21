@@ -24,7 +24,7 @@ func NewProxyServer() *ProxyServer {
 	}
 }
 
-// Proxy ...
+// Agent ...
 func (s *ProxyServer) Proxy(stream agent.ProxyService_ProxyServer) error {
 	glog.Info("proxy request from client")
 

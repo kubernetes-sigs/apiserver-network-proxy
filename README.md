@@ -17,56 +17,35 @@ Participation in the Kubernetes community is governed by the [Kubernetes Code of
 
 ## Examples
 
-There are 2 modes to run the examples:
-- client/server mode
-- agent dial back mode
+The current example runs the two actual services as well as a sample client on one end and a sample destination for requests on the other. 
+- *Proxy service:* The proxy service takes the API server requests and forwards them appropriately.
+- *Agent service:* The agent service connects to the proxy and then allows traffic to be forwarded to it.
 
-### Client/Server mode
+### Proxy with dial back Agent 
 
 ```
-client ==> server(:8090) ==> SimpleHTTPServer(:8000)
+client ==> (:8090) proxy (:8091) <== agent ==> SimpleHTTPServer(:8000)
+  |                                                    ^
+  |                          Tunnel                    |
+  +----------------------------------------------------+
 ```
 
-- Start SimpleHTTPServer
+- Start SimpleHTTPServer (Sample destination)
 ```console
 python -m SimpleHTTPServer
 ```
 
-- Start server
+- Start agent service
 ```
-go run examples/server/main.go
-```
-
-- Run client
-```
-go run examples/client/main.go
+go run cmd/agent/main.go
 ```
 
-### Agent dial back mode
-
+- Start proxy service
 ```
-client ==> (:8090) agentserver (:8091) <== agentclient ==> SimpleHTTPServer(:8000)
-  |                                                                           ^
-  |                               Tunnel                                      |
-  +---------------------------------------------------------------------------+
+go run cmd/proxy/main.go
 ```
 
-- Start SimpleHTTPServer
-```console
-python -m SimpleHTTPServer
+- Run client (Sample client)
 ```
-
-- Start agentserver
-```
-go run examples/agentserver/main.go
-```
-
-- Start agentclient
-```
-go run examples/agentclient/main.go
-```
-
-- Run client
-```
-go run examples/client/main.go
+go run cmd/client/main.go
 ```
