@@ -1,4 +1,6 @@
 .PHONY: gen clean certs build
+proto/agent/agent.pb.go: proto/agent/agent.proto
+	protoc -I proto proto/agent/agent.proto --go_out=plugins=grpc:proto
 
 bin:
 	mkdir -p bin
