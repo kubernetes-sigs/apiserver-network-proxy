@@ -15,13 +15,21 @@ You can reach the maintainers of this project at:
 
 Participation in the Kubernetes community is governed by the [Kubernetes Code of Conduct](code-of-conduct.md).
 
+## Build
+
+```console
+make clean
+make certs
+make build
+```
+
 ## Examples
 
 The current example runs the two actual services as well as a sample client on one end and a sample destination for requests on the other. 
 - *Proxy service:* The proxy service takes the API server requests and forwards them appropriately.
 - *Agent service:* The agent service connects to the proxy and then allows traffic to be forwarded to it.
 
-### Proxy with dial back Agent 
+### mTLS Proxy with dial back Agent 
 
 ```
 client ==> (:8090) proxy (:8091) <== agent ==> SimpleHTTPServer(:8000)
@@ -37,15 +45,15 @@ python -m SimpleHTTPServer
 
 - Start agent service
 ```
-go run cmd/agent/main.go
+./bin/proxy-server --caCert=certs/issued/ca.crt --serverCert=certs/issued/proxy-master.crt --serverKey=certs/private/proxy-master.key
 ```
 
 - Start proxy service
 ```
-go run cmd/proxy/main.go
+./bin/proxy-agent
 ```
 
-- Run client (Sample client)
+- Run client (mTLS enabled sample client)
 ```
-go run cmd/client/main.go
+./bin/proxy-test-client --caCert=certs/issued/ca.crt --clientCert=certs/issued/proxy-client.crt --clientKey=certs/private/proxy-client.key
 ```

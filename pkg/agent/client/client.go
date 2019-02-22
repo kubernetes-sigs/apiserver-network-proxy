@@ -34,9 +34,9 @@ type grpcTunnel struct {
 }
 
 // CreateGrpcTunnel creates a grpc based tunnel
-func CreateGrpcTunnel(address string) (Tunnel, error) {
+func CreateGrpcTunnel(address string, opts ...grpc.DialOption) (Tunnel, error) {
 	// TODO: mTLS
-	c, err := grpc.Dial(address, grpc.WithInsecure())
+	c, err := grpc.Dial(address, opts...)
 	if err != nil {
 		return nil, err
 	}
