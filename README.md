@@ -29,7 +29,7 @@ The current example runs the two actual services as well as a sample client on o
 - *Proxy service:* The proxy service takes the API server requests and forwards them appropriately.
 - *Agent service:* The agent service connects to the proxy and then allows traffic to be forwarded to it.
 
-### mTLS Proxy with dial back Agent 
+### mTLS Proxy with dial back Agent
 
 ```
 client ==> (:8090) proxy (:8091) <== agent ==> SimpleHTTPServer(:8000)
@@ -57,3 +57,15 @@ python -m SimpleHTTPServer
 ```
 ./bin/proxy-test-client --caCert=certs/issued/ca.crt --clientCert=certs/issued/proxy-client.crt --clientKey=certs/private/proxy-client.key
 ```
+
+## Troubleshoot
+
+### Undefined ProtoPackageIsVersion3
+As explained in https://github.com/golang/protobuf/issues/763#issuecomment-442767135,
+protoc-gen-go binary has to be built from the vendored version:
+
+```console
+go install ./vendor/github.com/golang/protobuf/protoc-gen-go
+make gen
+```
+
