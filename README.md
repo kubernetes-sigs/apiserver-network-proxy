@@ -45,17 +45,17 @@ python -m SimpleHTTPServer
 
 - Start agent service
 ```
-./bin/proxy-server --caCert=certs/issued/ca.crt --serverCert=certs/issued/proxy-master.crt --serverKey=certs/private/proxy-master.key
+./bin/proxy-server --serverCaCert=certs/master/issued/ca.crt --serverCert=certs/master/issued/proxy-master.crt --serverKey=certs/master/private/proxy-master.key --clusterCaCert=certs/agent/issued/ca.crt --clusterCert=certs/agent/issued/proxy-master.crt --clusterKey=certs/agent/private/proxy-master.key
 ```
 
 - Start proxy service
 ```
-./bin/proxy-agent
+./bin/proxy-agent --caCert=certs/agent/issued/ca.crt --agentCert=certs/agent/issued/proxy-agent.crt --agentKey=certs/agent/private/proxy-agent.key
 ```
 
 - Run client (mTLS enabled sample client)
 ```
-./bin/proxy-test-client --caCert=certs/issued/ca.crt --clientCert=certs/issued/proxy-client.crt --clientKey=certs/private/proxy-client.key
+./bin/proxy-test-client --caCert=certs/master/issued/ca.crt --clientCert=certs/master/issued/proxy-client.crt --clientKey=certs/master/private/proxy-client.key
 ```
 
 ## Troubleshoot

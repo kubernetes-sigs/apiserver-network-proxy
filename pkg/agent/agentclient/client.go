@@ -28,8 +28,8 @@ func NewAgentClient(address string) *AgentClient {
 	return a
 }
 
-func (a *AgentClient) Connect() error {
-	c, err := grpc.Dial(a.address, grpc.WithInsecure())
+func (a *AgentClient) Connect(opts ...grpc.DialOption) error {
+	c, err := grpc.Dial(a.address, opts...)
 	if err != nil {
 		return err
 	}

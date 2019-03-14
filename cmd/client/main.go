@@ -43,8 +43,8 @@ func (o *GrpcProxyClientOptions) Flags() *pflag.FlagSet {
 }
 
 func (o *GrpcProxyClientOptions) Print() {
-	glog.Warningf("ServerCert set to \"%s\".\n", o.clientCert)
-	glog.Warningf("ServerKey set to \"%s\".\n", o.clientKey)
+	glog.Warningf("ClientCert set to \"%s\".\n", o.clientCert)
+	glog.Warningf("ClientKey set to \"%s\".\n", o.clientKey)
 	glog.Warningf("CACert set to \"%s\".\n", o.caCert)
 }
 
@@ -54,7 +54,7 @@ func (o *GrpcProxyClientOptions) Validate() error {
 			return err
 		}
 		if o.clientCert == "" {
-			return fmt.Errorf("cannot have server cert empty when server key is set to \"%s\"", o.clientKey)
+			return fmt.Errorf("cannot have client cert empty when client key is set to \"%s\"", o.clientKey)
 		}
 	}
 	if o.clientCert != "" {
@@ -62,7 +62,7 @@ func (o *GrpcProxyClientOptions) Validate() error {
 			return err
 		}
 		if o.clientKey == "" {
-			return fmt.Errorf("cannot have server key empty when server cert is set to \"%s\"", o.clientCert)
+			return fmt.Errorf("cannot have client key empty when client cert is set to \"%s\"", o.clientCert)
 		}
 	}
 	if o.caCert != "" {
