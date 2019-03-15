@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"google.golang.org/grpc/credentials"
 	"net"
+	"net/http"
 	"os"
 
 	"google.golang.org/grpc"
@@ -150,6 +151,11 @@ func (p *Proxy) run(o *ProxyRunOptions) error {
 		return err
 	}
 
+	err = p.runAdminServer(o, server)
+	if err != nil {
+		return err
+	}
+
 	stopCh := make(chan struct{})
 	<-stopCh
 
@@ -219,3 +225,26 @@ func (p *Proxy) runAgentServer(o *ProxyRunOptions, server *agentserver.ProxyServ
 
 	return nil
 }
+
+func (p *Proxy) runAdminServer(o *ProxyRunOptions, server *agentserver.ProxyServer) error {
+	healthHandler := http.HandlerFunc(func (w http.ResponseWriter, r *http.Request) {
+		fmt.Fprintf(w, "ok")
+	})
+
+	adminServer := &http.Server{
+		Addr:           "127.0.0.1:8092",
+		Handler:        healthHandler,
+		MaxHeaderBytes: 1 << 20,
+	}
+
+	go func() {
+		err := adminServer.ListenAndServe()
+		if err != nil {
+			glog.Warningf("health server received %v.\n", err)
+		}
+		glog.Warningf("Health server stopped listening\n")
+	}()
+
+	return nil
+}
+

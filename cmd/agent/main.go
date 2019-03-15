@@ -10,6 +10,7 @@ import (
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials"
 	"io/ioutil"
+	"net/http"
 	"os"
 	"github.com/spf13/cobra"
 )
@@ -102,6 +103,21 @@ func (a *Agent) run(o *GrpcProxyAgentOptions) error {
 		return err
 	}
 
+	if err := a.runProxyConnection(o); err != nil {
+		return err
+	}
+
+	if err := a.runAdminServer(o); err != nil {
+		return err
+	}
+
+	stopCh := make(chan struct{})
+	<-stopCh
+
+	return nil
+}
+
+func (p* Agent) runProxyConnection(o *GrpcProxyAgentOptions) error {
 	agentCert, err := tls.LoadX509KeyPair(o.agentCert, o.agentKey)
 	if err != nil {
 		return err
@@ -130,6 +146,29 @@ func (a *Agent) run(o *GrpcProxyAgentOptions) error {
 
 	stopCh := make(chan struct{})
 
-	client.Serve(stopCh)
+	go client.Serve(stopCh)
+
+	return nil
+}
+
+func (p *Agent) runAdminServer(o *GrpcProxyAgentOptions) error {
+	healthHandler := http.HandlerFunc(func (w http.ResponseWriter, r *http.Request) {
+		fmt.Fprintf(w, "ok")
+	})
+
+	adminServer := &http.Server{
+		Addr:           "127.0.0.1:8093",
+		Handler:        healthHandler,
+		MaxHeaderBytes: 1 << 20,
+	}
+
+	go func() {
+		err := adminServer.ListenAndServe()
+		if err != nil {
+			glog.Warningf("health server received %v.\n", err)
+		}
+		glog.Warningf("Health server stopped listening\n")
+	}()
+
 	return nil
 }
