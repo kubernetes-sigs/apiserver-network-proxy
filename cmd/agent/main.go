@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"github.com/anfernee/proxy-service/pkg/agent/agentclient"
 	"github.com/golang/glog"
+	"github.com/prometheus/client_golang/prometheus"
 	"github.com/spf13/pflag"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials"
@@ -152,13 +153,23 @@ func (p* Agent) runProxyConnection(o *GrpcProxyAgentOptions) error {
 }
 
 func (p *Agent) runAdminServer(o *GrpcProxyAgentOptions) error {
-	healthHandler := http.HandlerFunc(func (w http.ResponseWriter, r *http.Request) {
+	livenessHandler := http.HandlerFunc(func (w http.ResponseWriter, r *http.Request) {
 		fmt.Fprintf(w, "ok")
 	})
+	readinessHandler := http.HandlerFunc(func (w http.ResponseWriter, r *http.Request) {
+		fmt.Fprintf(w, "ok")
+	})
+	metricsHandler := http.HandlerFunc(func (w http.ResponseWriter, r *http.Request) {
+		prometheus.Handler().ServeHTTP(w, r)
+	})
 
+	muxHandler := http.NewServeMux()
+	muxHandler.HandleFunc("/healthz", livenessHandler)
+	muxHandler.HandleFunc("/ready", readinessHandler)
+	muxHandler.HandleFunc("/metrics", metricsHandler)
 	adminServer := &http.Server{
 		Addr:           "127.0.0.1:8093",
-		Handler:        healthHandler,
+		Handler:        muxHandler,
 		MaxHeaderBytes: 1 << 20,
 	}
 

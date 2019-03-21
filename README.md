@@ -43,12 +43,12 @@ client ==> (:8090) proxy (:8091) <== agent ==> SimpleHTTPServer(:8000)
 python -m SimpleHTTPServer
 ```
 
-- Start agent service
+- Start proxy service
 ```
 ./bin/proxy-server --serverCaCert=certs/master/issued/ca.crt --serverCert=certs/master/issued/proxy-master.crt --serverKey=certs/master/private/proxy-master.key --clusterCaCert=certs/agent/issued/ca.crt --clusterCert=certs/agent/issued/proxy-master.crt --clusterKey=certs/agent/private/proxy-master.key
 ```
 
-- Start proxy service
+- Start agent service
 ```
 ./bin/proxy-agent --caCert=certs/agent/issued/ca.crt --agentCert=certs/agent/issued/proxy-agent.crt --agentKey=certs/agent/private/proxy-agent.key
 ```

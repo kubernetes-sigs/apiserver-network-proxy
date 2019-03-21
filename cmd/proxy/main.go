@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"github.com/prometheus/client_golang/prometheus"
 	"google.golang.org/grpc/credentials"
 	"net"
 	"net/http"
@@ -227,13 +228,23 @@ func (p *Proxy) runAgentServer(o *ProxyRunOptions, server *agentserver.ProxyServ
 }
 
 func (p *Proxy) runAdminServer(o *ProxyRunOptions, server *agentserver.ProxyServer) error {
-	healthHandler := http.HandlerFunc(func (w http.ResponseWriter, r *http.Request) {
+	livenessHandler := http.HandlerFunc(func (w http.ResponseWriter, r *http.Request) {
 		fmt.Fprintf(w, "ok")
 	})
+	readinessHandler := http.HandlerFunc(func (w http.ResponseWriter, r *http.Request) {
+		fmt.Fprintf(w, "ok")
+	})
+	metricsHandler := http.HandlerFunc(func (w http.ResponseWriter, r *http.Request) {
+		prometheus.Handler().ServeHTTP(w, r)
+	})
 
+	muxHandler := http.NewServeMux()
+	muxHandler.HandleFunc("/healthz", livenessHandler)
+	muxHandler.HandleFunc("/ready", readinessHandler)
+	muxHandler.HandleFunc("/metrics", metricsHandler)
 	adminServer := &http.Server{
 		Addr:           "127.0.0.1:8092",
-		Handler:        healthHandler,
+		Handler:        muxHandler,
 		MaxHeaderBytes: 1 << 20,
 	}
 
