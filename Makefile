@@ -3,11 +3,8 @@
 bin:
 	mkdir -p bin
 
-proto/agent/agent.pb.go: proto/agent/agent.proto
-	protoc -I proto proto/agent/agent.proto --go_out=plugins=grpc:proto
-
-proto/proxy.pb.go: proto/proxy.proto
-	protoc -I proto proto/proxy.proto --go_out=plugins=grpc:proto
+proto/%.pb.go: proto/%.proto
+	protoc -I proto $< --go_out=plugins=grpc:proto
 
 bin/proxy-agent: bin cmd/agent/main.go proto/agent/agent.pb.go
 	go build -o bin/proxy-agent cmd/agent/main.go
@@ -58,7 +55,7 @@ certs: easy-rsa-master cfssl cfssljson
 	cp -r easy-rsa-master/agent/pki/issued certs/agent
 	cp easy-rsa-master/agent/pki/ca.crt certs/agent/issued
 
-gen: proto/agent/agent.pb.go proto/proxy.pb.go
+gen: proto/agent/agent.pb.go proto/proxy.pb.go proto/proxy2/proxy.pb.go
 
 build: bin/proxy-agent bin/proxy-server bin/proxy-test-client
 
