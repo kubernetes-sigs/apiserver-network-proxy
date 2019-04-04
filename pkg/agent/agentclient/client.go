@@ -4,6 +4,7 @@ import (
 	"context"
 	"io"
 	"net"
+	"sync"
 	"sync/atomic"
 
 	"github.com/anfernee/proxy-service/proto/agent"
@@ -14,6 +15,7 @@ import (
 type AgentClient struct {
 	nextConnID int64
 	conns      map[int64]net.Conn
+	dataChs    map[int64]chan []byte
 	address    string
 
 	stream agent.AgentService_ConnectClient
@@ -23,6 +25,7 @@ func NewAgentClient(address string) *AgentClient {
 	a := &AgentClient{
 		conns:   make(map[int64]net.Conn),
 		address: address,
+		dataChs: make(map[int64]chan []byte),
 	}
 
 	return a
@@ -48,12 +51,16 @@ func (a *AgentClient) Serve(stopCh <-chan struct{}) {
 	for {
 		select {
 		case <-stopCh:
+			glog.Info("stop agent client.")
 			return
 		default:
 		}
 
+		glog.Info("waiting packets...")
+
 		pkt, err := a.stream.Recv()
 		if err == io.EOF {
+			glog.Info("received EOF, exit")
 			return
 		}
 		if err != nil {
@@ -85,31 +92,34 @@ func (a *AgentClient) Serve(stopCh <-chan struct{}) {
 
 			connID := atomic.AddInt64(&a.nextConnID, 1)
 			a.conns[connID] = conn
+			a.dataChs[connID] = make(chan []byte, 5)
+			var once sync.Once
+
+			cleanup := func() {
+				once.Do(func() {
+					conn.Close()
+					close(a.dataChs[connID])
+					delete(a.conns, connID)
+					delete(a.dataChs, connID)
+				})
+			}
 
 			resp.GetDialResponse().ConnectID = connID
 			if err := a.stream.Send(resp); err != nil {
 				glog.Warningf("stream send error: %v", err)
+				continue
 			}
 
-			go a.pipe(conn, connID)
+			go a.remoteToProxy(conn, connID, cleanup)
+			go a.proxyToRemote(conn, a.dataChs[connID], cleanup)
 
 		case agent.PacketType_DATA:
 			glog.Info("received DATA")
 			data := pkt.GetData()
+			glog.Infof("[tracing] %v", data)
 
-			if conn, ok := a.conns[data.ConnectID]; ok {
-				pos := 0
-				for {
-					n, err := conn.Write(data.Data[pos:])
-					if n > 0 {
-						pos += n
-						continue
-					}
-					if err != nil {
-						glog.Errorf("conn write error: %v", err)
-						return
-					}
-				}
+			if dataCh, ok := a.dataChs[data.ConnectID]; ok {
+				dataCh <- data.Data
 			}
 
 		default:
@@ -118,10 +128,10 @@ func (a *AgentClient) Serve(stopCh <-chan struct{}) {
 	}
 }
 
-// TODO: use send channel
-func (a *AgentClient) pipe(conn net.Conn, connID int64) {
-	var buf [1 << 12]byte
+func (a *AgentClient) remoteToProxy(conn net.Conn, connID int64, cleanup func()) {
+	defer cleanup()
 
+	var buf [1 << 12]byte
 	resp := &agent.Packet{
 		Type: agent.PacketType_DATA,
 	}
@@ -148,6 +158,24 @@ func (a *AgentClient) pipe(conn net.Conn, connID int64) {
 				glog.Warningf("stream send error: %v", err)
 			}
 		}
+	}
+}
 
+func (a *AgentClient) proxyToRemote(conn net.Conn, dataCh <-chan []byte, cleanup func()) {
+	defer cleanup()
+
+	for d := range dataCh {
+		pos := 0
+		for {
+			n, err := conn.Write(d[pos:])
+			if err == nil {
+				break
+			} else if n > 0 {
+				pos += n
+			} else {
+				glog.Errorf("conn write error: %v", err)
+				return
+			}
+		}
 	}
 }

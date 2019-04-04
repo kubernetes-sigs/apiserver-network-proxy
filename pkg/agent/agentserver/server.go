@@ -74,6 +74,7 @@ func (s *ProxyServer) serveRecv(stream agent.ProxyService_ProxyServer, recvCh <-
 			if err := s.backend.Send(pkt); err != nil {
 				glog.Warningf("send packet to backend failed: $v", err)
 			}
+			glog.Info("DIAL_REQ sent to backend") // got this. but backend didn't receive anything.
 			s.pendingDial[pkt.GetDialRequest().Random] = stream
 		case agent.PacketType_DIAL_RSP:
 			glog.Info("received DIAL_RSP;; ignore on server")
@@ -91,6 +92,7 @@ func (s *ProxyServer) serveRecv(stream agent.ProxyService_ProxyServer, recvCh <-
 			if err := s.backend.Send(pkt); err != nil {
 				glog.Warningf("send packet to backend failed: $v", err)
 			}
+			glog.Info("DATA sent to backend")
 		}
 	}
 }
