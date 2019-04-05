@@ -123,7 +123,7 @@ func (a *AgentClient) Serve(stopCh <-chan struct{}) {
 			}
 
 		default:
-			glog.Warningf("unreconginzed packet type: %+v", pkt)
+			glog.Warningf("unrecognized packet type: %+v", pkt)
 		}
 	}
 }
