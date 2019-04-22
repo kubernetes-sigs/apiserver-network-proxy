@@ -107,6 +107,7 @@ func (s *ProxyServer) serveRecv(stream agent.ProxyService_ProxyServer, recvCh <-
 			s.PendingDial[pkt.GetDialRequest().Random] = &ProxyClientConnection{
 				Mode: "grpc",
 				Grpc: stream,
+				connected: make(chan struct{}),
 			}
 			glog.Info("DIAL_REQ sent to backend") // got this. but backend didn't receive anything.
 		case agent.PacketType_DIAL_RSP:

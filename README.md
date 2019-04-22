@@ -25,14 +25,15 @@ make build
 
 ## Examples
 
-The current example runs the two actual services as well as a sample client on one end and a sample destination for requests on the other. 
+The current examples run two actual services as well as a sample client on one end and a sample destination for 
+requests on the other.
 - *Proxy service:* The proxy service takes the API server requests and forwards them appropriately.
 - *Agent service:* The agent service connects to the proxy and then allows traffic to be forwarded to it.
 
-### mTLS Proxy with dial back Agent
+### GRPC Client using mTLS Proxy with dial back Agent
 
 ```
-client ==> (:8090) proxy (:8091) <== agent ==> SimpleHTTPServer(:8000)
+client =HTTP over GRPC=> (:8090) proxy (:8091) <=GRPC= agent =HTTP=> SimpleHTTPServer(:8000)
   |                                                    ^
   |                          Tunnel                    |
   +----------------------------------------------------+
@@ -56,6 +57,35 @@ python -m SimpleHTTPServer
 - Run client (mTLS enabled sample client)
 ```
 ./bin/proxy-test-client --caCert=certs/master/issued/ca.crt --clientCert=certs/master/issued/proxy-client.crt --clientKey=certs/master/private/proxy-client.key
+```
+
+### HTTP-Connect Client using mTLS Proxy with dial back Agent
+
+```
+client =HTTP-CONNECT=> (:8090) proxy (:8091) <=GRPC= agent =HTTP=> SimpleHTTPServer(:8000)
+  |                                                    ^
+  |                          Tunnel                    |
+  +----------------------------------------------------+
+```
+
+- Start SimpleHTTPServer (Sample destination)
+```console
+python -m SimpleHTTPServer
+```
+
+- Start proxy service
+```
+./bin/proxy-server --mode=http-connect --serverCaCert=certs/master/issued/ca.crt --serverCert=certs/master/issued/proxy-master.crt --serverKey=certs/master/private/proxy-master.key --clusterCaCert=certs/agent/issued/ca.crt --clusterCert=certs/agent/issued/proxy-master.crt --clusterKey=certs/agent/private/proxy-master.key
+```
+
+- Start agent service
+```
+./bin/proxy-agent --caCert=certs/agent/issued/ca.crt --agentCert=certs/agent/issued/proxy-agent.crt --agentKey=certs/agent/private/proxy-agent.key
+```
+
+- Run curl client (curl using a mTLS http-connect proxy)
+```
+curl -v -p --proxy-key certs/master/private/proxy-client.key --proxy-cert certs/master/issued/proxy-client.crt --proxy-cacert certs/master/issued/ca.crt --proxy-cert-type PEM -x https://127.0.0.1:8090  http://localhost:8000```
 ```
 
 ## Troubleshoot
