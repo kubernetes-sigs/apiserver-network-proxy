@@ -1,0 +1,71 @@
+syntax = "proto3";
+
+// Retransmit?
+// Sliding windows?
+
+
+service ProxyService {
+  rpc Proxy(stream Packet) returns (stream Packet) {}
+}
+
+service AgentService {
+  // Agent Identifier?
+  rpc Connect(stream Packet) returns (stream Packet) {}
+}
+
+enum PacketType {
+  DIAL_REQ = 0;
+  DIAL_RSP = 1;
+  ACK = 2; // needed only for TCP?
+  CLOSE = 3;
+  DATA = 4;
+}
+
+enum Error {
+  EOF = 0;
+  // ...
+}
+
+message Packet {
+  PacketType type = 1;
+
+  oneof payload {
+    DialRequest dialRequest = 2;
+    DialResponse dialResponse = 3;
+    Data data = 4;
+  }
+}
+
+message DialRequest {
+    // tcp or udp?
+    string protocol = 1;
+
+    // node:port
+    string address = 2;
+
+    // random id for client, maybe should be longer
+    int64 random = 3;
+}
+
+message DialResponse {
+    // error failed reason; enum?
+    string error = 1;
+
+    // connectID indicates the identifier of the connection
+    int64 connectID = 2;
+
+    // random copied from DialRequest
+    int64 random = 3;
+}
+
+message Data {
+    // connectID to connect to
+    int64 connectID = 1;
+
+    // error message if error happens
+    string error = 2;
+
+    // stream data
+    bytes data = 3;
+}
+
