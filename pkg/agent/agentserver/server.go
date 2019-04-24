@@ -3,9 +3,9 @@ package agentserver
 import (
 	"io"
 
+	"fmt"
 	"github.com/anfernee/proxy-service/proto/agent"
 	"github.com/golang/glog"
-	"fmt"
 	"net"
 )
 
@@ -14,7 +14,7 @@ type ProxyClientConnection struct {
 	Mode string
 	Grpc agent.ProxyService_ProxyServer
 	// Http http.ResponseWriter
-	Http net.Conn
+	Http      net.Conn
 	connected chan struct{}
 	connectID int64
 }
@@ -105,8 +105,8 @@ func (s *ProxyServer) serveRecv(stream agent.ProxyService_ProxyServer, recvCh <-
 				glog.Warningf("send packet to Backend failed: $v", err)
 			}
 			s.PendingDial[pkt.GetDialRequest().Random] = &ProxyClientConnection{
-				Mode: "grpc",
-				Grpc: stream,
+				Mode:      "grpc",
+				Grpc:      stream,
 				connected: make(chan struct{}),
 			}
 			glog.Info("DIAL_REQ sent to backend") // got this. but backend didn't receive anything.

@@ -1,11 +1,11 @@
 package agentserver
 
 import (
-	"net/http"
-	"io"
 	"github.com/anfernee/proxy-service/proto/agent"
-	"math/rand"
 	"github.com/golang/glog"
+	"io"
+	"math/rand"
+	"net/http"
 )
 
 type Tunnel struct {
@@ -52,7 +52,7 @@ func (t *Tunnel) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	connection := &ProxyClientConnection{
 		Mode: "http-connect",
 		// Http: w,
-		Http: conn,
+		Http:      conn,
 		connected: connected,
 	}
 	t.Server.PendingDial[random] = connection
@@ -80,7 +80,7 @@ func (t *Tunnel) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	defer conn.Close()
 
 	glog.Infof("Starting proxy to %q", r.Host)
-	pkt := make([]byte, 1 << 12)
+	pkt := make([]byte, 1<<12)
 	for {
 		n, err := conn.Read(pkt[:])
 		if err == io.EOF {
@@ -95,7 +95,7 @@ func (t *Tunnel) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			Payload: &agent.Packet_Data{
 				Data: &agent.Data{
 					ConnectID: connection.connectID,
-					Data:	 pkt[:n],
+					Data:      pkt[:n],
 				},
 			},
 		}
@@ -105,5 +105,3 @@ func (t *Tunnel) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	glog.Infof("Stopping transfer to %q", r.Host)
 	delete(t.Server.Frontends, connection.connectID)
 }
-
-

@@ -23,7 +23,7 @@ func main() {
 	flags := command.Flags()
 	flags.AddFlagSet(o.Flags())
 	if err := command.Execute(); err != nil {
-		glog.Errorf( "error: %v\n", err)
+		glog.Errorf("error: %v\n", err)
 		os.Exit(1)
 	}
 }
@@ -95,7 +95,6 @@ func newGrpcProxyClientCommand(c *Client, o *GrpcProxyClientOptions) *cobra.Comm
 }
 
 type Client struct {
-
 }
 
 func (c *Client) run(o *GrpcProxyClientOptions) error {
@@ -157,5 +156,3 @@ func (c *Client) run(o *GrpcProxyClientOptions) error {
 	}
 	return nil
 }
-
-

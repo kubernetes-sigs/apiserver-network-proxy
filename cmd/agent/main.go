@@ -7,13 +7,13 @@ import (
 	"github.com/anfernee/proxy-service/pkg/agent/agentclient"
 	"github.com/golang/glog"
 	"github.com/prometheus/client_golang/prometheus"
+	"github.com/spf13/cobra"
 	"github.com/spf13/pflag"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials"
 	"io/ioutil"
 	"net/http"
 	"os"
-	"github.com/spf13/cobra"
 )
 
 func main() {
@@ -23,7 +23,7 @@ func main() {
 	flags := command.Flags()
 	flags.AddFlagSet(o.Flags())
 	if err := command.Execute(); err != nil {
-		glog.Errorf( "error: %v\n", err)
+		glog.Errorf("error: %v\n", err)
 		os.Exit(1)
 	}
 }
@@ -31,7 +31,7 @@ func main() {
 type GrpcProxyAgentOptions struct {
 	agentCert string
 	agentKey  string
-	caCert     string
+	caCert    string
 }
 
 func (o *GrpcProxyAgentOptions) Flags() *pflag.FlagSet {
@@ -95,7 +95,6 @@ func newAgentCommand(a *Agent, o *GrpcProxyAgentOptions) *cobra.Command {
 }
 
 type Agent struct {
-
 }
 
 func (a *Agent) run(o *GrpcProxyAgentOptions) error {
@@ -118,7 +117,7 @@ func (a *Agent) run(o *GrpcProxyAgentOptions) error {
 	return nil
 }
 
-func (p* Agent) runProxyConnection(o *GrpcProxyAgentOptions) error {
+func (p *Agent) runProxyConnection(o *GrpcProxyAgentOptions) error {
 	agentCert, err := tls.LoadX509KeyPair(o.agentCert, o.agentKey)
 	if err != nil {
 		return err
@@ -153,13 +152,13 @@ func (p* Agent) runProxyConnection(o *GrpcProxyAgentOptions) error {
 }
 
 func (p *Agent) runAdminServer(o *GrpcProxyAgentOptions) error {
-	livenessHandler := http.HandlerFunc(func (w http.ResponseWriter, r *http.Request) {
+	livenessHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		fmt.Fprintf(w, "ok")
 	})
-	readinessHandler := http.HandlerFunc(func (w http.ResponseWriter, r *http.Request) {
+	readinessHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		fmt.Fprintf(w, "ok")
 	})
-	metricsHandler := http.HandlerFunc(func (w http.ResponseWriter, r *http.Request) {
+	metricsHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		prometheus.Handler().ServeHTTP(w, r)
 	})
 
