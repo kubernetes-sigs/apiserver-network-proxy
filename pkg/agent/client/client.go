@@ -30,7 +30,7 @@ type grpcTunnel struct {
 	client      agent.ProxyServiceClient
 	stream      agent.ProxyService_ProxyClient
 	pendingDial map[int64]chan<- dialResult
-	conns map[int64]*conn
+	conns       map[int64]*conn
 }
 
 // CreateGrpcTunnel creates a grpc based tunnel
@@ -53,7 +53,7 @@ func CreateGrpcTunnel(address string, opts ...grpc.DialOption) (Tunnel, error) {
 		client:      client,
 		stream:      stream,
 		pendingDial: make(map[int64]chan<- dialResult),
-		conns: make(map[int64]*conn),
+		conns:       make(map[int64]*conn),
 	}
 
 	go tunnel.serve()

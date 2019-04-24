@@ -28,16 +28,16 @@ func main() {
 	flags := command.Flags()
 	flags.AddFlagSet(o.Flags())
 	if err := command.Execute(); err != nil {
-		glog.Errorf( "error: %v\n", err)
+		glog.Errorf("error: %v\n", err)
 		os.Exit(1)
 	}
 }
 
 type ProxyRunOptions struct {
 	// Certificate setup for securing communication to the "client" i.e. the Kube API Server.
-	serverCert    string
-	serverKey     string
-	serverCaCert  string
+	serverCert   string
+	serverKey    string
+	serverCaCert string
 	// Certificate setup for securing communication to the "agent" i.e. the managed cluster.
 	clusterCert   string
 	clusterKey    string
@@ -62,8 +62,8 @@ func (o *ProxyRunOptions) Flags() *pflag.FlagSet {
 	flags.StringVar(&o.clusterCaCert, "clusterCaCert", o.clusterCaCert, "If non-empty the CA we use to validate Agent clients.")
 	flags.StringVar(&o.mode, "mode", "grpc", "Mode can be either 'grpc' or 'http-connect'.")
 	flags.UintVar(&o.serverPort, "serverPort", 8090, "Port we listen for server connections on.")
-	flags.UintVar(&o.agentPort,"agentPort", 8091, "Port we listen for agent connections on.")
-	flags.UintVar(&o.adminPort,"adminPort", 8092, "Port we listen for admin connections on.")
+	flags.UintVar(&o.agentPort, "agentPort", 8091, "Port we listen for agent connections on.")
+	flags.UintVar(&o.adminPort, "adminPort", 8092, "Port we listen for admin connections on.")
 	return flags
 }
 
@@ -149,16 +149,16 @@ func (o *ProxyRunOptions) Validate() error {
 
 func newProxyRunOptions() *ProxyRunOptions {
 	o := ProxyRunOptions{
-		serverCert: "",
-		serverKey: "",
-		serverCaCert: "",
-		clusterCert: "",
-		clusterKey: "",
+		serverCert:    "",
+		serverKey:     "",
+		serverCaCert:  "",
+		clusterCert:   "",
+		clusterKey:    "",
 		clusterCaCert: "",
-		mode: "grpc",
-		serverPort: 8090,
-		agentPort: 8091,
-		adminPort: 8092,
+		mode:          "grpc",
+		serverPort:    8090,
+		agentPort:     8091,
+		adminPort:     8092,
 	}
 	return &o
 }
@@ -176,7 +176,6 @@ func newProxyCommand(p *Proxy, o *ProxyRunOptions) *cobra.Command {
 }
 
 type Proxy struct {
-
 }
 
 func (p *Proxy) run(o *ProxyRunOptions) error {
@@ -245,9 +244,9 @@ func (p *Proxy) runMasterServer(o *ProxyRunOptions, server *agentserver.ProxySer
 		go func() {
 			// http-connect
 			server := &http.Server{
-				Addr:         addr,
-				TLSConfig:    tlsConfig,
-				Handler:      &agentserver.Tunnel{
+				Addr:      addr,
+				TLSConfig: tlsConfig,
+				Handler: &agentserver.Tunnel{
 					Server: server,
 				},
 				TLSNextProto: make(map[string]func(*http.Server, *tls.Conn, http.Handler)),
@@ -296,13 +295,13 @@ func (p *Proxy) runAgentServer(o *ProxyRunOptions, server *agentserver.ProxyServ
 }
 
 func (p *Proxy) runAdminServer(o *ProxyRunOptions, server *agentserver.ProxyServer) error {
-	livenessHandler := http.HandlerFunc(func (w http.ResponseWriter, r *http.Request) {
+	livenessHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		fmt.Fprintf(w, "ok")
 	})
-	readinessHandler := http.HandlerFunc(func (w http.ResponseWriter, r *http.Request) {
+	readinessHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		fmt.Fprintf(w, "ok")
 	})
-	metricsHandler := http.HandlerFunc(func (w http.ResponseWriter, r *http.Request) {
+	metricsHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		prometheus.Handler().ServeHTTP(w, r)
 	})
 
@@ -326,4 +325,3 @@ func (p *Proxy) runAdminServer(o *ProxyRunOptions, server *agentserver.ProxyServ
 
 	return nil
 }
-
