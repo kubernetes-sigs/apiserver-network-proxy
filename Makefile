@@ -21,9 +21,13 @@ bin:
 
 proto/agent/agent.pb.go: proto/agent/agent.proto
 	protoc -I proto proto/agent/agent.proto --go_out=plugins=grpc:proto
+	cat hack/go-license-header.txt proto/agent/agent.pb.go > proto/agent/agent.licensed.go
+	mv proto/agent/agent.licensed.go proto/agent/agent.pb.go
 
 proto/proxy.pb.go: proto/proxy.proto
 	protoc -I proto proto/proxy.proto --go_out=plugins=grpc:proto
+	cat hack/go-license-header.txt proto/proxy.pb.go > proto/proxy.licensed.go
+	mv proto/proxy.licensed.go proto/proxy.pb.go
 
 bin/proxy-agent: bin cmd/agent/main.go proto/agent/agent.pb.go
 	go build -o bin/proxy-agent cmd/agent/main.go
