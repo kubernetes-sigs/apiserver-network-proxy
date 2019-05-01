@@ -27,7 +27,7 @@ import (
 	"io/ioutil"
 	"os"
 
-	"github.com/anfernee/proxy-service/pkg/agent/client"
+	"sigs.k8s.io/apiserver-network-proxy/pkg/agent/client"
 	"github.com/golang/glog"
 	"github.com/spf13/cobra"
 )

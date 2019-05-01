@@ -28,8 +28,8 @@ import (
 
 	"crypto/tls"
 	"crypto/x509"
-	"github.com/anfernee/proxy-service/pkg/agent/agentserver"
-	"github.com/anfernee/proxy-service/proto/agent"
+	"sigs.k8s.io/apiserver-network-proxy/pkg/agent/agentserver"
+	"sigs.k8s.io/apiserver-network-proxy/proto/agent"
 	"github.com/golang/glog"
 	"github.com/spf13/cobra"
 	"github.com/spf13/pflag"

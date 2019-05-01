@@ -22,7 +22,7 @@ import (
 	"net"
 	"sync/atomic"
 
-	proxy "github.com/anfernee/proxy-service/proto"
+	proxy "sigs.k8s.io/apiserver-network-proxy/proto"
 )
 
 type ProxyServer struct {
