@@ -20,7 +20,7 @@ import (
 	"crypto/tls"
 	"crypto/x509"
 	"fmt"
-	"github.com/anfernee/proxy-service/pkg/agent/agentclient"
+	"sigs.k8s.io/apiserver-network-proxy/pkg/agent/agentclient"
 	"github.com/golang/glog"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/spf13/cobra"

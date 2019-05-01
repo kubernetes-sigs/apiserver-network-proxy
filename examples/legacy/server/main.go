@@ -23,8 +23,8 @@ import (
 
 	"google.golang.org/grpc"
 
-	"github.com/anfernee/proxy-service/pkg/server"
-	proxy "github.com/anfernee/proxy-service/proto"
+	"sigs.k8s.io/apiserver-network-proxy/proxy-service/pkg/server"
+	proxy "sigs.k8s.io/apiserver-network-proxy/proxy-service/proto"
 )
 
 func main() {

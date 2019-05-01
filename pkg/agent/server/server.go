@@ -21,7 +21,7 @@ import (
 	"net"
 	"sync/atomic"
 
-	"github.com/anfernee/proxy-service/proto/agent"
+	"sigs.k8s.io/apiserver-network-proxy/proto/agent"
 	"github.com/golang/glog"
 )
 

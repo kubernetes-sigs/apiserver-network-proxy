@@ -17,7 +17,7 @@ limitations under the License.
 package agentserver
 
 import (
-	"github.com/anfernee/proxy-service/proto/agent"
+	"sigs.k8s.io/apiserver-network-proxy/proto/agent"
 	"github.com/golang/glog"
 	"io"
 	"math/rand"

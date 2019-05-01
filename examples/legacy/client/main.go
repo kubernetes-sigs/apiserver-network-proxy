@@ -24,7 +24,7 @@ import (
 
 	"google.golang.org/grpc"
 
-	proxy "github.com/anfernee/proxy-service/proto"
+	proxy "sigs.k8s.io/apiserver-network-proxy/proto"
 )
 
 func main() {
