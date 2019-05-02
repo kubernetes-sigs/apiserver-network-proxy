@@ -22,8 +22,8 @@ import (
 	"net"
 	"time"
 
-	"sigs.k8s.io/apiserver-network-proxy/proto/agent"
 	"github.com/golang/glog"
+	"sigs.k8s.io/apiserver-network-proxy/proto/agent"
 )
 
 type conn struct {

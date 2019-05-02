@@ -17,19 +17,18 @@ limitations under the License.
 package agentserver
 
 import (
-	"io"
-
 	"fmt"
-	"sigs.k8s.io/apiserver-network-proxy/proto/agent"
-	"github.com/golang/glog"
+	"io"
 	"net"
+
+	"github.com/golang/glog"
+	"sigs.k8s.io/apiserver-network-proxy/proto/agent"
 )
 
 // ProxyClientConnection...
 type ProxyClientConnection struct {
-	Mode string
-	Grpc agent.ProxyService_ProxyServer
-	// Http http.ResponseWriter
+	Mode      string
+	Grpc      agent.ProxyService_ProxyServer
 	Http      net.Conn
 	connected chan struct{}
 	connectID int64
@@ -74,14 +73,14 @@ func NewProxyServer() *ProxyServer {
 	}
 }
 
-// Agent ...
+// Proxy handles incoming streams from gRPC frontend.
 func (s *ProxyServer) Proxy(stream agent.ProxyService_ProxyServer) error {
 	glog.Info("proxy request from client")
 
 	recvCh := make(chan *agent.Packet, 10)
 	stopCh := make(chan error)
 
-	go s.serveRecv(stream, recvCh)
+	go s.serveRecvFrontend(stream, recvCh)
 
 	defer func() {
 		close(recvCh)
@@ -106,7 +105,7 @@ func (s *ProxyServer) Proxy(stream agent.ProxyService_ProxyServer) error {
 	return <-stopCh
 }
 
-func (s *ProxyServer) serveRecv(stream agent.ProxyService_ProxyServer, recvCh <-chan *agent.Packet) {
+func (s *ProxyServer) serveRecvFrontend(stream agent.ProxyService_ProxyServer, recvCh <-chan *agent.Packet) {
 	glog.Info("start serve recv ...")
 	for pkt := range recvCh {
 		switch pkt.Type {

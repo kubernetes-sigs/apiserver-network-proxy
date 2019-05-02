@@ -20,16 +20,16 @@ import (
 	"crypto/tls"
 	"crypto/x509"
 	"fmt"
-	"github.com/spf13/pflag"
-	"google.golang.org/grpc"
-	"google.golang.org/grpc/credentials"
 	"io"
 	"io/ioutil"
 	"os"
 
-	"sigs.k8s.io/apiserver-network-proxy/pkg/agent/client"
 	"github.com/golang/glog"
 	"github.com/spf13/cobra"
+	"github.com/spf13/pflag"
+	"google.golang.org/grpc"
+	"google.golang.org/grpc/credentials"
+	"sigs.k8s.io/apiserver-network-proxy/pkg/agent/client"
 )
 
 func main() {
