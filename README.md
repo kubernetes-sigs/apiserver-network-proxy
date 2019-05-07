@@ -17,10 +17,25 @@ Participation in the Kubernetes community is governed by the [Kubernetes Code of
 
 ## Build
 
+Please make sure you have the REGISTRY and PROJECT_ID environment variables set.
+For local builds these can be set to anything.
+For image builds these determine the location of your image.
+For GCE the registry should be gcr.io and PROJECT_ID should be the project you
+want to use the images in.
+
+### Local builds
+
 ```console
 make clean
 make certs
 make build
+```
+
+### Build images
+
+```console
+build docker/proxy-server
+build docker/proxy-agent
 ```
 
 ## Examples

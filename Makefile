@@ -12,7 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-.PHONY: gen clean certs build
+.PHONY: gen clean certs build docker/proxy-server docker/proxy-agent
 proto/agent/agent.pb.go: proto/agent/agent.proto
 	protoc -I proto proto/agent/agent.proto --go_out=plugins=grpc:proto
 
@@ -32,8 +32,18 @@ proto/proxy.pb.go: proto/proxy.proto
 bin/proxy-agent: bin cmd/agent/main.go proto/agent/agent.pb.go
 	go build -o bin/proxy-agent cmd/agent/main.go
 
+docker/proxy-agent: cmd/agent/main.go proto/agent/agent.pb.go
+	@[ "${REGISTRY}" ] || ( echo "REGISTRY is not set"; exit 1 )
+	@[ "${PROJECT_ID}" ] || ( echo "PROJECT_ID is not set"; exit 1 )
+	docker build . -f artifacts/images/agent-build.Dockerfile -t ${REGISTRY}/${PROJECT_ID}/proxy-agent:latest
+
 bin/proxy-server: bin cmd/proxy/main.go proto/agent/agent.pb.go proto/proxy.pb.go
 	go build -o bin/proxy-server cmd/proxy/main.go
+
+docker/proxy-server: cmd/proxy/main.go proto/agent/agent.pb.go proto/proxy.pb.go
+	@[ "${REGISTRY}" ] || ( echo "REGISTRY is not set"; exit 1 )
+	@[ "${PROJECT_ID}" ] || ( echo "PROJECT_ID is not set"; exit 1 )
+	docker build . -f artifacts/images/server-build.Dockerfile -t ${REGISTRY}/${PROJECT_ID}/server-proxy:latest
 
 bin/proxy-test-client: bin cmd/client/main.go proto/proxy.pb.go
 	go build -o bin/proxy-test-client cmd/client/main.go
