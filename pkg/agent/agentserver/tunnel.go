@@ -17,11 +17,12 @@ limitations under the License.
 package agentserver
 
 import (
-	"sigs.k8s.io/apiserver-network-proxy/proto/agent"
-	"github.com/golang/glog"
 	"io"
 	"math/rand"
 	"net/http"
+
+	"github.com/golang/glog"
+	"sigs.k8s.io/apiserver-network-proxy/proto/agent"
 )
 
 type Tunnel struct {

@@ -23,9 +23,9 @@ import (
 	"sync"
 	"sync/atomic"
 
-	"sigs.k8s.io/apiserver-network-proxy/proto/agent"
 	"github.com/golang/glog"
 	"google.golang.org/grpc"
+	"sigs.k8s.io/apiserver-network-proxy/proto/agent"
 )
 
 type AgentClient struct {

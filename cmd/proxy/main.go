@@ -17,23 +17,22 @@ limitations under the License.
 package main
 
 import (
+	"crypto/tls"
+	"crypto/x509"
 	"fmt"
-	"github.com/prometheus/client_golang/prometheus"
-	"google.golang.org/grpc/credentials"
+	"io/ioutil"
 	"net"
 	"net/http"
 	"os"
 
-	"google.golang.org/grpc"
-
-	"crypto/tls"
-	"crypto/x509"
-	"sigs.k8s.io/apiserver-network-proxy/pkg/agent/agentserver"
-	"sigs.k8s.io/apiserver-network-proxy/proto/agent"
 	"github.com/golang/glog"
+	"github.com/prometheus/client_golang/prometheus"
 	"github.com/spf13/cobra"
 	"github.com/spf13/pflag"
-	"io/ioutil"
+	"google.golang.org/grpc"
+	"google.golang.org/grpc/credentials"
+	"sigs.k8s.io/apiserver-network-proxy/pkg/agent/agentserver"
+	"sigs.k8s.io/apiserver-network-proxy/proto/agent"
 )
 
 func main() {

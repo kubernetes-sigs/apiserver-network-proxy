@@ -20,16 +20,17 @@ import (
 	"crypto/tls"
 	"crypto/x509"
 	"fmt"
-	"sigs.k8s.io/apiserver-network-proxy/pkg/agent/agentclient"
+	"io/ioutil"
+	"net/http"
+	"os"
+
 	"github.com/golang/glog"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/spf13/cobra"
 	"github.com/spf13/pflag"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials"
-	"io/ioutil"
-	"net/http"
-	"os"
+	"sigs.k8s.io/apiserver-network-proxy/pkg/agent/agentclient"
 )
 
 func main() {

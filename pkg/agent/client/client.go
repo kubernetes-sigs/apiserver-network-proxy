@@ -24,10 +24,9 @@ import (
 	"net"
 	"time"
 
-	"sigs.k8s.io/apiserver-network-proxy/proto/agent"
 	"github.com/golang/glog"
-
 	"google.golang.org/grpc"
+	"sigs.k8s.io/apiserver-network-proxy/proto/agent"
 )
 
 // Tunnel provides ability to dial a connection through itself
