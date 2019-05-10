@@ -24,8 +24,8 @@ import (
 	"net"
 	"time"
 
-	"github.com/golang/glog"
 	"google.golang.org/grpc"
+	"k8s.io/klog"
 	"sigs.k8s.io/apiserver-network-proxy/proto/agent"
 )
 
@@ -83,17 +83,17 @@ func (t *grpcTunnel) serve() {
 			return
 		}
 		if err != nil {
-			glog.Warningf("stream read error: %v", err)
+			klog.Warningf("stream read error: %v", err)
 			return
 		}
 
-		glog.Infof("[tracing] recv packet %+v", pkt)
+		klog.Infof("[tracing] recv packet %+v", pkt)
 
 		switch pkt.Type {
 		case agent.PacketType_DIAL_RSP:
 			resp := pkt.GetDialResponse()
 			if ch, ok := t.pendingDial[resp.Random]; !ok {
-				glog.Warning("DialResp not recognized; dropped")
+				klog.Warning("DialResp not recognized; dropped")
 			} else {
 				ch <- dialResult{
 					err:    resp.Error,
@@ -106,7 +106,7 @@ func (t *grpcTunnel) serve() {
 			if conn, ok := t.conns[resp.ConnectID]; ok {
 				conn.readCh <- resp.Data
 			} else {
-				glog.Warningf("connection id %d not recognized", resp.ConnectID)
+				klog.Warningf("connection id %d not recognized", resp.ConnectID)
 			}
 		}
 	}
@@ -130,7 +130,7 @@ func (t *grpcTunnel) Dial(protocol, address string) (net.Conn, error) {
 			},
 		},
 	}
-	glog.Infof("[tracing] send packet %+v", req)
+	klog.Infof("[tracing] send packet %+v", req)
 
 	err := t.stream.Send(req)
 	if err != nil {

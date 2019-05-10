@@ -19,18 +19,20 @@ package main
 import (
 	"crypto/tls"
 	"crypto/x509"
+	"flag"
 	"fmt"
 	"io/ioutil"
 	"net/http"
 	"os"
 
-	"github.com/golang/glog"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/spf13/cobra"
 	"github.com/spf13/pflag"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials"
 	"sigs.k8s.io/apiserver-network-proxy/pkg/agent/agentclient"
+	"sigs.k8s.io/apiserver-network-proxy/pkg/util"
+	"k8s.io/klog"
 )
 
 func main() {
@@ -39,8 +41,15 @@ func main() {
 	command := newAgentCommand(agent, o)
 	flags := command.Flags()
 	flags.AddFlagSet(o.Flags())
+	local := flag.NewFlagSet(os.Args[0], flag.ExitOnError)
+	klog.InitFlags(local)
+	local.VisitAll(func(fl *flag.Flag) {
+		fl.Name = util.Normalize(fl.Name)
+		flags.AddGoFlag(fl)
+	})
 	if err := command.Execute(); err != nil {
-		glog.Errorf("error: %v\n", err)
+		klog.Errorf("error: %v\n", err)
+		klog.Flush()
 		os.Exit(1)
 	}
 }
@@ -52,7 +61,7 @@ type GrpcProxyAgentOptions struct {
 }
 
 func (o *GrpcProxyAgentOptions) Flags() *pflag.FlagSet {
-	flags := pflag.NewFlagSet("proxy", pflag.ContinueOnError)
+	flags := pflag.NewFlagSet("proxy-agent", pflag.ContinueOnError)
 	flags.StringVar(&o.agentCert, "agentCert", o.agentCert, "If non-empty secure communication with this cert.")
 	flags.StringVar(&o.agentKey, "agentKey", o.agentKey, "If non-empty secure communication with this key.")
 	flags.StringVar(&o.caCert, "caCert", o.caCert, "If non-empty the CAs we use to validate clients.")
@@ -60,9 +69,9 @@ func (o *GrpcProxyAgentOptions) Flags() *pflag.FlagSet {
 }
 
 func (o *GrpcProxyAgentOptions) Print() {
-	glog.Warningf("AgentCert set to \"%s\".\n", o.agentCert)
-	glog.Warningf("AgentKey set to \"%s\".\n", o.agentKey)
-	glog.Warningf("CACert set to \"%s\".\n", o.caCert)
+	klog.Warningf("AgentCert set to \"%s\".\n", o.agentCert)
+	klog.Warningf("AgentKey set to \"%s\".\n", o.agentKey)
+	klog.Warningf("CACert set to \"%s\".\n", o.caCert)
 }
 
 func (o *GrpcProxyAgentOptions) Validate() error {
@@ -192,9 +201,9 @@ func (p *Agent) runAdminServer(o *GrpcProxyAgentOptions) error {
 	go func() {
 		err := adminServer.ListenAndServe()
 		if err != nil {
-			glog.Warningf("health server received %v.\n", err)
+			klog.Warningf("health server received %v.\n", err)
 		}
-		glog.Warningf("Health server stopped listening\n")
+		klog.Warningf("Health server stopped listening\n")
 	}()
 
 	return nil
