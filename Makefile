@@ -12,7 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-.PHONY: gen clean certs build docker/proxy-server docker/proxy-agent
+.PHONY: gen clean certs build docker/proxy-server docker/proxy-agent push-images
 proto/agent/agent.pb.go: proto/agent/agent.proto
 	protoc -I proto proto/agent/agent.proto --go_out=plugins=grpc:proto
 
@@ -43,7 +43,7 @@ bin/proxy-server: bin cmd/proxy/main.go proto/agent/agent.pb.go proto/proxy.pb.g
 docker/proxy-server: cmd/proxy/main.go proto/agent/agent.pb.go proto/proxy.pb.go
 	@[ "${REGISTRY}" ] || ( echo "REGISTRY is not set"; exit 1 )
 	@[ "${PROJECT_ID}" ] || ( echo "PROJECT_ID is not set"; exit 1 )
-	docker build . -f artifacts/images/server-build.Dockerfile -t ${REGISTRY}/${PROJECT_ID}/server-proxy:latest
+	docker build . -f artifacts/images/server-build.Dockerfile -t ${REGISTRY}/${PROJECT_ID}/proxy-server:latest
 
 bin/proxy-test-client: bin cmd/client/main.go proto/proxy.pb.go
 	go build -o bin/proxy-test-client cmd/client/main.go
@@ -91,6 +91,11 @@ certs: easy-rsa-master cfssl cfssljson
 gen: proto/agent/agent.pb.go proto/proxy.pb.go
 
 build: bin/proxy-agent bin/proxy-server bin/proxy-test-client
+
+push-images: docker/proxy-agent docker/proxy-server
+	@[ "${DOCKER_CMD}" ] || ( echo "DOCKER_CMD is not set"; exit 1 )
+	${DOCKER_CMD} push ${REGISTRY}/${PROJECT_ID}/proxy-agent:latest
+	${DOCKER_CMD} push ${REGISTRY}/${PROJECT_ID}/proxy-server:latest
 
 clean:
 	rm -rf proto/agent/agent.pb.go proto/proxy.pb.go easy-rsa.tar.gz easy-rsa-master cfssl cfssljson certs bin

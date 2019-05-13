@@ -21,7 +21,7 @@ import (
 	"math/rand"
 	"net/http"
 
-	"github.com/golang/glog"
+	"k8s.io/klog"
 	"sigs.k8s.io/apiserver-network-proxy/proto/agent"
 )
 
@@ -30,7 +30,7 @@ type Tunnel struct {
 }
 
 func (t *Tunnel) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	glog.Infof("Received %s request to %q from %v",
+	klog.Infof("Received %s request to %q from %v",
 		r.Method,
 		r.Host,
 		r.TLS.PeerCertificates[0].Subject.CommonName) // can do authz with certs
@@ -64,7 +64,7 @@ func (t *Tunnel) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			},
 		},
 	}
-	glog.Infof("Set pending[%d] to %v", random, w)
+	klog.Infof("Set pending[%d] to %v", random, w)
 	connected := make(chan struct{})
 	connection := &ProxyClientConnection{
 		Mode: "http-connect",
@@ -77,17 +77,17 @@ func (t *Tunnel) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "currently no tunnels available", http.StatusInternalServerError)
 	}
 	if err := t.Server.Backend.Send(dialRequest); err != nil {
-		glog.Errorf("failed to tunnel dial request %v", err)
+		klog.Errorf("failed to tunnel dial request %v", err)
 		// http.Error(w, fmt.Sprintf("failed to tunnel dial request %v", err), http.StatusInternalServerError) // TODO REINSTATE
 		return
 	}
 	ctxt := t.Server.Backend.Context()
 	if ctxt.Err() != nil {
-		glog.Errorf("context reports error %v", err)
+		klog.Errorf("context reports error %v", err)
 	}
 	select {
 	case <-ctxt.Done():
-		glog.Errorf("context reports done!!!")
+		klog.Errorf("context reports done!!!")
 	default:
 	}
 	select {
@@ -96,7 +96,7 @@ func (t *Tunnel) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	defer conn.Close()
 
-	glog.Infof("Starting proxy to %q", r.Host)
+	klog.Infof("Starting proxy to %q", r.Host)
 	pkt := make([]byte, 1<<12)
 	for {
 		n, err := conn.Read(pkt[:])
@@ -104,7 +104,7 @@ func (t *Tunnel) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			break
 		}
 		if err != nil {
-			glog.Errorf("Received error on connection %v", err)
+			klog.Errorf("Received error on connection %v", err)
 			break
 		}
 		packet := &agent.Packet{
@@ -117,8 +117,8 @@ func (t *Tunnel) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			},
 		}
 		t.Server.Backend.Send(packet)
-		glog.Infof("Forwarding on tunnel, packet %v", string(pkt[:n]))
+		klog.Infof("Forwarding on tunnel, packet %v", string(pkt[:n]))
 	}
-	glog.Infof("Stopping transfer to %q", r.Host)
+	klog.Infof("Stopping transfer to %q", r.Host)
 	delete(t.Server.Frontends, connection.connectID)
 }

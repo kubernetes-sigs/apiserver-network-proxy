@@ -19,19 +19,21 @@ package main
 import (
 	"crypto/tls"
 	"crypto/x509"
+	"flag"
 	"fmt"
 	"io/ioutil"
 	"net"
 	"net/http"
 	"os"
-
-	"github.com/golang/glog"
+	
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/spf13/cobra"
 	"github.com/spf13/pflag"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials"
+	"k8s.io/klog"
 	"sigs.k8s.io/apiserver-network-proxy/pkg/agent/agentserver"
+	"sigs.k8s.io/apiserver-network-proxy/pkg/util"
 	"sigs.k8s.io/apiserver-network-proxy/proto/agent"
 )
 
@@ -42,8 +44,15 @@ func main() {
 	command := newProxyCommand(proxy, o)
 	flags := command.Flags()
 	flags.AddFlagSet(o.Flags())
+	local := flag.NewFlagSet(os.Args[0], flag.ExitOnError)
+	klog.InitFlags(local)
+	local.VisitAll(func(fl *flag.Flag) {
+		fl.Name = util.Normalize(fl.Name)
+		flags.AddGoFlag(fl)
+	})
 	if err := command.Execute(); err != nil {
-		glog.Errorf("error: %v\n", err)
+		klog.Errorf("error: %v\n", err)
+		klog.Flush()
 		os.Exit(1)
 	}
 }
@@ -68,7 +77,7 @@ type ProxyRunOptions struct {
 }
 
 func (o *ProxyRunOptions) Flags() *pflag.FlagSet {
-	flags := pflag.NewFlagSet("proxy", pflag.ContinueOnError)
+	flags := pflag.NewFlagSet("proxy-server", pflag.ContinueOnError)
 	flags.StringVar(&o.serverCert, "serverCert", o.serverCert, "If non-empty secure communication with this cert.")
 	flags.StringVar(&o.serverKey, "serverKey", o.serverKey, "If non-empty secure communication with this key.")
 	flags.StringVar(&o.serverCaCert, "serverCaCert", o.serverCaCert, "If non-empty the CA we use to validate KAS clients.")
@@ -83,16 +92,16 @@ func (o *ProxyRunOptions) Flags() *pflag.FlagSet {
 }
 
 func (o *ProxyRunOptions) Print() {
-	glog.Warningf("ServerCert set to %q.\n", o.serverCert)
-	glog.Warningf("ServerKey set to %q.\n", o.serverKey)
-	glog.Warningf("ServerCACert set to %q.\n", o.serverCaCert)
-	glog.Warningf("ClusterCert set to %q.\n", o.clusterCert)
-	glog.Warningf("ClusterKey set to %q.\n", o.clusterKey)
-	glog.Warningf("ClusterCACert set to %q.\n", o.clusterCaCert)
-	glog.Warningf("Mode set to %q.\n", o.mode)
-	glog.Warningf("Server port set to %d.\n", o.serverPort)
-	glog.Warningf("Agent port set to %d.\n", o.agentPort)
-	glog.Warningf("Admin port set to %d.\n", o.adminPort)
+	klog.Warningf("ServerCert set to %q.\n", o.serverCert)
+	klog.Warningf("ServerKey set to %q.\n", o.serverKey)
+	klog.Warningf("ServerCACert set to %q.\n", o.serverCaCert)
+	klog.Warningf("ClusterCert set to %q.\n", o.clusterCert)
+	klog.Warningf("ClusterKey set to %q.\n", o.clusterKey)
+	klog.Warningf("ClusterCACert set to %q.\n", o.clusterCaCert)
+	klog.Warningf("Mode set to %q.\n", o.mode)
+	klog.Warningf("Server port set to %d.\n", o.serverPort)
+	klog.Warningf("Agent port set to %d.\n", o.agentPort)
+	klog.Warningf("Admin port set to %d.\n", o.adminPort)
 }
 
 func (o *ProxyRunOptions) Validate() error {
@@ -200,19 +209,19 @@ func (p *Proxy) run(o *ProxyRunOptions) error {
 	}
 	server := agentserver.NewProxyServer()
 
-	glog.Info("Starting master server for client connections.")
+	klog.Info("Starting master server for client connections.")
 	err := p.runMasterServer(o, server)
 	if err != nil {
 		return err
 	}
 
-	glog.Info("Starting agent server for tunnel connections.")
+	klog.Info("Starting agent server for tunnel connections.")
 	err = p.runAgentServer(o, server)
 	if err != nil {
 		return err
 	}
 
-	glog.Info("Starting admin server for debug connections.")
+	klog.Info("Starting admin server for debug connections.")
 	err = p.runAdminServer(o, server)
 	if err != nil {
 		return err
@@ -268,7 +277,7 @@ func (p *Proxy) runMasterServer(o *ProxyRunOptions, server *agentserver.ProxySer
 			}
 			err := server.ListenAndServeTLS("", "") // empty files defaults to tlsConfig
 			if err != nil {
-				glog.Errorf("failed to listen on master port %v", err)
+				klog.Errorf("failed to listen on master port %v", err)
 			}
 		}()
 	}
@@ -333,9 +342,9 @@ func (p *Proxy) runAdminServer(o *ProxyRunOptions, server *agentserver.ProxyServ
 	go func() {
 		err := adminServer.ListenAndServe()
 		if err != nil {
-			glog.Warningf("health server received %v.\n", err)
+			klog.Warningf("health server received %v.\n", err)
 		}
-		glog.Warningf("Health server stopped listening\n")
+		klog.Warningf("Health server stopped listening\n")
 	}()
 
 	return nil

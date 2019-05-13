@@ -22,8 +22,8 @@ import (
 	"net"
 	"time"
 
-	"github.com/golang/glog"
 	"sigs.k8s.io/apiserver-network-proxy/proto/agent"
+	"k8s.io/klog"
 )
 
 type conn struct {
@@ -46,7 +46,7 @@ func (c *conn) Write(data []byte) (n int, err error) {
 		},
 	}
 
-	glog.Infof("[tracing] send req %+v", req)
+	klog.Infof("[tracing] send req %+v", req)
 
 	err = c.stream.Send(req)
 	if err != nil {
@@ -101,7 +101,7 @@ func (c *conn) SetWriteDeadline(t time.Time) error {
 }
 
 func (c *conn) Close() error {
-	glog.Info("conn.Close()")
+	klog.Info("conn.Close()")
 	return nil
 }
 

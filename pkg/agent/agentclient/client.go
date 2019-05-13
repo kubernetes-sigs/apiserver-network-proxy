@@ -23,8 +23,8 @@ import (
 	"sync"
 	"sync/atomic"
 
-	"github.com/golang/glog"
 	"google.golang.org/grpc"
+	"k8s.io/klog"
 	"sigs.k8s.io/apiserver-network-proxy/proto/agent"
 )
 
@@ -67,28 +67,28 @@ func (a *AgentClient) Serve(stopCh <-chan struct{}) {
 	for {
 		select {
 		case <-stopCh:
-			glog.Info("stop agent client.")
+			klog.Info("stop agent client.")
 			return
 		default:
 		}
 
-		glog.Info("waiting packets...")
+		klog.Info("waiting packets...")
 
 		pkt, err := a.stream.Recv()
 		if err == io.EOF {
-			glog.Info("received EOF, exit")
+			klog.Info("received EOF, exit")
 			return
 		}
 		if err != nil {
-			glog.Warningf("stream read error: %v", err)
+			klog.Warningf("stream read error: %v", err)
 			return
 		}
 
-		glog.Infof("[tracing] recv packet %+v", pkt)
+		klog.Infof("[tracing] recv packet %+v", pkt)
 
 		switch pkt.Type {
 		case agent.PacketType_DIAL_REQ:
-			glog.Info("received DIAL_REQ")
+			klog.Info("received DIAL_REQ")
 			resp := &agent.Packet{
 				Type:    agent.PacketType_DIAL_RSP,
 				Payload: &agent.Packet_DialResponse{DialResponse: &agent.DialResponse{}},
@@ -101,7 +101,7 @@ func (a *AgentClient) Serve(stopCh <-chan struct{}) {
 			if err != nil {
 				resp.GetDialResponse().Error = err.Error()
 				if err := a.stream.Send(resp); err != nil {
-					glog.Warningf("stream send error: %v", err)
+					klog.Warningf("stream send error: %v", err)
 				}
 				continue
 			}
@@ -122,7 +122,7 @@ func (a *AgentClient) Serve(stopCh <-chan struct{}) {
 
 			resp.GetDialResponse().ConnectID = connID
 			if err := a.stream.Send(resp); err != nil {
-				glog.Warningf("stream send error: %v", err)
+				klog.Warningf("stream send error: %v", err)
 				continue
 			}
 
@@ -130,16 +130,16 @@ func (a *AgentClient) Serve(stopCh <-chan struct{}) {
 			go a.proxyToRemote(conn, a.dataChs[connID], cleanup)
 
 		case agent.PacketType_DATA:
-			glog.Info("received DATA")
+			klog.Info("received DATA")
 			data := pkt.GetData()
-			glog.Infof("[tracing] %v", data)
+			klog.Infof("[tracing] %v", data)
 
 			if dataCh, ok := a.dataChs[data.ConnectID]; ok {
 				dataCh <- data.Data
 			}
 
 		default:
-			glog.Warningf("unrecognized packet type: %+v", pkt)
+			klog.Warningf("unrecognized packet type: %+v", pkt)
 		}
 	}
 }
@@ -157,13 +157,13 @@ func (a *AgentClient) remoteToProxy(conn net.Conn, connID int64, cleanup func())
 		if err == io.EOF {
 			return
 		} else if err != nil {
-			glog.Errorf("connection read error: %v", err)
+			klog.Errorf("connection read error: %v", err)
 			resp.Payload = &agent.Packet_Data{Data: &agent.Data{
 				Error:     err.Error(),
 				ConnectID: connID,
 			}}
 			if err := a.stream.Send(resp); err != nil {
-				glog.Warningf("stream send error: %v", err)
+				klog.Warningf("stream send error: %v", err)
 			}
 		} else {
 			resp.Payload = &agent.Packet_Data{Data: &agent.Data{
@@ -171,7 +171,7 @@ func (a *AgentClient) remoteToProxy(conn net.Conn, connID int64, cleanup func())
 				ConnectID: connID,
 			}}
 			if err := a.stream.Send(resp); err != nil {
-				glog.Warningf("stream send error: %v", err)
+				klog.Warningf("stream send error: %v", err)
 			}
 		}
 	}
@@ -189,7 +189,7 @@ func (a *AgentClient) proxyToRemote(conn net.Conn, dataCh <-chan []byte, cleanup
 			} else if n > 0 {
 				pos += n
 			} else {
-				glog.Errorf("conn write error: %v", err)
+				klog.Errorf("conn write error: %v", err)
 				return
 			}
 		}

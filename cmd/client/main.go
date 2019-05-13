@@ -19,17 +19,19 @@ package main
 import (
 	"crypto/tls"
 	"crypto/x509"
+	"flag"
 	"fmt"
 	"io"
 	"io/ioutil"
 	"os"
 
-	"github.com/golang/glog"
 	"github.com/spf13/cobra"
 	"github.com/spf13/pflag"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials"
+	"k8s.io/klog"
 	"sigs.k8s.io/apiserver-network-proxy/pkg/agent/client"
+	"sigs.k8s.io/apiserver-network-proxy/pkg/util"
 )
 
 func main() {
@@ -38,8 +40,15 @@ func main() {
 	command := newGrpcProxyClientCommand(client, o)
 	flags := command.Flags()
 	flags.AddFlagSet(o.Flags())
+	local := flag.NewFlagSet(os.Args[0], flag.ExitOnError)
+	klog.InitFlags(local)
+	local.VisitAll(func(fl *flag.Flag) {
+		fl.Name = util.Normalize(fl.Name)
+		flags.AddGoFlag(fl)
+	})
 	if err := command.Execute(); err != nil {
-		glog.Errorf("error: %v\n", err)
+		klog.Errorf("error: %v\n", err)
+		klog.Flush()
 		os.Exit(1)
 	}
 }
@@ -59,9 +68,9 @@ func (o *GrpcProxyClientOptions) Flags() *pflag.FlagSet {
 }
 
 func (o *GrpcProxyClientOptions) Print() {
-	glog.Warningf("ClientCert set to \"%s\".\n", o.clientCert)
-	glog.Warningf("ClientKey set to \"%s\".\n", o.clientKey)
-	glog.Warningf("CACert set to \"%s\".\n", o.caCert)
+	klog.Warningf("ClientCert set to \"%s\".\n", o.clientCert)
+	klog.Warningf("ClientKey set to \"%s\".\n", o.clientKey)
+	klog.Warningf("CACert set to \"%s\".\n", o.caCert)
 }
 
 func (o *GrpcProxyClientOptions) Validate() error {
@@ -168,7 +177,7 @@ func (c *Client) run(o *GrpcProxyClientOptions) error {
 		if err != nil {
 			return err
 		}
-		glog.Info(string(buf[:n]))
+		klog.Info(string(buf[:n]))
 	}
 	return nil
 }

@@ -43,3 +43,7 @@ required = [
 [prune]
   go-tests = true
   unused-packages = true
+
+[[constraint]]
+  name = "k8s.io/klog"
+  version = "0.3.0"

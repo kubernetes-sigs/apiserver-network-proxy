@@ -21,7 +21,7 @@ import (
 	"io"
 	"net"
 
-	"github.com/golang/glog"
+	"k8s.io/klog"
 	"sigs.k8s.io/apiserver-network-proxy/proto/agent"
 )
 
@@ -43,8 +43,8 @@ func (c *ProxyClientConnection) send(pkt *agent.Packet) error {
 			return nil
 		}
 		writer := c.Http
-		glog.Warningf("pkt is set to %v.", pkt)
-		glog.Warningf("GetData() returns %v.", pkt.GetData())
+		klog.Warningf("pkt is set to %v.", pkt)
+		klog.Warningf("GetData() returns %v.", pkt.GetData())
 		_, err := writer.Write(pkt.GetData().Data)
 		return err
 	} else {
@@ -75,7 +75,7 @@ func NewProxyServer() *ProxyServer {
 
 // Proxy handles incoming streams from gRPC frontend.
 func (s *ProxyServer) Proxy(stream agent.ProxyService_ProxyServer) error {
-	glog.Info("proxy request from client")
+	klog.Info("proxy request from client")
 
 	recvCh := make(chan *agent.Packet, 10)
 	stopCh := make(chan error)
@@ -94,7 +94,7 @@ func (s *ProxyServer) Proxy(stream agent.ProxyService_ProxyServer) error {
 				return
 			}
 			if err != nil {
-				glog.Warningf("stream read error: %v", err)
+				klog.Warningf("stream read error: %v", err)
 				return
 			}
 
@@ -106,68 +106,68 @@ func (s *ProxyServer) Proxy(stream agent.ProxyService_ProxyServer) error {
 }
 
 func (s *ProxyServer) serveRecvFrontend(stream agent.ProxyService_ProxyServer, recvCh <-chan *agent.Packet) {
-	glog.Info("start serve recv ...")
+	klog.Info("start serve recv ...")
 	for pkt := range recvCh {
 		switch pkt.Type {
 		case agent.PacketType_DIAL_REQ:
-			glog.Info("received DIAL_REQ")
+			klog.Info("received DIAL_REQ")
 			if s.Backend == nil {
-				glog.Info("no backend found; drop")
+				klog.Info("no backend found; drop")
 				continue
 			}
 
 			if err := s.Backend.Send(pkt); err != nil {
-				glog.Warningf("send packet to Backend failed: $v", err)
+				klog.Warningf("send packet to Backend failed: $v", err)
 			}
 			s.PendingDial[pkt.GetDialRequest().Random] = &ProxyClientConnection{
 				Mode:      "grpc",
 				Grpc:      stream,
 				connected: make(chan struct{}),
 			}
-			glog.Info("DIAL_REQ sent to backend") // got this. but backend didn't receive anything.
+			klog.Info("DIAL_REQ sent to backend") // got this. but backend didn't receive anything.
 		case agent.PacketType_DIAL_RSP:
-			glog.Info("received DIAL_RSP;; ignore on Server")
+			klog.Info("received DIAL_RSP;; ignore on Server")
 		case agent.PacketType_ACK:
-			glog.Info("received ACK")
+			klog.Info("received ACK")
 		case agent.PacketType_CLOSE:
-			glog.Info("received CLOSE")
+			klog.Info("received CLOSE")
 		case agent.PacketType_DATA:
-			glog.Info("received DATA")
+			klog.Info("received DATA")
 			if s.Backend == nil {
-				glog.Info("no Backend found; drop")
+				klog.Info("no Backend found; drop")
 				continue
 			}
 
 			if err := s.Backend.Send(pkt); err != nil {
-				glog.Warningf("send packet to Backend failed: $v", err)
+				klog.Warningf("send packet to Backend failed: $v", err)
 			}
-			glog.Info("DATA sent to backend")
+			klog.Info("DATA sent to backend")
 		}
 	}
 }
 
 // Ignored now
 func (s *ProxyServer) serveSend(stream agent.ProxyService_ProxyServer, sendCh <-chan *agent.Packet) {
-	glog.Info("start serve send ...")
+	klog.Info("start serve send ...")
 	for pkt := range sendCh {
 		err := stream.Send(pkt)
 		if err != nil {
-			glog.Warningf("stream write error: %v", err)
+			klog.Warningf("stream write error: %v", err)
 		}
 	}
 }
 
 // Connect is for agent to connect to ProxyServer as next hop
 func (s *ProxyServer) Connect(stream agent.AgentService_ConnectServer) error {
-	glog.Info("connect request from Backend")
+	klog.Info("connect request from Backend")
 
 	recvCh := make(chan *agent.Packet, 10)
 	stopCh := make(chan error)
 
-	glog.Infof("register Backend %v", stream)
+	klog.Infof("register Backend %v", stream)
 	s.Backend = stream
 	defer func() {
-		glog.Infof("unregister Backend %v", stream)
+		klog.Infof("unregister Backend %v", stream)
 		s.Backend = nil
 	}()
 
@@ -185,7 +185,7 @@ func (s *ProxyServer) Connect(stream agent.AgentService_ConnectServer) error {
 				return
 			}
 			if err != nil {
-				glog.Warningf("stream read error: %v", err)
+				klog.Warningf("stream read error: %v", err)
 				return
 			}
 
@@ -202,14 +202,14 @@ func (s *ProxyServer) serveRecvBackend(stream agent.AgentService_ConnectServer, 
 		switch pkt.Type {
 		case agent.PacketType_DIAL_RSP:
 			resp := pkt.GetDialResponse()
-			glog.Warningf("Received dial response for %d, connectID is %d", resp.Random, resp.ConnectID)
+			klog.Warningf("Received dial response for %d, connectID is %d", resp.Random, resp.ConnectID)
 			if client, ok := s.PendingDial[resp.Random]; !ok {
-				glog.Warning("DialResp not recognized; dropped")
+				klog.Warning("DialResp not recognized; dropped")
 			} else {
 				err := client.send(pkt)
 				delete(s.PendingDial, resp.Random)
 				if err != nil {
-					glog.Warning("send to client stream error: %v", err)
+					klog.Warning("send to client stream error: %v", err)
 				} else {
 					client.connectID = resp.ConnectID
 					s.Frontends[resp.ConnectID] = client
@@ -220,11 +220,11 @@ func (s *ProxyServer) serveRecvBackend(stream agent.AgentService_ConnectServer, 
 			resp := pkt.GetData()
 			if client, ok := s.Frontends[resp.ConnectID]; ok {
 				if err := client.send(pkt); err != nil {
-					glog.Warningf("send to client stream error: %v", err)
+					klog.Warningf("send to client stream error: %v", err)
 				}
 			}
 		default:
-			glog.Warningf("unrecognized packet %+v", pkt)
+			klog.Warningf("unrecognized packet %+v", pkt)
 		}
 	}
 }
