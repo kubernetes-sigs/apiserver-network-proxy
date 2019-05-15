@@ -107,7 +107,7 @@ func (o *ProxyRunOptions) Print() {
 func (o *ProxyRunOptions) Validate() error {
 	if o.serverKey != "" {
 		if _, err := os.Stat(o.serverKey); os.IsNotExist(err) {
-			return err
+			return fmt.Errorf("error checking server key %s, got %v", o.serverKey, err)
 		}
 		if o.serverCert == "" {
 			return fmt.Errorf("cannot have server cert empty when server key is set to %q", o.serverKey)
@@ -115,7 +115,7 @@ func (o *ProxyRunOptions) Validate() error {
 	}
 	if o.serverCert != "" {
 		if _, err := os.Stat(o.serverCert); os.IsNotExist(err) {
-			return err
+			return fmt.Errorf("error checking server cert %s, got %v", o.serverCert, err)
 		}
 		if o.serverKey == "" {
 			return fmt.Errorf("cannot have server key empty when server cert is set to %q", o.serverCert)
@@ -123,12 +123,12 @@ func (o *ProxyRunOptions) Validate() error {
 	}
 	if o.serverCaCert != "" {
 		if _, err := os.Stat(o.serverCaCert); os.IsNotExist(err) {
-			return err
+			return fmt.Errorf("error checking server CA cert %s, got %v", o.serverCaCert, err)
 		}
 	}
 	if o.clusterKey != "" {
 		if _, err := os.Stat(o.clusterKey); os.IsNotExist(err) {
-			return err
+			return fmt.Errorf("error checking cluster key %s, got %v", o.clusterKey, err)
 		}
 		if o.clusterCert == "" {
 			return fmt.Errorf("cannot have cluster cert empty when cluster key is set to %q", o.clusterKey)
@@ -136,7 +136,7 @@ func (o *ProxyRunOptions) Validate() error {
 	}
 	if o.clusterCert != "" {
 		if _, err := os.Stat(o.clusterCert); os.IsNotExist(err) {
-			return err
+			return fmt.Errorf("error checking cluster cert %s, got %v", o.clusterCert, err)
 		}
 		if o.clusterKey == "" {
 			return fmt.Errorf("cannot have cluster key empty when cluster cert is set to %q", o.clusterCert)
@@ -144,7 +144,7 @@ func (o *ProxyRunOptions) Validate() error {
 	}
 	if o.clusterCaCert != "" {
 		if _, err := os.Stat(o.clusterCaCert); os.IsNotExist(err) {
-			return err
+			return fmt.Errorf("error checking cluster CA cert %s, got %v", o.clusterCaCert, err)
 		}
 	}
 	if o.mode != "grpc" && o.mode != "http-connect" {
@@ -205,26 +205,26 @@ type Proxy struct {
 func (p *Proxy) run(o *ProxyRunOptions) error {
 	o.Print()
 	if err := o.Validate(); err != nil {
-		return err
+		return fmt.Errorf("failed to validate server options with %v", err)
 	}
 	server := agentserver.NewProxyServer()
 
 	klog.Info("Starting master server for client connections.")
 	err := p.runMasterServer(o, server)
 	if err != nil {
-		return err
+		return fmt.Errorf("failed to run the master server: %v", err)
 	}
 
 	klog.Info("Starting agent server for tunnel connections.")
 	err = p.runAgentServer(o, server)
 	if err != nil {
-		return err
+		return fmt.Errorf("failed to run the agent server: %v", err)
 	}
 
 	klog.Info("Starting admin server for debug connections.")
 	err = p.runAdminServer(o, server)
 	if err != nil {
-		return err
+		return fmt.Errorf("failed to run the admin server: %v", err)
 	}
 
 	stopCh := make(chan struct{})
@@ -236,12 +236,12 @@ func (p *Proxy) run(o *ProxyRunOptions) error {
 func (p *Proxy) runMasterServer(o *ProxyRunOptions, server *agentserver.ProxyServer) error {
 	proxyCert, err := tls.LoadX509KeyPair(o.serverCert, o.serverKey)
 	if err != nil {
-		return err
+		return fmt.Errorf("failed to load X509 key pair %s and %s: %v", o.serverCert, o.serverKey, err)
 	}
 	certPool := x509.NewCertPool()
 	caCert, err := ioutil.ReadFile(o.serverCaCert)
 	if err != nil {
-		return err
+		return fmt.Errorf("failed to read server CA cert %s: %v", o.serverCaCert, err)
 	}
 	ok := certPool.AppendCertsFromPEM(caCert)
 	if !ok {
@@ -261,7 +261,7 @@ func (p *Proxy) runMasterServer(o *ProxyRunOptions, server *agentserver.ProxySer
 		agent.RegisterProxyServiceServer(grpcServer, server)
 		lis, err := net.Listen("tcp", addr)
 		if err != nil {
-			return err
+			return fmt.Errorf("failed to listen on %s: %v", addr, err)
 		}
 		go grpcServer.Serve(lis)
 	} else {
@@ -288,12 +288,12 @@ func (p *Proxy) runMasterServer(o *ProxyRunOptions, server *agentserver.ProxySer
 func (p *Proxy) runAgentServer(o *ProxyRunOptions, server *agentserver.ProxyServer) error {
 	clusterCert, err := tls.LoadX509KeyPair(o.clusterCert, o.clusterKey)
 	if err != nil {
-		return err
+		return fmt.Errorf("failed to load X509 key pair %s and %s: %v", o.clusterCert, o.clusterKey, err)
 	}
 	certPool := x509.NewCertPool()
 	caCert, err := ioutil.ReadFile(o.clusterCaCert)
 	if err != nil {
-		return err
+		return fmt.Errorf("failed to read cluster CA cert %s: %v", o.clusterCaCert, err)
 	}
 	ok := certPool.AppendCertsFromPEM(caCert)
 	if !ok {
@@ -311,7 +311,7 @@ func (p *Proxy) runAgentServer(o *ProxyRunOptions, server *agentserver.ProxyServ
 	agent.RegisterAgentServiceServer(grpcServer, server)
 	lis, err := net.Listen("tcp", addr)
 	if err != nil {
-		return err
+		return fmt.Errorf("failed to listen on %s: %v", addr, err)
 	}
 	go grpcServer.Serve(lis)
 
