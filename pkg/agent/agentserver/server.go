@@ -117,7 +117,7 @@ func (s *ProxyServer) serveRecvFrontend(stream agent.ProxyService_ProxyServer, r
 			}
 
 			if err := s.Backend.Send(pkt); err != nil {
-				klog.Warningf("send packet to Backend failed: $v", err)
+				klog.Warningf("send packet to Backend failed: %v", err)
 			}
 			s.PendingDial[pkt.GetDialRequest().Random] = &ProxyClientConnection{
 				Mode:      "grpc",
@@ -125,23 +125,33 @@ func (s *ProxyServer) serveRecvFrontend(stream agent.ProxyService_ProxyServer, r
 				connected: make(chan struct{}),
 			}
 			klog.Info("DIAL_REQ sent to backend") // got this. but backend didn't receive anything.
-		case agent.PacketType_DIAL_RSP:
-			klog.Info("received DIAL_RSP;; ignore on Server")
-		case agent.PacketType_ACK:
-			klog.Info("received ACK")
-		case agent.PacketType_CLOSE:
-			klog.Info("received CLOSE")
-		case agent.PacketType_DATA:
-			klog.Info("received DATA")
+
+		case agent.PacketType_CLOSE_REQ:
+			klog.Infof("received CLOSE_REQ(id=%d)", pkt.GetCloseRequest().ConnectID)
 			if s.Backend == nil {
-				klog.Info("no Backend found; drop")
+				klog.Info("no backend found; drop")
 				continue
 			}
 
 			if err := s.Backend.Send(pkt); err != nil {
-				klog.Warningf("send packet to Backend failed: $v", err)
+				klog.Warningf("send packet to Backend failed: %v", err)
+			}
+			klog.Info("CLOSE_REQ sent to backend")
+
+		case agent.PacketType_DATA:
+			klog.Infof("received DATA(id=%d)", pkt.GetData().ConnectID)
+			if s.Backend == nil {
+				klog.Info("no backend found; drop")
+				continue
+			}
+
+			if err := s.Backend.Send(pkt); err != nil {
+				klog.Warningf("send packet to Backend failed: %v", err)
 			}
 			klog.Info("DATA sent to backend")
+
+		default:
+			klog.Infof("Ignore %v packet coming from frontend", pkt.Type)
 		}
 	}
 }
@@ -209,7 +219,7 @@ func (s *ProxyServer) serveRecvBackend(stream agent.AgentService_ConnectServer, 
 				err := client.send(pkt)
 				delete(s.PendingDial, resp.Random)
 				if err != nil {
-					klog.Warning("send to client stream error: %v", err)
+					klog.Warningf("dial response send to client stream error: %v", err)
 				} else {
 					client.connectID = resp.ConnectID
 					s.Frontends[resp.ConnectID] = client
@@ -220,7 +230,14 @@ func (s *ProxyServer) serveRecvBackend(stream agent.AgentService_ConnectServer, 
 			resp := pkt.GetData()
 			if client, ok := s.Frontends[resp.ConnectID]; ok {
 				if err := client.send(pkt); err != nil {
-					klog.Warningf("send to client stream error: %v", err)
+					klog.Warningf("data send to client stream error: %v", err)
+				}
+			}
+		case agent.PacketType_CLOSE_RSP:
+			resp := pkt.GetCloseResponse()
+			if client, ok := s.Frontends[resp.ConnectID]; ok {
+				if err := client.send(pkt); err != nil {
+					klog.Warningf("close response send to client stream error: %v", err)
 				}
 			}
 		default:

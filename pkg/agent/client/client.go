@@ -108,6 +108,15 @@ func (t *grpcTunnel) serve() {
 			} else {
 				klog.Warningf("connection id %d not recognized", resp.ConnectID)
 			}
+		case agent.PacketType_CLOSE_RSP:
+			resp := pkt.GetCloseResponse()
+			if conn, ok := t.conns[resp.ConnectID]; ok {
+				close(conn.readCh)
+				conn.closeCh <- resp.Error
+				close(conn.closeCh)
+			} else {
+				klog.Warningf("connection id %d not recognized", resp.ConnectID)
+			}
 		}
 	}
 }
@@ -146,6 +155,7 @@ func (t *grpcTunnel) Dial(protocol, address string) (net.Conn, error) {
 		}
 		c.connID = res.connid
 		c.readCh = make(chan []byte, 10)
+		c.closeCh = make(chan string)
 		t.conns[res.connid] = c
 		// TODO: remove connection from the map
 	case <-time.After(30 * time.Second):
