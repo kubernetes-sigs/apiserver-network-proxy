@@ -17,12 +17,15 @@ limitations under the License.
 package main
 
 import (
+	"bufio"
+	"context"
 	"crypto/tls"
 	"crypto/x509"
 	"flag"
 	"fmt"
-	"io"
 	"io/ioutil"
+	"net"
+	"net/http"
 	"os"
 
 	"github.com/spf13/cobra"
@@ -30,6 +33,7 @@ import (
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials"
 	"k8s.io/klog"
+
 	"sigs.k8s.io/apiserver-network-proxy/pkg/agent/client"
 	"sigs.k8s.io/apiserver-network-proxy/pkg/util"
 )
@@ -54,9 +58,17 @@ func main() {
 }
 
 type GrpcProxyClientOptions struct {
-	clientCert string
-	clientKey  string
-	caCert     string
+	clientCert   string
+	clientKey    string
+	caCert       string
+	requestProto string
+	requestPath  string
+	requestHost  string
+	requestPort  int
+	proxyHost    string
+	proxyPort    int
+	mode         string
+
 }
 
 func (o *GrpcProxyClientOptions) Flags() *pflag.FlagSet {
@@ -64,13 +76,27 @@ func (o *GrpcProxyClientOptions) Flags() *pflag.FlagSet {
 	flags.StringVar(&o.clientCert, "clientCert", o.clientCert, "If non-empty secure communication with this cert.")
 	flags.StringVar(&o.clientKey, "clientKey", o.clientKey, "If non-empty secure communication with this key.")
 	flags.StringVar(&o.caCert, "caCert", o.caCert, "If non-empty the CAs we use to validate clients.")
+	flags.StringVar(&o.requestProto, "requestProto", o.requestProto, "The protocol for the request to send through the proxy.")
+	flags.StringVar(&o.requestPath, "requestPath", o.requestPath, "The url request to send through the proxy.")
+	flags.StringVar(&o.requestHost, "requestHost", o.requestHost, "The host of the request server.")
+	flags.IntVar(&o.requestPort, "requestPort", o.requestPort, "The port the request server is listening on.")
+	flags.StringVar(&o.proxyHost, "proxyHost", o.proxyHost, "The host of the proxy server.")
+	flags.IntVar(&o.proxyPort, "proxyPort", o.proxyPort, "The port the proxy server is listening on.")
+	flags.StringVar(&o.mode, "mode", o.mode, "Mode can be either 'grpc' or 'http-connect'.")
 	return flags
 }
 
 func (o *GrpcProxyClientOptions) Print() {
-	klog.Warningf("ClientCert set to \"%s\".\n", o.clientCert)
-	klog.Warningf("ClientKey set to \"%s\".\n", o.clientKey)
-	klog.Warningf("CACert set to \"%s\".\n", o.caCert)
+	klog.Warningf("ClientCert set to %q.\n", o.clientCert)
+	klog.Warningf("ClientKey set to %q.\n", o.clientKey)
+	klog.Warningf("CACert set to %q.\n", o.caCert)
+	klog.Warningf("RequestProto set to %q.\n", o.requestProto)
+	klog.Warningf("RequestPath set to %q.\n", o.requestPath)
+	klog.Warningf("RequestHost set to %q.\n", o.requestHost)
+	klog.Warningf("RequestPort set to %d.\n", o.requestPort)
+	klog.Warningf("ProxyHost set to %q.\n", o.proxyHost)
+	klog.Warningf("ProxyPort set to %d.\n", o.proxyPort)
+	klog.Warningf("Mode set to %q.\n", o.mode)
 }
 
 func (o *GrpcProxyClientOptions) Validate() error {
@@ -79,7 +105,7 @@ func (o *GrpcProxyClientOptions) Validate() error {
 			return err
 		}
 		if o.clientCert == "" {
-			return fmt.Errorf("cannot have client cert empty when client key is set to \"%s\"", o.clientKey)
+			return fmt.Errorf("cannot have client cert empty when client key is set to %q", o.clientKey)
 		}
 	}
 	if o.clientCert != "" {
@@ -87,7 +113,7 @@ func (o *GrpcProxyClientOptions) Validate() error {
 			return err
 		}
 		if o.clientKey == "" {
-			return fmt.Errorf("cannot have client key empty when client cert is set to \"%s\"", o.clientCert)
+			return fmt.Errorf("cannot have client key empty when client cert is set to %q", o.clientCert)
 		}
 	}
 	if o.caCert != "" {
@@ -95,14 +121,39 @@ func (o *GrpcProxyClientOptions) Validate() error {
 			return err
 		}
 	}
+	if o.requestProto != "http" && o.requestProto != "https" {
+		return fmt.Errorf("request protocol must be set to either 'http' or 'https' not %q", o.requestProto)
+	}
+	if o.mode != "grpc" && o.mode != "http-connect" {
+		return fmt.Errorf("mode must be set to either 'grpc' or 'http-connect' not %q", o.mode)
+	}
+	if o.requestPort > 49151 {
+		return fmt.Errorf("please do not try to use ephemeral port %d for the request server port", o.requestPort)
+	}
+	if o.requestPort < 1024 {
+		return fmt.Errorf("please do not try to use reserved port %d for the request server port", o.requestPort)
+	}
+	if o.proxyPort > 49151 {
+		return fmt.Errorf("please do not try to use ephemeral port %d for the proxy server port", o.proxyPort)
+	}
+	if o.proxyPort < 1024 {
+		return fmt.Errorf("please do not try to use reserved port %d for the proxy server port", o.proxyPort)
+	}
 	return nil
 }
 
 func newGrpcProxyClientOptions() *GrpcProxyClientOptions {
 	o := GrpcProxyClientOptions{
-		clientCert: "",
-		clientKey:  "",
-		caCert:     "",
+		clientCert:   "",
+		clientKey:    "",
+		caCert:       "",
+		requestProto: "http",
+		requestPath:  "/",
+		requestHost:  "localhost",
+		requestPort:  8000,
+		proxyHost:    "localhost",
+		proxyPort:    8090,
+		mode:         "grpc",
 	}
 	return &o
 }
@@ -125,24 +176,54 @@ type Client struct {
 func (c *Client) run(o *GrpcProxyClientOptions) error {
 	o.Print()
 	if err := o.Validate(); err != nil {
-		return err
+		return fmt.Errorf("failed to validate proxy client options, got %v", err)
 	}
 
 	// Run remote simple http service on server side as
 	// "python -m SimpleHTTPServer"
 
+
+	dialer, err := c.getDialer(o)
+	if err != nil {
+		return fmt.Errorf("failed to get dialer for client, got %v", err)
+	}
+	transport := &http.Transport{
+		DialContext: dialer,
+	}
+	client := &http.Client{
+		Transport: transport,
+	}
+	requestURL := fmt.Sprintf("%s://%s:%d%s", o.requestProto, o.requestHost, o.requestPort, o.requestPath)
+	request, err := http.NewRequest("GET", requestURL, nil)
+	if err != nil {
+		return fmt.Errorf("failed to create request %s to send, got %v", requestURL, err)
+	}
+	response, err := client.Do(request)
+	if err != nil {
+		return fmt.Errorf("failed to send request to client, got %v", err)
+	}
+	data, err := ioutil.ReadAll(response.Body)
+	if err != nil {
+		return fmt.Errorf("failed to read response from client, got %v", err)
+	}
+	klog.Info(string(data))
+
+	return nil
+}
+
+func (c *Client) getDialer(o *GrpcProxyClientOptions) (func(ctx context.Context, network, addr string) (net.Conn, error), error) {
 	clientCert, err := tls.LoadX509KeyPair(o.clientCert, o.clientKey)
 	if err != nil {
-		return err
+		return nil, fmt.Errorf("failed to read key pair %s & %s, got %v", o.clientCert, o.clientKey, err)
 	}
 	certPool := x509.NewCertPool()
 	caCert, err := ioutil.ReadFile(o.caCert)
 	if err != nil {
-		return err
+		return nil, fmt.Errorf("failed to read cert file %s, got %v", o.caCert, err)
 	}
 	ok := certPool.AppendCertsFromPEM(caCert)
 	if !ok {
-		return fmt.Errorf("failed to append CA cert to the cert pool")
+		return nil, fmt.Errorf("failed to append CA cert to the cert pool")
 	}
 
 	transportCreds := credentials.NewTLS(&tls.Config{
@@ -151,33 +232,59 @@ func (c *Client) run(o *GrpcProxyClientOptions) error {
 		RootCAs:      certPool,
 	})
 
-	dialOption := grpc.WithTransportCredentials(transportCreds)
-	tunnel, err := client.CreateGrpcTunnel("localhost:8090", dialOption)
-	if err != nil {
-		return err
-	}
-
-	conn, err := tunnel.Dial("tcp", "localhost:8000")
-	if err != nil {
-		return err
-	}
-
-	_, err = conn.Write([]byte("GET / HTTP/1.1\r\nHost: localhost\r\n\r\n"))
-	if err != nil {
-		return err
-	}
-
-	var buf [1 << 12]byte
-
-	for {
-		n, err := conn.Read(buf[:])
-		if err == io.EOF {
-			break
-		}
+	var proxyConn net.Conn
+	switch o.mode {
+	case "grpc":
+		dialOption := grpc.WithTransportCredentials(transportCreds)
+		serverAddress := fmt.Sprintf("%s:%d", o.proxyHost, o.proxyPort)
+		tunnel, err := client.CreateGrpcTunnel(serverAddress, dialOption)
 		if err != nil {
-			return err
+			return nil, fmt.Errorf("failed to create tunnel %s, got %v", serverAddress, err)
 		}
-		klog.Info(string(buf[:n]))
+
+		requestAddress := fmt.Sprintf("%s:%d", o.requestHost, o.requestPort)
+		proxyConn, err = tunnel.Dial("tcp", requestAddress)
+		if err != nil {
+			return nil, fmt.Errorf("failed to dial request %s, got %v", requestAddress, err)
+		}
+	case "http-connect":
+		proxyAddress := fmt.Sprintf("%s:%d", o.proxyHost, o.proxyPort)
+		requestAddress := fmt.Sprintf("%s:%d", o.requestHost, o.requestPort)
+
+		proxyConn, err = tls.Dial("tcp", proxyAddress,
+			&tls.Config{
+				ServerName:   o.proxyHost,
+				Certificates: []tls.Certificate{clientCert},
+				RootCAs:      certPool,
+			},
+		)
+		if err != nil {
+			return nil, fmt.Errorf("dialing proxy %q failed: %v", proxyAddress, err)
+		}
+		fmt.Fprintf(proxyConn, "CONNECT %s HTTP/1.1\r\nHost: %s\r\n\r\n", requestAddress, "127.0.0.1")
+		br := bufio.NewReader(proxyConn)
+		res, err := http.ReadResponse(br, nil)
+		if err != nil {
+			return nil, fmt.Errorf("reading HTTP response from CONNECT to %s via proxy %s failed: %v",
+				requestAddress, proxyAddress, err)
+		}
+		if res.StatusCode != 200 {
+			return nil, fmt.Errorf("proxy error from %s while dialing %s: %v", proxyAddress, requestAddress, res.Status)
+		}
+
+		// It's safe to discard the bufio.Reader here and return the
+		// original TCP conn directly because we only use this for
+		// TLS, and in TLS the client speaks first, so we know there's
+		// no unbuffered data. But we can double-check.
+		if br.Buffered() > 0 {
+			return nil, fmt.Errorf("unexpected %d bytes of buffered data from CONNECT proxy %q",
+				br.Buffered(), proxyAddress)
+		}
+	default:
+		return nil, fmt.Errorf("failed to process mode %s", o.mode)
 	}
-	return nil
+
+	return func(ctx context.Context, network, addr string) (net.Conn, error) {
+		return proxyConn, nil
+	}, nil
 }

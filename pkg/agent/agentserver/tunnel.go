@@ -34,7 +34,6 @@ func (t *Tunnel) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		r.Method,
 		r.Host,
 		r.TLS.PeerCertificates[0].Subject.CommonName) // can do authz with certs
-
 	if r.Method != http.MethodConnect {
 		http.Error(w, "this proxy only supports CONNECT passthrough", http.StatusMethodNotAllowed)
 		return

@@ -60,21 +60,21 @@ python -m SimpleHTTPServer
 ```
 
 - Start proxy service
-```
+```console
 ./bin/proxy-server --serverCaCert=certs/master/issued/ca.crt --serverCert=certs/master/issued/proxy-master.crt --serverKey=certs/master/private/proxy-master.key --clusterCaCert=certs/agent/issued/ca.crt --clusterCert=certs/agent/issued/proxy-master.crt --clusterKey=certs/agent/private/proxy-master.key
 ```
 
 - Start agent service
-```
+```console
 ./bin/proxy-agent --caCert=certs/agent/issued/ca.crt --agentCert=certs/agent/issued/proxy-agent.crt --agentKey=certs/agent/private/proxy-agent.key
 ```
 
 - Run client (mTLS enabled sample client)
-```
+```console
 ./bin/proxy-test-client --caCert=certs/master/issued/ca.crt --clientCert=certs/master/issued/proxy-client.crt --clientKey=certs/master/private/proxy-client.key
 ```
 
-### HTTP-Connect Client using mTLS Proxy with dial back Agent
+### HTTP-Connect Client using mTLS Proxy with dial back Agent (Either curl OR test client)
 
 ```
 client =HTTP-CONNECT=> (:8090) proxy (:8091) <=GRPC= agent =HTTP=> SimpleHTTPServer(:8000)
@@ -89,17 +89,22 @@ python -m SimpleHTTPServer
 ```
 
 - Start proxy service
-```
+```console
 ./bin/proxy-server --mode=http-connect --serverCaCert=certs/master/issued/ca.crt --serverCert=certs/master/issued/proxy-master.crt --serverKey=certs/master/private/proxy-master.key --clusterCaCert=certs/agent/issued/ca.crt --clusterCert=certs/agent/issued/proxy-master.crt --clusterKey=certs/agent/private/proxy-master.key
 ```
 
 - Start agent service
-```
+```console
 ./bin/proxy-agent --caCert=certs/agent/issued/ca.crt --agentCert=certs/agent/issued/proxy-agent.crt --agentKey=certs/agent/private/proxy-agent.key
 ```
 
-- Run curl client (curl using a mTLS http-connect proxy)
+- Run client (mTLS & http-connect enabled sample client)
+```console
+./bin/proxy-test-client --mode=http-connect  --proxyHost=127.0.0.1 --caCert=certs/master/issued/ca.crt --clientCert=certs/master/issued/proxy-client.crt --clientKey=certs/master/private/proxy-client.key
 ```
+
+- Run curl client (curl using a mTLS http-connect proxy)
+```console
 curl -v -p --proxy-key certs/master/private/proxy-client.key --proxy-cert certs/master/issued/proxy-client.crt --proxy-cacert certs/master/issued/ca.crt --proxy-cert-type PEM -x https://127.0.0.1:8090  http://localhost:8000```
 ```
 

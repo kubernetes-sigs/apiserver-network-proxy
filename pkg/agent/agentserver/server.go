@@ -43,8 +43,6 @@ func (c *ProxyClientConnection) send(pkt *agent.Packet) error {
 			return nil
 		}
 		writer := c.Http
-		klog.Warningf("pkt is set to %v.", pkt)
-		klog.Warningf("GetData() returns %v.", pkt.GetData())
 		_, err := writer.Write(pkt.GetData().Data)
 		return err
 	} else {
