@@ -63,8 +63,10 @@ cfssljson:
 	chmod +x cfssljson
 
 certs: easy-rsa-master cfssl cfssljson
+	# set up easy-rsa
 	cp -rf easy-rsa-master/easyrsa3 easy-rsa-master/master
 	cp -rf easy-rsa-master/easyrsa3 easy-rsa-master/agent
+	# create the client <-> server-proxy connection certs
 	cd easy-rsa-master/master; \
 	./easyrsa init-pki; \
 	./easyrsa --batch "--req-cn=127.0.0.1@$(date +%s)" build-ca nopass; \
@@ -76,6 +78,7 @@ certs: easy-rsa-master cfssl cfssljson
 	cp -r easy-rsa-master/master/pki/private certs/master
 	cp -r easy-rsa-master/master/pki/issued certs/master
 	cp easy-rsa-master/master/pki/ca.crt certs/master/issued
+	# create the agent <-> server-proxy connection certs
 	cd easy-rsa-master/agent; \
 	./easyrsa init-pki; \
 	./easyrsa --batch "--req-cn=127.0.0.1@$(date +%s)" build-ca nopass; \

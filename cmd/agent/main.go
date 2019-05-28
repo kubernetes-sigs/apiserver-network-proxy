@@ -55,9 +55,14 @@ func main() {
 }
 
 type GrpcProxyAgentOptions struct {
+	// Configuration for authenticating with the proxy-server
 	agentCert string
 	agentKey  string
 	caCert    string
+
+	// Configuration for connecting to the proxy-server
+	proxyServerHost string
+	proxyServerPort int
 }
 
 func (o *GrpcProxyAgentOptions) Flags() *pflag.FlagSet {
@@ -65,6 +70,8 @@ func (o *GrpcProxyAgentOptions) Flags() *pflag.FlagSet {
 	flags.StringVar(&o.agentCert, "agentCert", o.agentCert, "If non-empty secure communication with this cert.")
 	flags.StringVar(&o.agentKey, "agentKey", o.agentKey, "If non-empty secure communication with this key.")
 	flags.StringVar(&o.caCert, "caCert", o.caCert, "If non-empty the CAs we use to validate clients.")
+	flags.StringVar(&o.proxyServerHost, "proxyServerHost", o.proxyServerHost, "The hostname to use to connect to the proxy-server.")
+	flags.IntVar(&o.proxyServerPort, "proxyServerPort", o.proxyServerPort, "The port the proxy server is listening on.")
 	return flags
 }
 
@@ -72,12 +79,14 @@ func (o *GrpcProxyAgentOptions) Print() {
 	klog.Warningf("AgentCert set to \"%s\".\n", o.agentCert)
 	klog.Warningf("AgentKey set to \"%s\".\n", o.agentKey)
 	klog.Warningf("CACert set to \"%s\".\n", o.caCert)
+	klog.Warningf("ProxyServerHost set to \"%s\".\n", o.proxyServerHost)
+	klog.Warningf("ProxyServerPort set to %d.\n", o.proxyServerPort)
 }
 
 func (o *GrpcProxyAgentOptions) Validate() error {
 	if o.agentKey != "" {
 		if _, err := os.Stat(o.agentKey); os.IsNotExist(err) {
-			return err
+			return fmt.Errorf("error checking agent key %s, got %v", o.agentKey, err)
 		}
 		if o.agentCert == "" {
 			return fmt.Errorf("cannot have agent cert empty when agent key is set to \"%s\"", o.agentKey)
@@ -85,7 +94,7 @@ func (o *GrpcProxyAgentOptions) Validate() error {
 	}
 	if o.agentCert != "" {
 		if _, err := os.Stat(o.agentCert); os.IsNotExist(err) {
-			return err
+			return fmt.Errorf("error checking agent cert %s, got %v", o.agentCert, err)
 		}
 		if o.agentKey == "" {
 			return fmt.Errorf("cannot have agent key empty when agent cert is set to \"%s\"", o.agentCert)
@@ -93,8 +102,11 @@ func (o *GrpcProxyAgentOptions) Validate() error {
 	}
 	if o.caCert != "" {
 		if _, err := os.Stat(o.caCert); os.IsNotExist(err) {
-			return err
+			return fmt.Errorf("error checking agent CA cert %s, got %v", o.caCert, err)
 		}
+	}
+	if o.proxyServerPort <= 0 {
+		return fmt.Errorf("proxy server port %d must be greater than 0", o.proxyServerPort)
 	}
 	return nil
 }
@@ -104,6 +116,8 @@ func newGrpcProxyAgentOptions() *GrpcProxyAgentOptions {
 		agentCert: "",
 		agentKey:  "",
 		caCert:    "",
+		proxyServerHost: "127.0.0.1",
+		proxyServerPort: 8091,
 	}
 	return &o
 }
@@ -126,15 +140,15 @@ type Agent struct {
 func (a *Agent) run(o *GrpcProxyAgentOptions) error {
 	o.Print()
 	if err := o.Validate(); err != nil {
-		return err
+		return fmt.Errorf("failed to validate agent options with %v", err)
 	}
 
 	if err := a.runProxyConnection(o); err != nil {
-		return err
+		return fmt.Errorf("failed to run proxy connection with %v", err)
 	}
 
 	if err := a.runAdminServer(o); err != nil {
-		return err
+		return fmt.Errorf("failed to run admin server with %v", err)
 	}
 
 	stopCh := make(chan struct{})
@@ -146,12 +160,12 @@ func (a *Agent) run(o *GrpcProxyAgentOptions) error {
 func (p *Agent) runProxyConnection(o *GrpcProxyAgentOptions) error {
 	agentCert, err := tls.LoadX509KeyPair(o.agentCert, o.agentKey)
 	if err != nil {
-		return err
+		return fmt.Errorf("failed to load X509 key pair %s and %s: %v", o.agentCert, o.agentKey, err)
 	}
 	certPool := x509.NewCertPool()
 	caCert, err := ioutil.ReadFile(o.caCert)
 	if err != nil {
-		return err
+		return fmt.Errorf("failed to read agent CA cert %s: %v", o.caCert, err)
 	}
 	ok := certPool.AppendCertsFromPEM(caCert)
 	if !ok {
@@ -159,15 +173,15 @@ func (p *Agent) runProxyConnection(o *GrpcProxyAgentOptions) error {
 	}
 
 	transportCreds := credentials.NewTLS(&tls.Config{
-		ServerName:   "127.0.0.1",
+		ServerName:   o.proxyServerHost,
 		Certificates: []tls.Certificate{agentCert},
 		RootCAs:      certPool,
 	})
 	dialOption := grpc.WithTransportCredentials(transportCreds)
-	client := agentclient.NewAgentClient("localhost:8091")
+	client := agentclient.NewAgentClient(fmt.Sprintf("%s:%d", o.proxyServerHost, o.proxyServerPort))
 
 	if err := client.Connect(dialOption); err != nil {
-		return err
+		return fmt.Errorf("failed to connect to proxy-server: %v", err)
 	}
 
 	stopCh := make(chan struct{})
