@@ -30,8 +30,8 @@ service AgentService {
 enum PacketType {
   DIAL_REQ = 0;
   DIAL_RSP = 1;
-  ACK = 2; // needed only for TCP?
-  CLOSE = 3;
+  CLOSE_REQ = 2;
+  CLOSE_RSP = 3;
   DATA = 4;
 }
 
@@ -47,6 +47,8 @@ message Packet {
     DialRequest dialRequest = 2;
     DialResponse dialResponse = 3;
     Data data = 4;
+    CloseRequest closeRequest = 5;
+    CloseResponse closeResponse = 6;
   }
 }
 
@@ -70,6 +72,19 @@ message DialResponse {
 
     // random copied from DialRequest
     int64 random = 3;
+}
+
+message CloseRequest {
+    // connectID of the stream to close
+    int64 connectID = 1;
+}
+
+message CloseResponse {
+    // error message
+    string error = 1;
+
+    // connectID indicates the identifier of the connection
+    int64 connectID = 2;
 }
 
 message Data {

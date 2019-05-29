@@ -1,22 +1,26 @@
 package agentclient
 
 import (
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"google.golang.org/grpc"
+	"k8s.io/klog"
 	"sigs.k8s.io/apiserver-network-proxy/proto/agent"
 )
 
 func TestServeData_HTTP(t *testing.T) {
+	var stream agent.AgentService_ConnectClient
 	client := NewAgentClient("")
-	client.stream = newStream()
+	client.stream, stream = pipe()
 	stopCh := make(chan struct{})
 
-	// Start agnet
+	// Start agent
 	go client.Serve(stopCh)
 	defer close(stopCh)
 
@@ -28,20 +32,11 @@ func TestServeData_HTTP(t *testing.T) {
 	defer ts.Close()
 
 	// Stimulate sending KAS DIAL_REQ to AgentClient
-	dialPacket := &agent.Packet{
-		Type: agent.PacketType_DIAL_REQ,
-		Payload: &agent.Packet_DialRequest{
-			DialRequest: &agent.DialRequest{
-				Protocol: "tcp",
-				Address:  ts.URL[len("http://"):],
-				Random:   111,
-			},
-		},
-	}
-	client.stream.Send(dialPacket)
+	dialPacket := newDialPacket("tcp", ts.URL[len("http://"):], 111)
+	stream.Send(dialPacket)
 
 	// Expect receiving DIAL_RSP packet from AgentClient
-	pkg, _ := client.stream.Recv()
+	pkg, _ := stream.Recv()
 	if pkg == nil {
 		t.Error("unexpected nil packet")
 	}
@@ -55,24 +50,16 @@ func TestServeData_HTTP(t *testing.T) {
 	}
 
 	// Send Data (HTTP Request) via AgentClient to the test http server
-	dataPacket := &agent.Packet{
-		Type: agent.PacketType_DATA,
-		Payload: &agent.Packet_Data{
-			Data: &agent.Data{
-				ConnectID: connID,
-				Data:      []byte("GET / HTTP/1.1\r\nHost: localhost\r\n\r\n"), // HTTP request
-			},
-		},
-	}
-	client.stream.Send(dataPacket)
+	dataPacket := newDataPacket(connID, []byte("GET / HTTP/1.1\r\nHost: localhost\r\n\r\n"))
+	stream.Send(dataPacket)
 
 	// Expect receiving http response via AgentClient
-	pkg, _ = client.stream.Recv()
+	pkg, _ = stream.Recv()
 	if pkg == nil {
-		t.Error("unexpected nil packet")
+		t.Fatal("unexpected nil packet")
 	}
 	if pkg.Type != agent.PacketType_DATA {
-		t.Errorf("expect PacketType_DIAL_RSP; got %v", pkg.Type)
+		t.Errorf("expect PacketType_DATA; got %v", pkg.Type)
 	}
 	data := pkg.Payload.(*agent.Packet_Data).Data.Data
 
@@ -88,25 +75,172 @@ func TestServeData_HTTP(t *testing.T) {
 	if body := headAndBody[len(headAndBody)-1]; body != expectedBody {
 		t.Errorf("expect body %v; got %v", expectedBody, body)
 	}
+
+	// Force close the test server which will cause remote connection gets droped
+	ts.Close()
+
+	// Verify receiving CLOSE_RSP
+	pkg, _ = stream.Recv()
+	if pkg == nil {
+		t.Fatal("unexpected nil packet")
+	}
+	if pkg.Type != agent.PacketType_CLOSE_RSP {
+		t.Errorf("expect PacketType_CLOSE_RSP; got %v", pkg.Type)
+	}
+	closeErr := pkg.Payload.(*agent.Packet_CloseResponse).CloseResponse.Error
+	if closeErr != "" {
+		t.Errorf("expect nil closeErr; got %v", closeErr)
+	}
+
+	// Verify internal state is consistent
+	if _, ok := client.connContext[connID]; ok {
+		t.Error("client.connContext not released")
+	}
+}
+
+func TestClose_Client(t *testing.T) {
+	var stream agent.AgentService_ConnectClient
+	client := NewAgentClient("")
+	client.stream, stream = pipe()
+	stopCh := make(chan struct{})
+
+	// Start agent
+	go client.Serve(stopCh)
+	defer close(stopCh)
+
+	// Start test http server as remote service
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		fmt.Fprint(w, "hello, world")
+	}))
+	defer ts.Close()
+
+	// Stimulate sending KAS DIAL_REQ to AgentClient
+	dialPacket := newDialPacket("tcp", ts.URL[len("http://"):], 111)
+	err := stream.Send(dialPacket)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Expect receiving DIAL_RSP packet from AgentClient
+	pkg, _ := stream.Recv()
+	if pkg == nil {
+		t.Error("unexpected nil packet")
+	}
+	if pkg.Type != agent.PacketType_DIAL_RSP {
+		t.Errorf("expect PacketType_DIAL_RSP; got %v", pkg.Type)
+	}
+	dialRsp := pkg.Payload.(*agent.Packet_DialResponse)
+	connID := dialRsp.DialResponse.ConnectID
+	if dialRsp.DialResponse.Random != 111 {
+		t.Errorf("expect random=111; got %v", dialRsp.DialResponse.Random)
+	}
+
+	closePacket := newClosePacket(connID)
+	if err := stream.Send(closePacket); err != nil {
+		t.Fatal(err)
+	}
+
+	// Expect receiving close response via AgentClient
+	pkg, _ = stream.Recv()
+	if pkg == nil {
+		t.Error("unexpected nil packet")
+	}
+	if pkg.Type != agent.PacketType_CLOSE_RSP {
+		t.Errorf("expect PacketType_CLOSE_RSP; got %v", pkg.Type)
+	}
+	closeErr := pkg.Payload.(*agent.Packet_CloseResponse).CloseResponse.Error
+	if closeErr != "" {
+		t.Errorf("expect nil closeErr; got %v", closeErr)
+	}
+
+	// Verify internal state is consistent
+	if _, ok := client.connContext[connID]; ok {
+		t.Error("client.connContext not released")
+	}
+
+	// Verify remote conn is closed
+	if err := stream.Send(closePacket); err != nil {
+		t.Fatal(err)
+	}
+
+	// Expect receiving close response via AgentClient
+	pkg, _ = stream.Recv()
+	if pkg == nil {
+		t.Error("unexpected nil packet")
+	}
+	if pkg.Type != agent.PacketType_CLOSE_RSP {
+		t.Errorf("expect PacketType_CLOSE_RSP; got %+v", pkg)
+	}
+	closeErr = pkg.Payload.(*agent.Packet_CloseResponse).CloseResponse.Error
+	if closeErr != "Unknown connectID" {
+		t.Errorf("expect Unknown connectID; got %v", closeErr)
+	}
+
 }
 
 // fakeStream implements AgentService_ConnectClient
 type fakeStream struct {
 	grpc.ClientStream
-	ch chan *agent.Packet
+	r <-chan *agent.Packet
+	w chan<- *agent.Packet
 }
 
-func newStream() agent.AgentService_ConnectClient {
-	s := &fakeStream{}
-	s.ch = make(chan *agent.Packet)
-	return s
+func pipe() (agent.AgentService_ConnectClient, agent.AgentService_ConnectClient) {
+	r, w := make(chan *agent.Packet, 2), make(chan *agent.Packet, 2)
+	s1, s2 := &fakeStream{}, &fakeStream{}
+	s1.r, s1.w = r, w
+	s2.r, s2.w = w, r
+	return s1, s2
 }
 
 func (s *fakeStream) Send(packet *agent.Packet) error {
-	s.ch <- packet
+	klog.Infof("[DEBUG] send packet %+v", packet)
+	s.w <- packet
 	return nil
 }
 
 func (s *fakeStream) Recv() (*agent.Packet, error) {
-	return <-s.ch, nil
+	select {
+	case pkg := <-s.r:
+		klog.Infof("[DEBUG] recv packet %+v", pkg)
+		return pkg, nil
+	case <-time.After(5 * time.Second):
+		return nil, errors.New("timeout recv")
+	}
+}
+
+func newDialPacket(protocol, address string, random int64) *agent.Packet {
+	return &agent.Packet{
+		Type: agent.PacketType_DIAL_REQ,
+		Payload: &agent.Packet_DialRequest{
+			DialRequest: &agent.DialRequest{
+				Protocol: protocol,
+				Address:  address,
+				Random:   random,
+			},
+		},
+	}
+}
+
+func newDataPacket(connID int64, data []byte) *agent.Packet {
+	return &agent.Packet{
+		Type: agent.PacketType_DATA,
+		Payload: &agent.Packet_Data{
+			Data: &agent.Data{
+				ConnectID: connID,
+				Data:      data,
+			},
+		},
+	}
+}
+
+func newClosePacket(connID int64) *agent.Packet {
+	return &agent.Packet{
+		Type: agent.PacketType_CLOSE_REQ,
+		Payload: &agent.Packet_CloseRequest{
+			CloseRequest: &agent.CloseRequest{
+				ConnectID: connID,
+			},
+		},
+	}
 }

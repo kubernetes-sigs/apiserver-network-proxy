@@ -22,15 +22,18 @@ import (
 	"net"
 	"time"
 
-	"sigs.k8s.io/apiserver-network-proxy/proto/agent"
 	"k8s.io/klog"
+	"sigs.k8s.io/apiserver-network-proxy/proto/agent"
 )
 
+const CloseTimeout = 10 * time.Second
+
 type conn struct {
-	stream agent.ProxyService_ProxyClient
-	connID int64
-	readCh chan []byte
-	rdata  []byte
+	stream  agent.ProxyService_ProxyClient
+	connID  int64
+	readCh  chan []byte
+	closeCh chan string
+	rdata   []byte
 }
 
 var _ net.Conn = &conn{}
@@ -102,7 +105,31 @@ func (c *conn) SetWriteDeadline(t time.Time) error {
 
 func (c *conn) Close() error {
 	klog.Info("conn.Close()")
-	return nil
+	req := &agent.Packet{
+		Type: agent.PacketType_CLOSE_REQ,
+		Payload: &agent.Packet_CloseRequest{
+			CloseRequest: &agent.CloseRequest{
+				ConnectID: c.connID,
+			},
+		},
+	}
+
+	klog.Infof("[tracing] send req %+v", req)
+
+	if err := c.stream.Send(req); err != nil {
+		return err
+	}
+
+	select {
+	case errMsg := <-c.closeCh:
+		if errMsg != "" {
+			return errors.New(errMsg)
+		}
+		return nil
+	case <-time.After(CloseTimeout):
+	}
+
+	return errors.New("close timeout")
 }
 
 // WriteBuffer writes to read buffer for connection to read from

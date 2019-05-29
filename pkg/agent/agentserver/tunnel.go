@@ -25,6 +25,8 @@ import (
 	"sigs.k8s.io/apiserver-network-proxy/proto/agent"
 )
 
+// Tunnel implements Proxy based on HTTP Connect, which tunnels the traffic to
+// the agent registered in ProxyServer.
 type Tunnel struct {
 	Server *ProxyServer
 }
@@ -64,11 +66,10 @@ func (t *Tunnel) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			},
 		},
 	}
-	klog.Infof("Set pending[%d] to %v", random, w)
+	klog.Infof("Set pending(rand=%d) to %v", random, w)
 	connected := make(chan struct{})
 	connection := &ProxyClientConnection{
-		Mode: "http-connect",
-		// Http: w,
+		Mode:      "http-connect",
 		Http:      conn,
 		connected: connected,
 	}
@@ -78,18 +79,19 @@ func (t *Tunnel) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	if err := t.Server.Backend.Send(dialRequest); err != nil {
 		klog.Errorf("failed to tunnel dial request %v", err)
-		// http.Error(w, fmt.Sprintf("failed to tunnel dial request %v", err), http.StatusInternalServerError) // TODO REINSTATE
 		return
 	}
 	ctxt := t.Server.Backend.Context()
 	if ctxt.Err() != nil {
 		klog.Errorf("context reports error %v", err)
 	}
+
 	select {
 	case <-ctxt.Done():
 		klog.Errorf("context reports done!!!")
 	default:
 	}
+
 	select {
 	case <-connection.connected: // Waiting for response before we begin full communication.
 	}
@@ -101,6 +103,7 @@ func (t *Tunnel) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	for {
 		n, err := conn.Read(pkt[:])
 		if err == io.EOF {
+			// TODO: Close remote..
 			break
 		}
 		if err != nil {
@@ -119,6 +122,7 @@ func (t *Tunnel) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		t.Server.Backend.Send(packet)
 		klog.Infof("Forwarding on tunnel, packet %v", string(pkt[:n]))
 	}
+
 	klog.Infof("Stopping transfer to %q", r.Host)
 	delete(t.Server.Frontends, connection.connectID)
 }
