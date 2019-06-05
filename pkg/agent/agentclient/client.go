@@ -28,6 +28,8 @@ import (
 	"sigs.k8s.io/apiserver-network-proxy/proto/agent"
 )
 
+// AgentClient runs on the node network side. It connects to proxy server and establishes
+// a stream connection from which it sends and receives network traffic.
 type AgentClient struct {
 	nextConnID  int64
 	connContext map[int64]*connContext
@@ -36,6 +38,17 @@ type AgentClient struct {
 	stream agent.AgentService_ConnectClient
 }
 
+// NewAgentClient creates an AgentClient
+func NewAgentClient(address string) *AgentClient {
+	a := &AgentClient{
+		connContext: make(map[int64]*connContext),
+		address:     address,
+	}
+
+	return a
+}
+
+// connContext tracks a connection from agent to node network.
 type connContext struct {
 	conn      net.Conn
 	cleanFunc func()
@@ -47,15 +60,14 @@ func (c *connContext) cleanup() {
 	c.cleanOnce.Do(c.cleanFunc)
 }
 
-func NewAgentClient(address string) *AgentClient {
-	a := &AgentClient{
-		connContext: make(map[int64]*connContext),
-		address:     address,
-	}
-
-	return a
-}
-
+// Connect connnects to proxy server to establish a gRPC stream,
+// on which the proxied traffic is multiplexed through the stream
+// and piped to the local connection. It register itself as a
+// backend from proxy server, so proxy server will route traffic
+// to this agent.
+//
+// The caller needs to call Serve to start serving proxy requests
+// coming from proxy server.
 func (a *AgentClient) Connect(opts ...grpc.DialOption) error {
 	c, err := grpc.Dial(a.address, opts...)
 	if err != nil {
@@ -72,6 +84,10 @@ func (a *AgentClient) Connect(opts ...grpc.DialOption) error {
 	return nil
 }
 
+// Serve starts to serve proxied requests from proxy server over the
+// gRPC stream. Successful Connect is required before Serve. The
+// The requests include things like opening a connection to a server,
+// streaming data and close the connection.
 func (a *AgentClient) Serve(stopCh <-chan struct{}) {
 	for {
 		select {
@@ -80,8 +96,6 @@ func (a *AgentClient) Serve(stopCh <-chan struct{}) {
 			return
 		default:
 		}
-
-		klog.Info("waiting packets...")
 
 		pkt, err := a.stream.Recv()
 		if err == io.EOF {
@@ -121,6 +135,7 @@ func (a *AgentClient) Serve(stopCh <-chan struct{}) {
 				conn:   conn,
 				dataCh: dataCh,
 				cleanFunc: func() {
+					klog.Infof("close connection(id=%d)", connID)
 					resp := &agent.Packet{
 						Type:    agent.PacketType_CLOSE_RSP,
 						Payload: &agent.Packet_CloseResponse{CloseResponse: &agent.CloseResponse{}},
@@ -201,11 +216,13 @@ func (a *AgentClient) remoteToProxy(conn net.Conn, connID int64) {
 
 	for {
 		n, err := conn.Read(buf[:])
+		klog.Infof("received %d bytes from proxy server", n)
 
 		if err == io.EOF {
 			klog.Info("connection EOF")
 			return
 		} else if err != nil {
+			// Normal when receive a CLOSE_REQ
 			klog.Warningf("connection read error: %v", err)
 			return
 		} else {
