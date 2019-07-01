@@ -78,16 +78,16 @@ type ProxyRunOptions struct {
 
 func (o *ProxyRunOptions) Flags() *pflag.FlagSet {
 	flags := pflag.NewFlagSet("proxy-server", pflag.ContinueOnError)
-	flags.StringVar(&o.serverCert, "serverCert", o.serverCert, "If non-empty secure communication with this cert.")
-	flags.StringVar(&o.serverKey, "serverKey", o.serverKey, "If non-empty secure communication with this key.")
-	flags.StringVar(&o.serverCaCert, "serverCaCert", o.serverCaCert, "If non-empty the CA we use to validate KAS clients.")
-	flags.StringVar(&o.clusterCert, "clusterCert", o.clusterCert, "If non-empty secure communication with this cert.")
-	flags.StringVar(&o.clusterKey, "clusterKey", o.clusterKey, "If non-empty secure communication with this key.")
-	flags.StringVar(&o.clusterCaCert, "clusterCaCert", o.clusterCaCert, "If non-empty the CA we use to validate Agent clients.")
+	flags.StringVar(&o.serverCert, "server-cert", o.serverCert, "If non-empty secure communication with this cert.")
+	flags.StringVar(&o.serverKey, "server-key", o.serverKey, "If non-empty secure communication with this key.")
+	flags.StringVar(&o.serverCaCert, "server-ca-cert", o.serverCaCert, "If non-empty the CA we use to validate KAS clients.")
+	flags.StringVar(&o.clusterCert, "cluster-cert", o.clusterCert, "If non-empty secure communication with this cert.")
+	flags.StringVar(&o.clusterKey, "cluster-key", o.clusterKey, "If non-empty secure communication with this key.")
+	flags.StringVar(&o.clusterCaCert, "cluster-ca-cert", o.clusterCaCert, "If non-empty the CA we use to validate Agent clients.")
 	flags.StringVar(&o.mode, "mode", "grpc", "Mode can be either 'grpc' or 'http-connect'.")
-	flags.UintVar(&o.serverPort, "serverPort", 8090, "Port we listen for server connections on.")
-	flags.UintVar(&o.agentPort, "agentPort", 8091, "Port we listen for agent connections on.")
-	flags.UintVar(&o.adminPort, "adminPort", 8092, "Port we listen for admin connections on.")
+	flags.UintVar(&o.serverPort, "server-port", 8090, "Port we listen for server connections on.")
+	flags.UintVar(&o.agentPort, "agent-port", 8091, "Port we listen for agent connections on.")
+	flags.UintVar(&o.adminPort, "admin-port", 8092, "Port we listen for admin connections on.")
 	return flags
 }
 

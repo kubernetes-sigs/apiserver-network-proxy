@@ -73,15 +73,15 @@ type GrpcProxyClientOptions struct {
 
 func (o *GrpcProxyClientOptions) Flags() *pflag.FlagSet {
 	flags := pflag.NewFlagSet("proxy", pflag.ContinueOnError)
-	flags.StringVar(&o.clientCert, "clientCert", o.clientCert, "If non-empty secure communication with this cert.")
-	flags.StringVar(&o.clientKey, "clientKey", o.clientKey, "If non-empty secure communication with this key.")
-	flags.StringVar(&o.caCert, "caCert", o.caCert, "If non-empty the CAs we use to validate clients.")
-	flags.StringVar(&o.requestProto, "requestProto", o.requestProto, "The protocol for the request to send through the proxy.")
-	flags.StringVar(&o.requestPath, "requestPath", o.requestPath, "The url request to send through the proxy.")
-	flags.StringVar(&o.requestHost, "requestHost", o.requestHost, "The host of the request server.")
-	flags.IntVar(&o.requestPort, "requestPort", o.requestPort, "The port the request server is listening on.")
-	flags.StringVar(&o.proxyHost, "proxyHost", o.proxyHost, "The host of the proxy server.")
-	flags.IntVar(&o.proxyPort, "proxyPort", o.proxyPort, "The port the proxy server is listening on.")
+	flags.StringVar(&o.clientCert, "client-cert", o.clientCert, "If non-empty secure communication with this cert.")
+	flags.StringVar(&o.clientKey, "client-key", o.clientKey, "If non-empty secure communication with this key.")
+	flags.StringVar(&o.caCert, "ca-cert", o.caCert, "If non-empty the CAs we use to validate clients.")
+	flags.StringVar(&o.requestProto, "request-proto", o.requestProto, "The protocol for the request to send through the proxy.")
+	flags.StringVar(&o.requestPath, "request-path", o.requestPath, "The url request to send through the proxy.")
+	flags.StringVar(&o.requestHost, "request-host", o.requestHost, "The host of the request server.")
+	flags.IntVar(&o.requestPort, "request-port", o.requestPort, "The port the request server is listening on.")
+	flags.StringVar(&o.proxyHost, "proxy-host", o.proxyHost, "The host of the proxy server.")
+	flags.IntVar(&o.proxyPort, "proxy-port", o.proxyPort, "The port the proxy server is listening on.")
 	flags.StringVar(&o.mode, "mode", o.mode, "Mode can be either 'grpc' or 'http-connect'.")
 
 	return flags
