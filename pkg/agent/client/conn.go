@@ -26,8 +26,12 @@ import (
 	"sigs.k8s.io/apiserver-network-proxy/proto/agent"
 )
 
+// CloseTimeout is the timeout to wait CLOSE_RSP packet after a
+// successful delivery of CLOSE_REQ.
 const CloseTimeout = 10 * time.Second
 
+// conn is an implementation of net.Conn, where the data is transported
+// over an established tunnel defined by a gRPC service ProxyService.
 type conn struct {
 	stream  agent.ProxyService_ProxyClient
 	connID  int64
@@ -38,6 +42,7 @@ type conn struct {
 
 var _ net.Conn = &conn{}
 
+// Write sends the data thru the connection over proxy service
 func (c *conn) Write(data []byte) (n int, err error) {
 	req := &agent.Packet{
 		Type: agent.PacketType_DATA,
@@ -58,6 +63,7 @@ func (c *conn) Write(data []byte) (n int, err error) {
 	return len(data), err
 }
 
+// Read receives data from the connection over proxy service
 func (c *conn) Read(b []byte) (n int, err error) {
 	var data []byte
 
@@ -103,6 +109,8 @@ func (c *conn) SetWriteDeadline(t time.Time) error {
 	return errors.New("not implemented")
 }
 
+// Close closes the connection. It also sends CLOSE_REQ packet over
+// proxy service to notify remote to drop the connection.
 func (c *conn) Close() error {
 	klog.Info("conn.Close()")
 	req := &agent.Packet{
@@ -130,10 +138,4 @@ func (c *conn) Close() error {
 	}
 
 	return errors.New("close timeout")
-}
-
-// WriteBuffer writes to read buffer for connection to read from
-func (c *conn) WriteBuffer(data []byte) (int, error) {
-	// c.bufch <- data
-	return len(data), nil
 }
