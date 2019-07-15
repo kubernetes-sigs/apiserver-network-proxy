@@ -34,16 +34,18 @@ bin/proxy-agent: bin cmd/agent/main.go proto/agent/agent.pb.go
 
 docker/proxy-agent: cmd/agent/main.go proto/agent/agent.pb.go
 	@[ "${REGISTRY}" ] || ( echo "REGISTRY is not set"; exit 1 )
+	@[ "${VERSION}" ] || ( echo "VERSION is not set"; exit 1 )
 	@[ "${PROJECT_ID}" ] || ( echo "PROJECT_ID is not set"; exit 1 )
-	docker build . -f artifacts/images/agent-build.Dockerfile -t ${REGISTRY}/${PROJECT_ID}/proxy-agent:latest
+	docker build . -f artifacts/images/agent-build.Dockerfile -t ${REGISTRY}/${PROJECT_ID}/proxy-agent:${VERSION}
 
 bin/proxy-server: bin cmd/proxy/main.go proto/agent/agent.pb.go proto/proxy.pb.go
 	go build -o bin/proxy-server cmd/proxy/main.go
 
 docker/proxy-server: cmd/proxy/main.go proto/agent/agent.pb.go proto/proxy.pb.go
 	@[ "${REGISTRY}" ] || ( echo "REGISTRY is not set"; exit 1 )
+	@[ "${VERSION}" ] || ( echo "VERSION is not set"; exit 1 )
 	@[ "${PROJECT_ID}" ] || ( echo "PROJECT_ID is not set"; exit 1 )
-	docker build . -f artifacts/images/server-build.Dockerfile -t ${REGISTRY}/${PROJECT_ID}/proxy-server:latest
+	docker build . -f artifacts/images/server-build.Dockerfile -t ${REGISTRY}/${PROJECT_ID}/proxy-server:${VERSION}
 
 bin/proxy-test-client: bin cmd/client/main.go proto/proxy.pb.go
 	go build -o bin/proxy-test-client cmd/client/main.go
@@ -97,8 +99,8 @@ build: bin/proxy-agent bin/proxy-server bin/proxy-test-client
 
 push-images: docker/proxy-agent docker/proxy-server
 	@[ "${DOCKER_CMD}" ] || ( echo "DOCKER_CMD is not set"; exit 1 )
-	${DOCKER_CMD} push ${REGISTRY}/${PROJECT_ID}/proxy-agent:latest
-	${DOCKER_CMD} push ${REGISTRY}/${PROJECT_ID}/proxy-server:latest
+	${DOCKER_CMD} push ${REGISTRY}/${PROJECT_ID}/proxy-agent:${VERSION}
+	${DOCKER_CMD} push ${REGISTRY}/${PROJECT_ID}/proxy-server:${VERSION}
 
 clean:
 	rm -rf proto/agent/agent.pb.go proto/proxy.pb.go easy-rsa.tar.gz easy-rsa-master cfssl cfssljson certs bin

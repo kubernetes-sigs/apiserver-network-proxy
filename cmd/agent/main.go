@@ -67,11 +67,11 @@ type GrpcProxyAgentOptions struct {
 
 func (o *GrpcProxyAgentOptions) Flags() *pflag.FlagSet {
 	flags := pflag.NewFlagSet("proxy-agent", pflag.ContinueOnError)
-	flags.StringVar(&o.agentCert, "agentCert", o.agentCert, "If non-empty secure communication with this cert.")
-	flags.StringVar(&o.agentKey, "agentKey", o.agentKey, "If non-empty secure communication with this key.")
-	flags.StringVar(&o.caCert, "caCert", o.caCert, "If non-empty the CAs we use to validate clients.")
-	flags.StringVar(&o.proxyServerHost, "proxyServerHost", o.proxyServerHost, "The hostname to use to connect to the proxy-server.")
-	flags.IntVar(&o.proxyServerPort, "proxyServerPort", o.proxyServerPort, "The port the proxy server is listening on.")
+	flags.StringVar(&o.agentCert, "agent-cert", o.agentCert, "If non-empty secure communication with this cert.")
+	flags.StringVar(&o.agentKey, "agent-key", o.agentKey, "If non-empty secure communication with this key.")
+	flags.StringVar(&o.caCert, "ca-cert", o.caCert, "If non-empty the CAs we use to validate clients.")
+	flags.StringVar(&o.proxyServerHost, "proxy-server-host", o.proxyServerHost, "The hostname to use to connect to the proxy-server.")
+	flags.IntVar(&o.proxyServerPort, "proxy-server-port", o.proxyServerPort, "The port the proxy server is listening on.")
 	return flags
 }
 
