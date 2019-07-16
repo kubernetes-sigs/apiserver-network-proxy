@@ -44,6 +44,8 @@ func (c *ProxyClientConnection) send(pkt *agent.Packet) error {
 		} else if pkt.Type == agent.PacketType_DATA {
 			_, err := c.Http.Write(pkt.GetData().Data)
 			return err
+		} else if pkt.Type == agent.PacketType_DIAL_RSP {
+			return nil
 		} else {
 			return fmt.Errorf("attempt to send via unrecognized connection type %v", pkt.Type)
 		}
