@@ -75,6 +75,7 @@ func (t *Tunnel) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	t.Server.PendingDial[random] = connection
 	if t.Server.Backend == nil {
 		http.Error(w, "currently no tunnels available", http.StatusInternalServerError)
+		return
 	}
 	if err := t.Server.Backend.Send(dialRequest); err != nil {
 		klog.Errorf("failed to tunnel dial request %v", err)
