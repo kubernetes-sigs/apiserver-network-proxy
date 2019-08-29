@@ -30,9 +30,9 @@ import (
 	"github.com/spf13/pflag"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials"
+	"k8s.io/klog"
 	"sigs.k8s.io/apiserver-network-proxy/pkg/agent/agentclient"
 	"sigs.k8s.io/apiserver-network-proxy/pkg/util"
-	"k8s.io/klog"
 )
 
 func main() {
@@ -113,9 +113,9 @@ func (o *GrpcProxyAgentOptions) Validate() error {
 
 func newGrpcProxyAgentOptions() *GrpcProxyAgentOptions {
 	o := GrpcProxyAgentOptions{
-		agentCert: "",
-		agentKey:  "",
-		caCert:    "",
+		agentCert:       "",
+		agentKey:        "",
+		caCert:          "",
 		proxyServerHost: "127.0.0.1",
 		proxyServerPort: 8091,
 	}
@@ -178,11 +178,7 @@ func (p *Agent) runProxyConnection(o *GrpcProxyAgentOptions) error {
 		RootCAs:      certPool,
 	})
 	dialOption := grpc.WithTransportCredentials(transportCreds)
-	client := agentclient.NewAgentClient(fmt.Sprintf("%s:%d", o.proxyServerHost, o.proxyServerPort))
-
-	if err := client.Connect(dialOption); err != nil {
-		return fmt.Errorf("failed to connect to proxy-server: %v", err)
-	}
+	client := agentclient.NewAgentClient(fmt.Sprintf("%s:%d", o.proxyServerHost, o.proxyServerPort), dialOption)
 
 	stopCh := make(chan struct{})
 

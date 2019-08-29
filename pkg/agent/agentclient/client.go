@@ -17,7 +17,6 @@ limitations under the License.
 package agentclient
 
 import (
-	"context"
 	"io"
 	"net"
 	"sync"
@@ -33,16 +32,15 @@ import (
 type AgentClient struct {
 	nextConnID  int64
 	connContext map[int64]*connContext
-	address     string
 
-	stream agent.AgentService_ConnectClient
+	stream *RedialableAgentClient
 }
 
 // NewAgentClient creates an AgentClient
-func NewAgentClient(address string) *AgentClient {
+func NewAgentClient(address string, opts ...grpc.DialOption) *AgentClient {
 	a := &AgentClient{
 		connContext: make(map[int64]*connContext),
-		address:     address,
+		stream:      NewRedialableAgentClient(address, opts...),
 	}
 
 	return a
@@ -68,21 +66,6 @@ func (c *connContext) cleanup() {
 //
 // The caller needs to call Serve to start serving proxy requests
 // coming from proxy server.
-func (a *AgentClient) Connect(opts ...grpc.DialOption) error {
-	c, err := grpc.Dial(a.address, opts...)
-	if err != nil {
-		return err
-	}
-
-	client := agent.NewAgentServiceClient(c)
-
-	a.stream, err = client.Connect(context.Background())
-	if err != nil {
-		return err
-	}
-
-	return nil
-}
 
 // Serve starts to serve proxied requests from proxy server over the
 // gRPC stream. Successful Connect is required before Serve. The
