@@ -32,10 +32,10 @@ type Tunnel struct {
 }
 
 func (t *Tunnel) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	klog.Infof("Received %s request to %q from %v",
-		r.Method,
-		r.Host,
-		r.TLS.PeerCertificates[0].Subject.CommonName) // can do authz with certs
+	klog.Infof("Received %s request to %q", r.Method, r.Host)
+	if r.TLS != nil {
+		klog.Infof("TLS CommonName: %v", r.TLS.PeerCertificates[0].Subject.CommonName)
+	}
 	if r.Method != http.MethodConnect {
 		http.Error(w, "this proxy only supports CONNECT passthrough", http.StatusMethodNotAllowed)
 		return

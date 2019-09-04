@@ -3,6 +3,7 @@ package agentclient
 import (
 	"context"
 	"fmt"
+	"io"
 	"sync"
 	"time"
 
@@ -10,12 +11,26 @@ import (
 	"google.golang.org/grpc/connectivity"
 	"k8s.io/klog"
 	"sigs.k8s.io/apiserver-network-proxy/proto/agent"
+	// "k8s.io/client-go/util/retry"
 )
 
 const (
 	defaultRetry    = 20
 	defaultInterval = 5 * time.Second
 )
+
+type ReconnectError struct {
+	internalErr error
+	errChan     <-chan error
+}
+
+func (e *ReconnectError) Error() string {
+	return "transient error: " + e.internalErr.Error()
+}
+
+func (e *ReconnectError) Wait() error {
+	return <-e.errChan
+}
 
 type RedialableAgentClient struct {
 	stream agent.AgentService_ConnectClient
@@ -25,7 +40,7 @@ type RedialableAgentClient struct {
 	opts          []grpc.DialOption
 	conn          *grpc.ClientConn
 	stopCh        chan struct{}
-	reconnTrigger chan struct{}
+	reconnTrigger chan error
 
 	// locks
 	sendLock   sync.Mutex
@@ -48,7 +63,7 @@ func NewRedialableAgentClient(address string, opts ...grpc.DialOption) *Redialab
 		stopCh:   make(chan struct{}),
 	}
 
-	c.reconnect()
+	_ = <-c.triggerReconnect()
 
 	go c.probe()
 
@@ -69,7 +84,10 @@ func (c *RedialableAgentClient) probe() {
 			}
 		}
 
-		c.reconnect()
+		klog.Info("probe failure: reconnect")
+		if err := <-c.triggerReconnect(); err != nil {
+			klog.Infof("probe reconnect failed: %v", err)
+		}
 	}
 }
 
@@ -78,46 +96,75 @@ func (c *RedialableAgentClient) Send(pkt *agent.Packet) error {
 	defer c.sendLock.Unlock()
 
 	if err := c.stream.Send(pkt); err != nil {
-		if c.conn.GetState() == connectivity.Ready {
+		if err == io.EOF {
 			return err
 		}
-
-		if err2 := c.reconnect(); err2 != nil {
-			return err2
+		return &ReconnectError{
+			internalErr: err,
+			errChan:     c.triggerReconnect(),
 		}
 	}
 
-	return c.stream.Send(pkt)
+	return nil
+}
+
+func (c *RedialableAgentClient) RetrySend(pkt *agent.Packet) error {
+	err := c.Send(pkt)
+	if err == nil {
+		return nil
+	} else if err == io.EOF {
+		return err
+	}
+
+	if err2, ok := err.(*ReconnectError); ok {
+		err = err2.Wait()
+	}
+	if err != nil {
+		return err
+	}
+	return c.RetrySend(pkt)
+}
+
+func (c *RedialableAgentClient) triggerReconnect() <-chan error {
+	c.reconnLock.Lock()
+	defer c.reconnLock.Unlock()
+
+	if c.reconnTrigger != nil {
+		return c.reconnTrigger
+	}
+
+	c.reconnTrigger = make(chan error)
+	go c.reconnect()
+
+	return c.reconnTrigger
+}
+
+func (c *RedialableAgentClient) doneReconnect(err error) {
+	c.reconnLock.Lock()
+	defer c.reconnLock.Unlock()
+
+	c.reconnTrigger <- err
+	c.reconnTrigger = nil
 }
 
 func (c *RedialableAgentClient) Recv() (*agent.Packet, error) {
 	c.recvLock.Lock()
 	defer c.recvLock.Unlock()
 
-	// this just get block..
 	if pkt, err := c.stream.Recv(); err != nil {
-		klog.Infof("error recving: %v", err)
-		klog.Info("start reconnecting")
-
-		if err2 := c.reconnect(); err2 != nil {
-			klog.Infof("reconnect failed: %v", err2)
-			return pkt, err2
+		if err == io.EOF {
+			return pkt, err
 		}
-
-		return c.stream.Recv()
+		return pkt, &ReconnectError{
+			internalErr: err,
+			errChan:     c.triggerReconnect(),
+		}
 	} else {
-		return pkt, err
+		return pkt, nil
 	}
 }
 
-func (c *RedialableAgentClient) reconnect() error {
-	c.reconnLock.Lock()
-	defer c.reconnLock.Unlock()
-
-	if c.conn != nil && c.conn.GetState() == connectivity.Ready {
-		return nil
-	}
-
+func (c *RedialableAgentClient) reconnect() {
 	klog.Info("start to connect...")
 
 	var err error
@@ -126,14 +173,16 @@ func (c *RedialableAgentClient) reconnect() error {
 	for retry < c.Retry {
 		if err = c.tryConnect(); err == nil {
 			klog.Info("connected")
-			return nil
+			c.doneReconnect(nil)
+			return
 		}
 		retry++
 		klog.V(5).Infof("Failed to connect to proxy server, retry %d in %v: %v", retry, c.Interval, err)
+		klog.Infof("Failed to connect to proxy server, retry %d in %v: %v", retry, c.Interval, err)
 		time.Sleep(c.Interval)
 	}
 
-	return fmt.Errorf("Failed to connect to proxy server: %v", err)
+	c.doneReconnect(fmt.Errorf("Failed to connect to proxy server: %v", err))
 }
 
 func (c *RedialableAgentClient) tryConnect() error {

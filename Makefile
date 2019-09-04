@@ -12,7 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-.PHONY: gen clean certs build docker/proxy-server docker/proxy-agent push-images
+.PHONY: gen clean certs build docker/proxy-server docker/proxy-agent push-images test
 proto/agent/agent.pb.go: proto/agent/agent.proto
 	protoc -I proto proto/agent/agent.proto --go_out=plugins=grpc:proto
 
@@ -104,3 +104,6 @@ push-images: docker/proxy-agent docker/proxy-server
 
 clean:
 	rm -rf proto/agent/agent.pb.go proto/proxy.pb.go easy-rsa.tar.gz easy-rsa-master cfssl cfssljson certs bin
+
+test:
+	go test ./...

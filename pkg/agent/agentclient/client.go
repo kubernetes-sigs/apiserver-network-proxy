@@ -81,10 +81,16 @@ func (a *AgentClient) Serve(stopCh <-chan struct{}) {
 		}
 
 		pkt, err := a.stream.Recv()
-		if err == io.EOF {
-			klog.Info("received EOF, exit")
-			return
+		if err != nil {
+			if err2, ok := err.(*ReconnectError); ok {
+				err = err2.Wait()
+				continue
+			} else if err == io.EOF {
+				klog.Info("received EOF, exit")
+				return
+			}
 		}
+
 		if err != nil {
 			klog.Warningf("stream read error: %v", err)
 			return
@@ -106,7 +112,7 @@ func (a *AgentClient) Serve(stopCh <-chan struct{}) {
 			conn, err := net.Dial(dialReq.Protocol, dialReq.Address)
 			if err != nil {
 				resp.GetDialResponse().Error = err.Error()
-				if err := a.stream.Send(resp); err != nil {
+				if err := a.stream.RetrySend(resp); err != nil {
 					klog.Warningf("stream send error: %v", err)
 				}
 				continue
@@ -130,7 +136,7 @@ func (a *AgentClient) Serve(stopCh <-chan struct{}) {
 						resp.GetCloseResponse().Error = err.Error()
 					}
 
-					if err := a.stream.Send(resp); err != nil {
+					if err := a.stream.RetrySend(resp); err != nil {
 						klog.Warningf("close response send error: %v", err)
 					}
 
@@ -140,7 +146,7 @@ func (a *AgentClient) Serve(stopCh <-chan struct{}) {
 			}
 
 			resp.GetDialResponse().ConnectID = connID
-			if err := a.stream.Send(resp); err != nil {
+			if err := a.stream.RetrySend(resp); err != nil {
 				klog.Warningf("stream send error: %v", err)
 				continue
 			}
@@ -213,7 +219,7 @@ func (a *AgentClient) remoteToProxy(conn net.Conn, connID int64) {
 				Data:      buf[:n],
 				ConnectID: connID,
 			}}
-			if err := a.stream.Send(resp); err != nil {
+			if err := a.stream.RetrySend(resp); err != nil {
 				klog.Warningf("stream send error: %v", err)
 			}
 		}
