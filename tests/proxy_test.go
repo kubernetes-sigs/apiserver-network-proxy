@@ -37,7 +37,9 @@ func TestBasicProxy_GRPC(t *testing.T) {
 	proxy, cleanup, err := runGRPCProxyServer()
 	defer cleanup()
 
-	runAgent(proxy.agent, stopCh)
+	if err := runAgent(proxy.agent, stopCh); err != nil {
+		t.Fatal(err)
+	}
 
 	// Wait for agent to register on proxy server
 	time.Sleep(time.Second)
@@ -79,7 +81,9 @@ func TestBasicProxy_HTTPCONN(t *testing.T) {
 	proxy, cleanup, err := runHTTPConnProxyServer()
 	defer cleanup()
 
-	runAgent(proxy.agent, stopCh)
+	if err := runAgent(proxy.agent, stopCh); err != nil {
+		t.Fatal(err)
+	}
 
 	// Wait for agent to register on proxy server
 	time.Sleep(time.Second)
@@ -226,8 +230,13 @@ func runHTTPConnProxyServer() (proxy, func(), error) {
 	return proxy, cleanup, nil
 }
 
-func runAgent(addr string, stopCh <-chan struct{}) {
-	client := agentclient.NewAgentClient(addr, grpc.WithInsecure())
+func runAgent(addr string, stopCh <-chan struct{}) error {
+	client, err := agentclient.NewAgentClient(addr, grpc.WithInsecure())
+	if err != nil {
+		return err
+	}
 
 	go client.Serve(stopCh)
+
+	return nil
 }

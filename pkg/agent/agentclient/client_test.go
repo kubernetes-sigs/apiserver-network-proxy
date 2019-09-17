@@ -16,8 +16,10 @@ import (
 
 func TestServeData_HTTP(t *testing.T) {
 	var stream agent.AgentService_ConnectClient
-	client := NewAgentClient("")
-	client.stream, stream = pipe()
+	client := &AgentClient{
+		connContext: make(map[int64]*connContext),
+	}
+	client.stream, stream = pipe2()
 	stopCh := make(chan struct{})
 
 	// Start agent
@@ -100,8 +102,10 @@ func TestServeData_HTTP(t *testing.T) {
 
 func TestClose_Client(t *testing.T) {
 	var stream agent.AgentService_ConnectClient
-	client := NewAgentClient("")
-	client.stream, stream = pipe()
+	client := &AgentClient{
+		connContext: make(map[int64]*connContext),
+	}
+	client.stream, stream = pipe2()
 	stopCh := make(chan struct{})
 
 	// Start agent
@@ -191,6 +195,11 @@ func pipe() (agent.AgentService_ConnectClient, agent.AgentService_ConnectClient)
 	s1.r, s1.w = r, w
 	s2.r, s2.w = w, r
 	return s1, s2
+}
+
+func pipe2() (*RedialableAgentClient, agent.AgentService_ConnectClient) {
+	s1, s2 := pipe()
+	return &RedialableAgentClient{stream: s1}, s2
 }
 
 func (s *fakeStream) Send(packet *agent.Packet) error {

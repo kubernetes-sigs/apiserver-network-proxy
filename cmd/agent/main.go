@@ -178,7 +178,10 @@ func (p *Agent) runProxyConnection(o *GrpcProxyAgentOptions) error {
 		RootCAs:      certPool,
 	})
 	dialOption := grpc.WithTransportCredentials(transportCreds)
-	client := agentclient.NewAgentClient(fmt.Sprintf("%s:%d", o.proxyServerHost, o.proxyServerPort), dialOption)
+	client, err := agentclient.NewAgentClient(fmt.Sprintf("%s:%d", o.proxyServerHost, o.proxyServerPort), dialOption)
+	if err != nil {
+		return err
+	}
 
 	stopCh := make(chan struct{})
 

@@ -40,7 +40,8 @@ type RedialableAgentClient struct {
 	opts          []grpc.DialOption
 	conn          *grpc.ClientConn
 	stopCh        chan struct{}
-	reconnTrigger chan error
+	reconnOngoing bool
+	reconnWaiters []chan error
 
 	// locks
 	sendLock   sync.Mutex
@@ -54,7 +55,7 @@ type RedialableAgentClient struct {
 	Interval time.Duration
 }
 
-func NewRedialableAgentClient(address string, opts ...grpc.DialOption) *RedialableAgentClient {
+func NewRedialableAgentClient(address string, opts ...grpc.DialOption) (*RedialableAgentClient, error) {
 	c := &RedialableAgentClient{
 		address:  address,
 		opts:     opts,
@@ -63,11 +64,7 @@ func NewRedialableAgentClient(address string, opts ...grpc.DialOption) *Redialab
 		stopCh:   make(chan struct{}),
 	}
 
-	_ = <-c.triggerReconnect()
-
-	go c.probe()
-
-	return c
+	return c, c.Connect()
 }
 
 func (c *RedialableAgentClient) probe() {
@@ -129,22 +126,26 @@ func (c *RedialableAgentClient) triggerReconnect() <-chan error {
 	c.reconnLock.Lock()
 	defer c.reconnLock.Unlock()
 
-	if c.reconnTrigger != nil {
-		return c.reconnTrigger
+	errch := make(chan error)
+	c.reconnWaiters = append(c.reconnWaiters, errch)
+
+	if !c.reconnOngoing {
+		go c.reconnect()
+		c.reconnOngoing = true
 	}
 
-	c.reconnTrigger = make(chan error)
-	go c.reconnect()
-
-	return c.reconnTrigger
+	return errch
 }
 
 func (c *RedialableAgentClient) doneReconnect(err error) {
 	c.reconnLock.Lock()
 	defer c.reconnLock.Unlock()
 
-	c.reconnTrigger <- err
-	c.reconnTrigger = nil
+	for _, ch := range c.reconnWaiters {
+		ch <- err
+	}
+	c.reconnOngoing = false
+	c.reconnWaiters = nil
 }
 
 func (c *RedialableAgentClient) Recv() (*agent.Packet, error) {
@@ -162,6 +163,15 @@ func (c *RedialableAgentClient) Recv() (*agent.Packet, error) {
 	} else {
 		return pkt, nil
 	}
+}
+
+func (c *RedialableAgentClient) Connect() error {
+	if err := c.tryConnect(); err != nil {
+		return err
+	}
+
+	go c.probe()
+	return nil
 }
 
 func (c *RedialableAgentClient) reconnect() {

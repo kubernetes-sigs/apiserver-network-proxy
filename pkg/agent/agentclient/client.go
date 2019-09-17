@@ -37,13 +37,17 @@ type AgentClient struct {
 }
 
 // NewAgentClient creates an AgentClient
-func NewAgentClient(address string, opts ...grpc.DialOption) *AgentClient {
-	a := &AgentClient{
-		connContext: make(map[int64]*connContext),
-		stream:      NewRedialableAgentClient(address, opts...),
+func NewAgentClient(address string, opts ...grpc.DialOption) (*AgentClient, error) {
+	stream, err := NewRedialableAgentClient(address, opts...)
+	if err != nil {
+		return nil, err
 	}
 
-	return a
+	a := &AgentClient{
+		connContext: make(map[int64]*connContext),
+		stream:      stream,
+	}
+	return a, nil
 }
 
 // connContext tracks a connection from agent to node network.
