@@ -38,13 +38,16 @@ func TestServeData_HTTP(t *testing.T) {
 	dialPacket := newDialPacket("tcp", ts.URL[len("http://"):], 111)
 	err = stream.Send(dialPacket)
 	if err != nil {
-		t.Error(err.Error())
+		t.Fatal(err.Error())
 	}
 
 	// Expect receiving DIAL_RSP packet from AgentClient
-	pkg, _ := stream.Recv()
+	pkg, err := stream.Recv()
+	if err != nil {
+		t.Fatal(err.Error())
+	}
 	if pkg == nil {
-		t.Error("unexpected nil packet")
+		t.Fatal("unexpected nil packet")
 	}
 	if pkg.Type != agent.PacketType_DIAL_RSP {
 		t.Errorf("expect PacketType_DIAL_RSP; got %v", pkg.Type)
@@ -135,7 +138,7 @@ func TestClose_Client(t *testing.T) {
 	// Expect receiving DIAL_RSP packet from AgentClient
 	pkg, _ := stream.Recv()
 	if pkg == nil {
-		t.Error("unexpected nil packet")
+		t.Fatal("unexpected nil packet")
 	}
 	if pkg.Type != agent.PacketType_DIAL_RSP {
 		t.Errorf("expect PacketType_DIAL_RSP; got %v", pkg.Type)

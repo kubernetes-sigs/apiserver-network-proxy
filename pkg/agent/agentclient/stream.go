@@ -152,7 +152,10 @@ func (c *RedialableAgentClient) Recv() (*agent.Packet, error) {
 	c.recvLock.Lock()
 	defer c.recvLock.Unlock()
 
-	if pkt, err := c.stream.Recv(); err != nil {
+	var pkt *agent.Packet
+	var err error
+
+	if pkt, err = c.stream.Recv(); err != nil {
 		if err == io.EOF {
 			return pkt, err
 		}
@@ -160,9 +163,9 @@ func (c *RedialableAgentClient) Recv() (*agent.Packet, error) {
 			internalErr: err,
 			errChan:     c.triggerReconnect(),
 		}
-	} else {
-		return pkt, nil
 	}
+
+	return pkt, nil
 }
 
 func (c *RedialableAgentClient) Connect() error {

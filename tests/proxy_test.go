@@ -35,6 +35,9 @@ func TestBasicProxy_GRPC(t *testing.T) {
 	defer close(stopCh)
 
 	proxy, cleanup, err := runGRPCProxyServer()
+	if err != nil {
+		t.Fatal(err)
+	}
 	defer cleanup()
 
 	if err := runAgent(proxy.agent, stopCh); err != nil {
@@ -79,6 +82,9 @@ func TestBasicProxy_HTTPCONN(t *testing.T) {
 	defer close(stopCh)
 
 	proxy, cleanup, err := runHTTPConnProxyServer()
+	if err != nil {
+		t.Fatal(err)
+	}
 	defer cleanup()
 
 	if err := runAgent(proxy.agent, stopCh); err != nil {

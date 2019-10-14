@@ -54,7 +54,7 @@ func (c *ProxyClientConnection) send(pkt *agent.Packet) error {
 	}
 }
 
-// ProxyServer 
+// ProxyServer
 type ProxyServer struct {
 	Backend agent.AgentService_ConnectServer
 
