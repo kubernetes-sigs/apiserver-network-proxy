@@ -17,7 +17,6 @@ limitations under the License.
 package agentclient
 
 import (
-	"context"
 	"io"
 	"net"
 	"sync"
@@ -33,19 +32,22 @@ import (
 type AgentClient struct {
 	nextConnID  int64
 	connContext map[int64]*connContext
-	address     string
 
-	stream agent.AgentService_ConnectClient
+	stream *RedialableAgentClient
 }
 
 // NewAgentClient creates an AgentClient
-func NewAgentClient(address string) *AgentClient {
-	a := &AgentClient{
-		connContext: make(map[int64]*connContext),
-		address:     address,
+func NewAgentClient(address string, opts ...grpc.DialOption) (*AgentClient, error) {
+	stream, err := NewRedialableAgentClient(address, opts...)
+	if err != nil {
+		return nil, err
 	}
 
-	return a
+	a := &AgentClient{
+		connContext: make(map[int64]*connContext),
+		stream:      stream,
+	}
+	return a, nil
 }
 
 // connContext tracks a connection from agent to node network.
@@ -68,21 +70,6 @@ func (c *connContext) cleanup() {
 //
 // The caller needs to call Serve to start serving proxy requests
 // coming from proxy server.
-func (a *AgentClient) Connect(opts ...grpc.DialOption) error {
-	c, err := grpc.Dial(a.address, opts...)
-	if err != nil {
-		return err
-	}
-
-	client := agent.NewAgentServiceClient(c)
-
-	a.stream, err = client.Connect(context.Background())
-	if err != nil {
-		return err
-	}
-
-	return nil
-}
 
 // Serve starts to serve proxied requests from proxy server over the
 // gRPC stream. Successful Connect is required before Serve. The
@@ -98,10 +85,16 @@ func (a *AgentClient) Serve(stopCh <-chan struct{}) {
 		}
 
 		pkt, err := a.stream.Recv()
-		if err == io.EOF {
-			klog.Info("received EOF, exit")
-			return
+		if err != nil {
+			if err2, ok := err.(*ReconnectError); ok {
+				err = err2.Wait()
+				continue
+			} else if err == io.EOF {
+				klog.Info("received EOF, exit")
+				return
+			}
 		}
+
 		if err != nil {
 			klog.Warningf("stream read error: %v", err)
 			return
@@ -123,7 +116,7 @@ func (a *AgentClient) Serve(stopCh <-chan struct{}) {
 			conn, err := net.Dial(dialReq.Protocol, dialReq.Address)
 			if err != nil {
 				resp.GetDialResponse().Error = err.Error()
-				if err := a.stream.Send(resp); err != nil {
+				if err := a.stream.RetrySend(resp); err != nil {
 					klog.Warningf("stream send error: %v", err)
 				}
 				continue
@@ -147,7 +140,7 @@ func (a *AgentClient) Serve(stopCh <-chan struct{}) {
 						resp.GetCloseResponse().Error = err.Error()
 					}
 
-					if err := a.stream.Send(resp); err != nil {
+					if err := a.stream.RetrySend(resp); err != nil {
 						klog.Warningf("close response send error: %v", err)
 					}
 
@@ -157,7 +150,7 @@ func (a *AgentClient) Serve(stopCh <-chan struct{}) {
 			}
 
 			resp.GetDialResponse().ConnectID = connID
-			if err := a.stream.Send(resp); err != nil {
+			if err := a.stream.RetrySend(resp); err != nil {
 				klog.Warningf("stream send error: %v", err)
 				continue
 			}
@@ -230,7 +223,7 @@ func (a *AgentClient) remoteToProxy(conn net.Conn, connID int64) {
 				Data:      buf[:n],
 				ConnectID: connID,
 			}}
-			if err := a.stream.Send(resp); err != nil {
+			if err := a.stream.RetrySend(resp); err != nil {
 				klog.Warningf("stream send error: %v", err)
 			}
 		}

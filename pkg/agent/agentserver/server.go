@@ -54,7 +54,7 @@ func (c *ProxyClientConnection) send(pkt *agent.Packet) error {
 	}
 }
 
-// ProxyServer ...
+// ProxyServer 
 type ProxyServer struct {
 	Backend agent.AgentService_ConnectServer
 
@@ -67,7 +67,7 @@ var _ agent.AgentServiceServer = &ProxyServer{}
 
 var _ agent.ProxyServiceServer = &ProxyServer{}
 
-// NewProxyServer ...
+// NewProxyServer creates a new ProxyServer instance
 func NewProxyServer() *ProxyServer {
 	return &ProxyServer{
 		Frontends:   make(map[int64]*ProxyClientConnection),
