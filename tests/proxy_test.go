@@ -21,14 +21,32 @@ import (
 
 // test remote server
 type testServer struct {
+	echo   []byte
+	chunks int
+}
+
+func newEchoServer(echo string) *testServer {
+	return &testServer{
+		echo:   []byte(echo),
+		chunks: 1,
+	}
+}
+
+func newSizedServer(length, chunks int) *testServer {
+	return &testServer{
+		echo:   make([]byte, length),
+		chunks: chunks,
+	}
 }
 
 func (s *testServer) ServeHTTP(w http.ResponseWriter, req *http.Request) {
-	w.Write([]byte("hello"))
+	for i := 0; i < s.chunks; i++ {
+		w.Write(s.echo)
+	}
 }
 
 func TestBasicProxy_GRPC(t *testing.T) {
-	server := httptest.NewServer(&testServer{})
+	server := httptest.NewServer(newEchoServer("hello"))
 	defer server.Close()
 
 	stopCh := make(chan struct{})
@@ -74,8 +92,54 @@ func TestBasicProxy_GRPC(t *testing.T) {
 	}
 }
 
+func TestProxy_LargeResponse(t *testing.T) {
+	length := 1 << 20 // 1M
+	chunks := 10
+	server := httptest.NewServer(newSizedServer(length, chunks))
+	defer server.Close()
+
+	stopCh := make(chan struct{})
+	defer close(stopCh)
+
+	proxy, cleanup, err := runGRPCProxyServer()
+	defer cleanup()
+
+	if err := runAgent(proxy.agent, stopCh); err != nil {
+		t.Fatal(err)
+	}
+
+	// Wait for agent to register on proxy server
+	time.Sleep(time.Second)
+
+	// run test client
+	tunnel, err := client.CreateGrpcTunnel(proxy.front, grpc.WithInsecure())
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	c := &http.Client{
+		Transport: &http.Transport{
+			Dial: tunnel.Dial,
+		},
+	}
+
+	r, err := c.Get(server.URL)
+	if err != nil {
+		t.Error(err)
+	}
+
+	data, err := ioutil.ReadAll(r.Body)
+	if err != nil {
+		t.Error(err)
+	}
+
+	if len(data) != length*chunks {
+		t.Errorf("expect data length %d; got %d", length*chunks, len(data))
+	}
+}
+
 func TestBasicProxy_HTTPCONN(t *testing.T) {
-	server := httptest.NewServer(&testServer{})
+	server := httptest.NewServer(newEchoServer("hello"))
 	defer server.Close()
 
 	stopCh := make(chan struct{})
