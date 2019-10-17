@@ -25,7 +25,7 @@ import (
 	"net"
 	"net/http"
 	"os"
-	
+
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/spf13/cobra"
 	"github.com/spf13/pflag"

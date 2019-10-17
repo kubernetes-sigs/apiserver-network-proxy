@@ -157,7 +157,7 @@ func (a *Agent) run(o *GrpcProxyAgentOptions) error {
 	return nil
 }
 
-func (p *Agent) runProxyConnection(o *GrpcProxyAgentOptions) error {
+func (a *Agent) runProxyConnection(o *GrpcProxyAgentOptions) error {
 	agentCert, err := tls.LoadX509KeyPair(o.agentCert, o.agentKey)
 	if err != nil {
 		return fmt.Errorf("failed to load X509 key pair %s and %s: %v", o.agentCert, o.agentKey, err)
@@ -190,7 +190,7 @@ func (p *Agent) runProxyConnection(o *GrpcProxyAgentOptions) error {
 	return nil
 }
 
-func (p *Agent) runAdminServer(o *GrpcProxyAgentOptions) error {
+func (a *Agent) runAdminServer(o *GrpcProxyAgentOptions) error {
 	livenessHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		fmt.Fprintf(w, "ok")
 	})

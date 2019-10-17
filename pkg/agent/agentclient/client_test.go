@@ -15,6 +15,7 @@ import (
 )
 
 func TestServeData_HTTP(t *testing.T) {
+	var err error
 	var stream agent.AgentService_ConnectClient
 	client := &AgentClient{
 		connContext: make(map[int64]*connContext),
@@ -35,12 +36,18 @@ func TestServeData_HTTP(t *testing.T) {
 
 	// Stimulate sending KAS DIAL_REQ to AgentClient
 	dialPacket := newDialPacket("tcp", ts.URL[len("http://"):], 111)
-	stream.Send(dialPacket)
+	err = stream.Send(dialPacket)
+	if err != nil {
+		t.Fatal(err.Error())
+	}
 
 	// Expect receiving DIAL_RSP packet from AgentClient
-	pkg, _ := stream.Recv()
+	pkg, err := stream.Recv()
+	if err != nil {
+		t.Fatal(err.Error())
+	}
 	if pkg == nil {
-		t.Error("unexpected nil packet")
+		t.Fatal("unexpected nil packet")
 	}
 	if pkg.Type != agent.PacketType_DIAL_RSP {
 		t.Errorf("expect PacketType_DIAL_RSP; got %v", pkg.Type)
@@ -53,7 +60,10 @@ func TestServeData_HTTP(t *testing.T) {
 
 	// Send Data (HTTP Request) via AgentClient to the test http server
 	dataPacket := newDataPacket(connID, []byte("GET / HTTP/1.1\r\nHost: localhost\r\n\r\n"))
-	stream.Send(dataPacket)
+	err = stream.Send(dataPacket)
+	if err != nil {
+		t.Error(err.Error())
+	}
 
 	// Expect receiving http response via AgentClient
 	pkg, _ = stream.Recv()
@@ -128,7 +138,7 @@ func TestClose_Client(t *testing.T) {
 	// Expect receiving DIAL_RSP packet from AgentClient
 	pkg, _ := stream.Recv()
 	if pkg == nil {
-		t.Error("unexpected nil packet")
+		t.Fatal("unexpected nil packet")
 	}
 	if pkg.Type != agent.PacketType_DIAL_RSP {
 		t.Errorf("expect PacketType_DIAL_RSP; got %v", pkg.Type)

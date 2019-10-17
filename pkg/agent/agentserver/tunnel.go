@@ -121,7 +121,11 @@ func (t *Tunnel) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 				},
 			},
 		}
-		t.Server.Backend.Send(packet)
+		err = t.Server.Backend.Send(packet)
+		if err != nil {
+			klog.Errorf("error sending packet %v", err)
+			continue
+		}
 		klog.Infof("Forwarding on tunnel, packet %v", string(pkt[:n]))
 	}
 
