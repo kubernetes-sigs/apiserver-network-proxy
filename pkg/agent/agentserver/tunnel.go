@@ -73,15 +73,16 @@ func (t *Tunnel) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		connected: connected,
 	}
 	t.Server.PendingDial[random] = connection
-	if t.Server.Backend == nil {
+	backend := t.Server.getBackend()
+	if backend == nil {
 		http.Error(w, "currently no tunnels available", http.StatusInternalServerError)
 		return
 	}
-	if err := t.Server.Backend.Send(dialRequest); err != nil {
+	if err := backend.Send(dialRequest); err != nil {
 		klog.Errorf("failed to tunnel dial request %v", err)
 		return
 	}
-	ctxt := t.Server.Backend.Context()
+	ctxt := backend.Context()
 	if ctxt.Err() != nil {
 		klog.Errorf("context reports error %v", err)
 	}
@@ -121,7 +122,8 @@ func (t *Tunnel) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 				},
 			},
 		}
-		err = t.Server.Backend.Send(packet)
+		backend := t.Server.getBackend()
+		err = backend.Send(packet)
 		if err != nil {
 			klog.Errorf("error sending packet %v", err)
 			continue

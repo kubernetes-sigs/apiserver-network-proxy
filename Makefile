@@ -35,7 +35,7 @@ DOCKER_CLI_EXPERIMENTAL ?= enabled
 
 .PHONY: test
 test:
-	go test ./...
+	go test -v -race ./...
 
 ## --------------------------------------
 ## Binaries

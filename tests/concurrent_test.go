@@ -13,7 +13,7 @@ import (
 )
 
 func TestProxy_Concurrency(t *testing.T) {
-	length := 1 << 20
+	length := 1 << 10
 	chunks := 10
 	server := httptest.NewServer(newSizedServer(length, chunks))
 	defer server.Close()

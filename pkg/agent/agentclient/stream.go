@@ -33,7 +33,8 @@ func (e *ReconnectError) Wait() error {
 }
 
 type RedialableAgentClient struct {
-	stream agent.AgentService_ConnectClient
+	stream     agent.AgentService_ConnectClient
+	streamLock sync.Mutex
 
 	// connect opts
 	address       string
@@ -74,10 +75,11 @@ func (c *RedialableAgentClient) probe() {
 			return
 		case <-time.After(c.Interval):
 			// health check
-			if c.conn != nil && c.conn.GetState() == connectivity.Ready {
+			conn := c.getConn()
+			if conn != nil && conn.GetState() == connectivity.Ready {
 				continue
 			} else {
-				klog.Infof("Connection state %v", c.conn.GetState())
+				klog.Infof("Connection state %v", conn.GetState())
 			}
 		}
 
@@ -92,7 +94,9 @@ func (c *RedialableAgentClient) Send(pkt *agent.Packet) error {
 	c.sendLock.Lock()
 	defer c.sendLock.Unlock()
 
-	if err := c.stream.Send(pkt); err != nil {
+	stream := c.getStream()
+
+	if err := stream.Send(pkt); err != nil {
 		if err == io.EOF {
 			return err
 		}
@@ -155,7 +159,9 @@ func (c *RedialableAgentClient) Recv() (*agent.Packet, error) {
 	var pkt *agent.Packet
 	var err error
 
-	if pkt, err = c.stream.Recv(); err != nil {
+	stream := c.getStream()
+
+	if pkt, err = stream.Recv(); err != nil {
 		if err == io.EOF {
 			return pkt, err
 		}
@@ -198,19 +204,47 @@ func (c *RedialableAgentClient) reconnect() {
 	c.doneReconnect(fmt.Errorf("Failed to connect to proxy server: %v", err))
 }
 
+func (c *RedialableAgentClient) getStream() agent.AgentService_ConnectClient {
+	c.streamLock.Lock()
+	defer c.streamLock.Unlock()
+
+	return c.stream
+}
+
+func (c *RedialableAgentClient) getConn() *grpc.ClientConn {
+	c.streamLock.Lock()
+	defer c.streamLock.Unlock()
+
+	return c.conn
+}
+
+func (c *RedialableAgentClient) setStreamAndConn(stream agent.AgentService_ConnectClient, conn *grpc.ClientConn) {
+	c.streamLock.Lock()
+	defer c.streamLock.Unlock()
+
+	c.conn = conn
+	c.stream = stream
+}
+
 func (c *RedialableAgentClient) tryConnect() error {
 	var err error
 
-	c.conn, err = grpc.Dial(c.address, c.opts...)
+	conn, err := grpc.Dial(c.address, c.opts...)
 	if err != nil {
 		return err
 	}
 
-	c.stream, err = agent.NewAgentServiceClient(c.conn).Connect(context.Background())
-	return err
+	stream, err := agent.NewAgentServiceClient(conn).Connect(context.Background())
+	if err != nil {
+		return err
+	}
+
+	c.setStreamAndConn(stream, conn)
+
+	return nil
 }
 
 // interrupt interrupt the stream connection. (For testing purpose)
 func (c *RedialableAgentClient) interrupt() {
-	c.conn.Close()
+	c.getConn().Close()
 }

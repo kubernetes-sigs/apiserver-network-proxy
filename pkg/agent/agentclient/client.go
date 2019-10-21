@@ -32,6 +32,7 @@ import (
 type AgentClient struct {
 	nextConnID  int64
 	connContext map[int64]*connContext
+	connLock    sync.RWMutex
 
 	stream *RedialableAgentClient
 }
@@ -132,6 +133,7 @@ func (a *AgentClient) Serve(stopCh <-chan struct{}) {
 
 			connID := atomic.AddInt64(&a.nextConnID, 1)
 			dataCh := make(chan []byte, 5)
+			a.connLock.Lock()
 			a.connContext[connID] = &connContext{
 				conn:   conn,
 				dataCh: dataCh,
@@ -153,9 +155,13 @@ func (a *AgentClient) Serve(stopCh <-chan struct{}) {
 					}
 
 					close(dataCh)
+
+					a.connLock.Lock()
 					delete(a.connContext, connID)
+					a.connLock.Unlock()
 				},
 			}
+			a.connLock.Unlock()
 
 			resp.GetDialResponse().ConnectID = connID
 			if err := a.stream.RetrySend(resp); err != nil {
@@ -171,7 +177,11 @@ func (a *AgentClient) Serve(stopCh <-chan struct{}) {
 			klog.Infof("received DATA(id=%d)", data.ConnectID)
 			klog.Infof("[tracing] %v", data)
 
-			if ctx, ok := a.connContext[data.ConnectID]; ok {
+			a.connLock.RLock()
+			ctx, ok := a.connContext[data.ConnectID]
+			a.connLock.RUnlock()
+
+			if ok {
 				ctx.dataCh <- data.Data
 			}
 
@@ -181,7 +191,11 @@ func (a *AgentClient) Serve(stopCh <-chan struct{}) {
 
 			klog.Infof("received CLOSE_REQ(id=%d)", connID)
 
-			if ctx, ok := a.connContext[connID]; ok {
+			a.connLock.RLock()
+			ctx, ok := a.connContext[connID]
+			a.connLock.RUnlock()
+
+			if ok {
 				ctx.cleanup()
 			} else {
 				resp := &agent.Packet{
@@ -203,7 +217,10 @@ func (a *AgentClient) Serve(stopCh <-chan struct{}) {
 }
 
 func (a *AgentClient) remoteToProxy(conn net.Conn, connID int64) {
+	a.connLock.RLock()
 	ctx := a.connContext[connID]
+	a.connLock.RUnlock()
+
 	if ctx == nil {
 		return
 	}
@@ -239,7 +256,10 @@ func (a *AgentClient) remoteToProxy(conn net.Conn, connID int64) {
 }
 
 func (a *AgentClient) proxyToRemote(conn net.Conn, connID int64) {
+	a.connLock.RLock()
 	ctx := a.connContext[connID]
+	a.connLock.RUnlock()
+
 	if ctx == nil {
 		return
 	}

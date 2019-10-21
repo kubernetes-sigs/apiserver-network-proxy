@@ -10,4 +10,4 @@ before_script:
   - go install github.com/golangci/golangci-lint/cmd/golangci-lint
 script:
   - golangci-lint run --skip-files ".*.pb.go"
-  - go test -v ./... # go test -v -race ./... is failing, should be fixed
+  - make test

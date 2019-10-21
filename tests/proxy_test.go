@@ -92,9 +92,10 @@ func TestBasicProxy_GRPC(t *testing.T) {
 	}
 }
 
+// Slow test! It takes about 10 seconds to finish on my desktop
 func TestProxy_LargeResponse(t *testing.T) {
 	length := 1 << 20 // 1M
-	chunks := 10
+	chunks := 5
 	server := httptest.NewServer(newSizedServer(length, chunks))
 	defer server.Close()
 

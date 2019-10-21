@@ -105,7 +105,12 @@ func TestServeData_HTTP(t *testing.T) {
 	}
 
 	// Verify internal state is consistent
-	if _, ok := client.connContext[connID]; ok {
+
+	client.connLock.RLock()
+	_, ok := client.connContext[connID]
+	client.connLock.RUnlock()
+
+	if ok {
 		t.Error("client.connContext not released")
 	}
 }
@@ -168,7 +173,11 @@ func TestClose_Client(t *testing.T) {
 	}
 
 	// Verify internal state is consistent
-	if _, ok := client.connContext[connID]; ok {
+	client.connLock.RLock()
+	_, ok := client.connContext[connID]
+	client.connLock.RUnlock()
+
+	if ok {
 		t.Error("client.connContext not released")
 	}
 
