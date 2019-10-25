@@ -95,7 +95,7 @@ spec:
           containerPort: 8131
           hostPort: 8131
         - name: agentport
-          containerPort:8132
+          containerPort: 8132
           hostPort: 8132
         - name: adminport
           containerPort: 8133
@@ -147,7 +147,7 @@ spec:
             # the path of your certificates on the worker nodes
             path: /var/lib/konnectivity-agent/pki
       containers:
-        - image: gcr.io/google-containers/proxy-server:v0.0.3
+        - image: gcr.io/google-containers/proxy-agent:v0.0.3
           name: konnectivity-agent
           command: 
           - /proxy-agent
