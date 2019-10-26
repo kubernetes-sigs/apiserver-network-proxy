@@ -29,7 +29,7 @@ import (
 type ProxyClientConnection struct {
 	Mode      string
 	Grpc      agent.ProxyService_ProxyServer
-	Http      net.Conn
+	HTTP      net.Conn
 	connected chan struct{}
 	connectID int64
 }
@@ -40,9 +40,9 @@ func (c *ProxyClientConnection) send(pkt *agent.Packet) error {
 		return stream.Send(pkt)
 	} else if c.Mode == "http-connect" {
 		if pkt.Type == agent.PacketType_CLOSE_RSP {
-			return c.Http.Close()
+			return c.HTTP.Close()
 		} else if pkt.Type == agent.PacketType_DATA {
-			_, err := c.Http.Write(pkt.GetData().Data)
+			_, err := c.HTTP.Write(pkt.GetData().Data)
 			return err
 		} else if pkt.Type == agent.PacketType_DIAL_RSP {
 			return nil
