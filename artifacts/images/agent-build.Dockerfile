@@ -9,7 +9,8 @@ COPY proto/  proto/
 COPY vendor/ vendor/
 
 # Build
-RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -a -o proxy-agent sigs.k8s.io/apiserver-network-proxy/cmd/agent
+ARG ARCH
+RUN CGO_ENABLED=0 GOOS=linux GOARCH=${ARCH} go build -a -ldflags '-extldflags "-static"' -o proxy-agent sigs.k8s.io/apiserver-network-proxy/cmd/agent
 
 # Copy the loader into a thin image
 FROM scratch
