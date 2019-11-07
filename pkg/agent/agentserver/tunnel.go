@@ -69,7 +69,7 @@ func (t *Tunnel) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	connected := make(chan struct{})
 	connection := &ProxyClientConnection{
 		Mode:      "http-connect",
-		Http:      conn,
+		HTTP:      conn,
 		connected: connected,
 	}
 	t.Server.PendingDial[random] = connection
