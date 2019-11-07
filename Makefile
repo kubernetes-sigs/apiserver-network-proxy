@@ -26,6 +26,7 @@ AGENT_FULL_IMAGE ?= $(REGISTRY)/$(AGENT_IMAGE_NAME)
 
 TAG ?= $(shell git rev-parse HEAD)
 
+DOCKER_CMD ?= docker
 DOCKER_CLI_EXPERIMENTAL ?= enabled
 
 ## --------------------------------------
@@ -139,7 +140,7 @@ docker-push: docker-push/proxy-agent docker-push/proxy-server
 docker-build/proxy-agent: cmd/agent/main.go proto/agent/agent.pb.go
 	@[ "${TAG}" ] || ( echo "TAG is not set"; exit 1 )
 	echo "Building proxy-agent for ${ARCH}"
-	docker build . --build-arg ARCH=$(ARCH) -f artifacts/images/agent-build.Dockerfile -t ${AGENT_FULL_IMAGE}-$(ARCH):${TAG}
+	${DOCKER_CMD} build . --build-arg ARCH=$(ARCH) -f artifacts/images/agent-build.Dockerfile -t ${AGENT_FULL_IMAGE}-$(ARCH):${TAG}
 
 .PHONY: docker-push/proxy-agent
 docker-push/proxy-agent: docker-build/proxy-agent
@@ -150,7 +151,7 @@ docker-push/proxy-agent: docker-build/proxy-agent
 docker-build/proxy-server: cmd/proxy/main.go proto/agent/agent.pb.go proto/proxy.pb.go
 	@[ "${TAG}" ] || ( echo "TAG is not set"; exit 1 )
 	echo "Building proxy-server for ${ARCH}"
-	docker build . --build-arg ARCH=$(ARCH) -f artifacts/images/server-build.Dockerfile -t ${SERVER_FULL_IMAGE}-$(ARCH):${TAG}
+	${DOCKER_CMD} build . --build-arg ARCH=$(ARCH) -f artifacts/images/server-build.Dockerfile -t ${SERVER_FULL_IMAGE}-$(ARCH):${TAG}
 
 .PHONY: docker-push/proxy-server
 docker-push/proxy-server: docker-build/proxy-server
@@ -185,15 +186,15 @@ docker-push/proxy-server-%:
 docker-push-manifest/proxy-agent: ## Push the fat manifest docker image.
 	## Minimum docker version 18.06.0 is required for creating and pushing manifest images.
 	docker manifest create --amend $(AGENT_FULL_IMAGE):$(TAG) $(shell echo $(ALL_ARCH) | sed -e "s~[^ ]*~$(AGENT_FULL_IMAGE)\-&:$(TAG)~g")
-	@for arch in $(ALL_ARCH); do docker manifest annotate --arch $${arch} ${AGENT_FULL_IMAGE}:${TAG} ${AGENT_FULL_IMAGE}-$${arch}:${TAG}; done
-	docker manifest push --purge $(AGENT_FULL_IMAGE):$(TAG)
+	@for arch in $(ALL_ARCH); do ${DOCKER_CMD} manifest annotate --arch $${arch} ${AGENT_FULL_IMAGE}:${TAG} ${AGENT_FULL_IMAGE}-$${arch}:${TAG}; done
+	${DOCKER_CMD} manifest push --purge $(AGENT_FULL_IMAGE):$(TAG)
 
 .PHONY: docker-push-manifest/proxy-server
 docker-push-manifest/proxy-server: ## Push the fat manifest docker image.
 	## Minimum docker version 18.06.0 is required for creating and pushing manifest images.
-	docker manifest create --amend $(SERVER_FULL_IMAGE):$(TAG) $(shell echo $(ALL_ARCH) | sed -e "s~[^ ]*~$(SERVER_FULL_IMAGE)\-&:$(TAG)~g")
-	@for arch in $(ALL_ARCH); do docker manifest annotate --arch $${arch} ${SERVER_FULL_IMAGE}:${TAG} ${SERVER_FULL_IMAGE}-$${arch}:${TAG}; done
-	docker manifest push --purge $(SERVER_FULL_IMAGE):$(TAG)
+	${DOCKER_CMD} manifest create --amend $(SERVER_FULL_IMAGE):$(TAG) $(shell echo $(ALL_ARCH) | sed -e "s~[^ ]*~$(SERVER_FULL_IMAGE)\-&:$(TAG)~g")
+	@for arch in $(ALL_ARCH); do ${DOCKER_CMD} manifest annotate --arch $${arch} ${SERVER_FULL_IMAGE}:${TAG} ${SERVER_FULL_IMAGE}-$${arch}:${TAG}; done
+	${DOCKER_CMD} manifest push --purge $(SERVER_FULL_IMAGE):$(TAG)
 
 ## --------------------------------------
 ## Release
