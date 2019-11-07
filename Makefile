@@ -26,6 +26,8 @@ AGENT_FULL_IMAGE ?= $(REGISTRY)/$(AGENT_IMAGE_NAME)
 
 TAG ?= $(shell git rev-parse HEAD)
 
+DOCKER_CLI_EXPERIMENTAL ?= enabled
+
 ## --------------------------------------
 ## Testing
 ## --------------------------------------

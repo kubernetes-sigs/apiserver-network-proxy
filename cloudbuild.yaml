@@ -5,7 +5,6 @@ steps:
   - name: 'gcr.io/k8s-testimages/gcb-docker-gcloud:v20190906-745fed4'
     entrypoint: make
     env:
-    - DOCKER_CLI_EXPERIMENTAL=enabled
     - TAG=$_GIT_TAG
     - BASE_REF=$_PULL_BASE_REF
     args:
