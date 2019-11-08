@@ -145,7 +145,7 @@ docker-build/proxy-agent: cmd/agent/main.go proto/agent/agent.pb.go
 .PHONY: docker-push/proxy-agent
 docker-push/proxy-agent: docker-build/proxy-agent
 	@[ "${DOCKER_CMD}" ] || ( echo "DOCKER_CMD is not set"; exit 1 )
-	${DOCKER_CMD} push ${AGENT_FULL_IMAGE}:${TAG}
+	${DOCKER_CMD} push ${AGENT_FULL_IMAGE}-$(ARCH):${TAG}
 
 .PHONY: docker-build/proxy-server
 docker-build/proxy-server: cmd/proxy/main.go proto/agent/agent.pb.go proto/proxy.pb.go
@@ -156,7 +156,7 @@ docker-build/proxy-server: cmd/proxy/main.go proto/agent/agent.pb.go proto/proxy
 .PHONY: docker-push/proxy-server
 docker-push/proxy-server: docker-build/proxy-server
 	@[ "${DOCKER_CMD}" ] || ( echo "DOCKER_CMD is not set"; exit 1 )
-	${DOCKER_CMD} push ${SERVER_FULL_IMAGE}:${TAG}
+	${DOCKER_CMD} push ${SERVER_FULL_IMAGE}-$(ARCH):${TAG}
 
 ## --------------------------------------
 ## Docker — All ARCH
@@ -185,7 +185,7 @@ docker-push/proxy-server-%:
 .PHONY: docker-push-manifest/proxy-agent
 docker-push-manifest/proxy-agent: ## Push the fat manifest docker image.
 	## Minimum docker version 18.06.0 is required for creating and pushing manifest images.
-	docker manifest create --amend $(AGENT_FULL_IMAGE):$(TAG) $(shell echo $(ALL_ARCH) | sed -e "s~[^ ]*~$(AGENT_FULL_IMAGE)\-&:$(TAG)~g")
+	${DOCKER_CMD} manifest create --amend $(AGENT_FULL_IMAGE):$(TAG) $(shell echo $(ALL_ARCH) | sed -e "s~[^ ]*~$(AGENT_FULL_IMAGE)\-&:$(TAG)~g")
 	@for arch in $(ALL_ARCH); do ${DOCKER_CMD} manifest annotate --arch $${arch} ${AGENT_FULL_IMAGE}:${TAG} ${AGENT_FULL_IMAGE}-$${arch}:${TAG}; done
 	${DOCKER_CMD} manifest push --purge $(AGENT_FULL_IMAGE):$(TAG)
 
