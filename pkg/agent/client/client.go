@@ -22,6 +22,7 @@ import (
 	"io"
 	"math/rand"
 	"net"
+	"sync"
 	"time"
 
 	"google.golang.org/grpc"
@@ -43,9 +44,11 @@ type dialResult struct {
 
 // grpcTunnel implements Tunnel
 type grpcTunnel struct {
-	stream      agent.ProxyService_ProxyClient
-	pendingDial map[int64]chan<- dialResult
-	conns       map[int64]*conn
+	stream          agent.ProxyService_ProxyClient
+	pendingDial     map[int64]chan<- dialResult
+	conns           map[int64]*conn
+	pendingDialLock sync.RWMutex
+	connsLock       sync.RWMutex
 }
 
 // CreateGrpcTunnel creates a Tunnel to dial to a remote server through a
@@ -90,7 +93,11 @@ func (t *grpcTunnel) serve() {
 		switch pkt.Type {
 		case agent.PacketType_DIAL_RSP:
 			resp := pkt.GetDialResponse()
-			if ch, ok := t.pendingDial[resp.Random]; !ok {
+			t.pendingDialLock.RLock()
+			ch, ok := t.pendingDial[resp.Random]
+			t.pendingDialLock.RUnlock()
+
+			if !ok {
 				klog.Warning("DialResp not recognized; dropped")
 			} else {
 				ch <- dialResult{
@@ -101,18 +108,28 @@ func (t *grpcTunnel) serve() {
 		case agent.PacketType_DATA:
 			resp := pkt.GetData()
 			// TODO: flow control
-			if conn, ok := t.conns[resp.ConnectID]; ok {
+			t.connsLock.RLock()
+			conn, ok := t.conns[resp.ConnectID]
+			t.connsLock.RUnlock()
+
+			if ok {
 				conn.readCh <- resp.Data
 			} else {
 				klog.Warningf("connection id %d not recognized", resp.ConnectID)
 			}
 		case agent.PacketType_CLOSE_RSP:
 			resp := pkt.GetCloseResponse()
-			if conn, ok := t.conns[resp.ConnectID]; ok {
+			t.connsLock.RLock()
+			conn, ok := t.conns[resp.ConnectID]
+			t.connsLock.RUnlock()
+
+			if ok {
 				close(conn.readCh)
 				conn.closeCh <- resp.Error
 				close(conn.closeCh)
+				t.connsLock.Lock()
 				delete(t.conns, resp.ConnectID)
+				t.connsLock.Unlock()
 			} else {
 				klog.Warningf("connection id %d not recognized", resp.ConnectID)
 			}
@@ -129,9 +146,13 @@ func (t *grpcTunnel) Dial(protocol, address string) (net.Conn, error) {
 
 	random := rand.Int63()
 	resCh := make(chan dialResult)
+	t.pendingDialLock.Lock()
 	t.pendingDial[random] = resCh
+	t.pendingDialLock.Unlock()
 	defer func() {
+		t.pendingDialLock.Lock()
 		delete(t.pendingDial, random)
+		t.pendingDialLock.Unlock()
 	}()
 
 	req := &agent.Packet{
@@ -163,7 +184,9 @@ func (t *grpcTunnel) Dial(protocol, address string) (net.Conn, error) {
 		c.connID = res.connid
 		c.readCh = make(chan []byte, 10)
 		c.closeCh = make(chan string)
+		t.connsLock.Lock()
 		t.conns[res.connid] = c
+		t.connsLock.Unlock()
 	case <-time.After(30 * time.Second):
 		return nil, errors.New("dial timeout")
 	}
