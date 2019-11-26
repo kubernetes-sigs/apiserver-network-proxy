@@ -191,7 +191,6 @@ func (c *RedialableAgentClient) reconnect() {
 		}
 		retry++
 		klog.V(5).Infof("Failed to connect to proxy server, retry %d in %v: %v", retry, c.Interval, err)
-		klog.Infof("Failed to connect to proxy server, retry %d in %v: %v", retry, c.Interval, err)
 		time.Sleep(c.Interval)
 	}
 
