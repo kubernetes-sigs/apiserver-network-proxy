@@ -1,21 +1,38 @@
+/*
+Copyright 2019 The Kubernetes Authors.
+
+Licensed under the Apache License, Version 2.0 (the "License");
+you may not use this file except in compliance with the License.
+You may obtain a copy of the License at
+
+    http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions and
+limitations under the License.
+*/
+
 package agentclient
 
 import (
 	"context"
 	"fmt"
 	"io"
+	"strconv"
 	"sync"
 	"time"
 
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/connectivity"
+	"google.golang.org/grpc/metadata"
 	"k8s.io/klog"
 	"sigs.k8s.io/apiserver-network-proxy/proto/agent"
-	// "k8s.io/client-go/util/retry"
+	"sigs.k8s.io/apiserver-network-proxy/proto/header"
 )
 
 const (
-	defaultRetry    = 20
 	defaultInterval = 5 * time.Second
 )
 
@@ -33,7 +50,13 @@ func (e *ReconnectError) Wait() error {
 }
 
 type RedialableAgentClient struct {
+	cs *ClientSet // the clientset that includes this RedialableAgentClient.
+
 	stream agent.AgentService_ConnectClient
+
+	agentID     string
+	serverID    string
+	serverCount int
 
 	// connect opts
 	address       string
@@ -48,23 +71,36 @@ type RedialableAgentClient struct {
 	recvLock   sync.Mutex
 	reconnLock sync.Mutex
 
-	// Retry times to reconnect to proxy server
-	Retry int
-
 	// Interval between every reconnect
 	Interval time.Duration
 }
 
-func NewRedialableAgentClient(address string, opts ...grpc.DialOption) (*RedialableAgentClient, error) {
+func copyRedialableAgentClient(in RedialableAgentClient) RedialableAgentClient {
+	out := in
+	out.stopCh = make(chan struct{})
+	out.reconnOngoing = false
+	out.reconnWaiters = nil
+	out.sendLock = sync.Mutex{}
+	out.recvLock = sync.Mutex{}
+	out.reconnLock = sync.Mutex{}
+	return out
+}
+
+func NewRedialableAgentClient(address, agentID string, cs *ClientSet, opts ...grpc.DialOption) (*RedialableAgentClient, error) {
 	c := &RedialableAgentClient{
+		cs:       cs,
 		address:  address,
+		agentID:  agentID,
 		opts:     opts,
-		Retry:    defaultRetry,
 		Interval: defaultInterval,
 		stopCh:   make(chan struct{}),
 	}
-
-	return c, c.Connect()
+	serverID, err := c.Connect()
+	if err != nil {
+		return nil, err
+	}
+	c.serverID = serverID
+	return c, nil
 }
 
 func (c *RedialableAgentClient) probe() {
@@ -168,48 +204,161 @@ func (c *RedialableAgentClient) Recv() (*agent.Packet, error) {
 	return pkt, nil
 }
 
-func (c *RedialableAgentClient) Connect() error {
-	if err := c.tryConnect(); err != nil {
-		return err
+// Connect makes the grpc dial to the proxy server. It returns the serverID
+// it connects to.
+func (c *RedialableAgentClient) Connect() (string, error) {
+	var err error
+	r, err := c.tryConnect()
+	if err != nil {
+		return "", err
 	}
+	c.serverID = r.serverID
+	klog.Infof("Connect to server %s", r.serverID)
+	c.serverCount = r.serverCount
+	c.conn = r.grpcConn
+	c.stream = r.agentServiceClient
+	return c.serverID, nil
+}
 
-	go c.probe()
-	return nil
+// The goal is to make the chance that client's Connect rpc call has never hit
+// the wanted server after "retries" times to be lower than 10^-2.
+func retryLimit(serverCount int) (retries int) {
+	switch serverCount {
+	case 1:
+		return 3 // to overcome transient errors
+	case 2:
+		return 3 + 7
+	case 3:
+		return 3 + 12
+	case 4:
+		return 3 + 17
+	case 5:
+		return 3 + 21
+	default:
+		// we don't expect HA server with more than 5 instances.
+		return 3 + 21
+	}
 }
 
 func (c *RedialableAgentClient) reconnect() {
-	klog.Info("start to connect...")
+	klog.Info("start to reconnect...")
 
-	var err error
-	var retry int
+	var retry, limit int
 
-	for retry < c.Retry {
-		if err = c.tryConnect(); err == nil {
-			klog.Info("connected")
+	limit = retryLimit(c.serverCount)
+	for retry < limit {
+		r, err := c.tryConnect()
+		if err != nil {
+			retry++
+			klog.Infof("Failed to connect to proxy server, retry %d in %v: %v", retry, c.Interval, err)
+			time.Sleep(c.Interval)
+			continue
+		}
+		switch {
+		case r.serverID == c.serverID:
+			klog.Info("reconnected to %s", serverID)
+			c.conn = r.grpcConn
+			c.stream = r.agentServiceClient
 			c.doneReconnect(nil)
 			return
+
+		case r.serverID != c.serverID && c.cs.HasID(r.serverID):
+			// reset the connection
+			err := r.grpcConn.Close()
+			if err != nil {
+				klog.Infof("failed to close connection to %s: %v", r.serverID, err)
+			}
+			retry++
+			klog.Infof("Trying to reconnect to proxy server %s, got connected to proxy server %s, for which there is already a connection, retry %d in %v", c.serverID, r.serverID, retry, c.Interval)
+			time.Sleep(c.Interval)
+		case r.serverID != c.serverID && !c.cs.HasID(r.serverID):
+			// create a new client
+			cc := copyRedialableAgentClient(*c)
+			cc.stream = r.agentServiceClient
+			cc.conn = r.grpcConn
+			cc.serverID = r.serverID
+			ac := newAgentClientWithRedialableAgentClient(&cc)
+			err := c.cs.AddClient(r.serverID, ac)
+			if err != nil {
+				klog.Infof("failed to add client for %s: %v", r.serverID, err)
+			}
+			go ac.Serve()
+			retry++
+			klog.Infof("Trying to reconnect to proxy server %s, got connected to proxy server %s. We will add this connection to the client set, but keep retrying connecting to proxy server %s, retry %d in %v", c.serverID, r.serverID, c.serverID, retry, c.Interval)
+			time.Sleep(c.Interval)
 		}
-		retry++
-		klog.V(5).Infof("Failed to connect to proxy server, retry %d in %v: %v", retry, c.Interval, err)
-		time.Sleep(c.Interval)
 	}
 
-	c.doneReconnect(fmt.Errorf("Failed to connect to proxy server: %v", err))
+	c.cs.RemoveClient(c.serverID)
+	close(c.stopCh)
+	c.doneReconnect(fmt.Errorf("Failed to connect to proxy server"))
 }
 
-func (c *RedialableAgentClient) tryConnect() error {
+func serverCount(stream agent.AgentService_ConnectClient) (int, error) {
+	md, err := stream.Header()
+	if err != nil {
+		return 0, err
+	}
+	scounts := md.Get(header.ServerCount)
+	if len(scounts) == 0 {
+		return 0, fmt.Errorf("missing server count")
+	}
+	scount := scounts[0]
+	return strconv.Atoi(scount)
+}
+
+func serverID(stream agent.AgentService_ConnectClient) (string, error) {
+	md, err := stream.Header()
+	if err != nil {
+		return "", err
+	}
+	sids := md.Get(header.ServerID)
+	if len(sids) != 1 {
+		return "", fmt.Errorf("expected one server ID in the context, got %v", sids)
+	}
+	return sids[0], nil
+}
+
+type connectResult struct {
+	serverID           string
+	serverCount        int
+	grpcConn           *grpc.ClientConn
+	agentServiceClient agent.AgentService_ConnectClient
+}
+
+// tryConnect makes the grpc dial to the proxy server. It returns the serverID
+// it connects to, and the number of servers (1 if server is non-HA). It also
+// updates c.stream.
+func (c *RedialableAgentClient) tryConnect() (connectResult, error) {
 	var err error
 
-	c.conn, err = grpc.Dial(c.address, c.opts...)
+	conn, err := grpc.Dial(c.address, c.opts...)
 	if err != nil {
-		return err
+		return connectResult{}, err
 	}
 
-	c.stream, err = agent.NewAgentServiceClient(c.conn).Connect(context.Background())
-	return err
+	ctx := metadata.AppendToOutgoingContext(context.Background(), header.AgentID, c.agentID)
+	stream, err := agent.NewAgentServiceClient(conn).Connect(ctx)
+	if err != nil {
+		return connectResult{}, err
+	}
+	sid, err := serverID(stream)
+	if err != nil {
+		return connectResult{}, err
+	}
+	count, err := serverCount(stream)
+	if err != nil {
+		return connectResult{}, err
+	}
+	r := connectResult{
+		serverID:           sid,
+		serverCount:        count,
+		grpcConn:           conn,
+		agentServiceClient: stream,
+	}
+	return r, err
 }
 
-// interrupt interrupt the stream connection. (For testing purpose)
-func (c *RedialableAgentClient) interrupt() {
+func (c *RedialableAgentClient) Close() {
 	c.conn.Close()
 }

@@ -22,7 +22,9 @@ import (
 	"fmt"
 	"net/http"
 	"os"
+	"time"
 
+	"github.com/google/uuid"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/spf13/cobra"
 	"github.com/spf13/pflag"
@@ -61,6 +63,9 @@ type GrpcProxyAgentOptions struct {
 	// Configuration for connecting to the proxy-server
 	proxyServerHost string
 	proxyServerPort int
+
+	agentID      string
+	syncInterval int
 }
 
 func (o *GrpcProxyAgentOptions) Flags() *pflag.FlagSet {
@@ -70,6 +75,8 @@ func (o *GrpcProxyAgentOptions) Flags() *pflag.FlagSet {
 	flags.StringVar(&o.caCert, "ca-cert", o.caCert, "If non-empty the CAs we use to validate clients.")
 	flags.StringVar(&o.proxyServerHost, "proxy-server-host", o.proxyServerHost, "The hostname to use to connect to the proxy-server.")
 	flags.IntVar(&o.proxyServerPort, "proxy-server-port", o.proxyServerPort, "The port the proxy server is listening on.")
+	flags.StringVar(&o.agentID, "agent-id", o.agentID, "The unique ID of this agent. Default to a generated uuid if not set.")
+	flags.IntVar(&o.syncInterval, "sync-interval", o.syncInterval, "The seconds by which the agent periodically checks that it has connections to all instances of the proxy server.")
 	return flags
 }
 
@@ -79,6 +86,8 @@ func (o *GrpcProxyAgentOptions) Print() {
 	klog.Warningf("CACert set to \"%s\".\n", o.caCert)
 	klog.Warningf("ProxyServerHost set to \"%s\".\n", o.proxyServerHost)
 	klog.Warningf("ProxyServerPort set to %d.\n", o.proxyServerPort)
+	klog.Warningf("AgentID set to %s.\n", o.agentID)
+	klog.Warningf("SyncInterval set to %d.\n", o.syncInterval)
 }
 
 func (o *GrpcProxyAgentOptions) Validate() error {
@@ -116,6 +125,8 @@ func newGrpcProxyAgentOptions() *GrpcProxyAgentOptions {
 		caCert:          "",
 		proxyServerHost: "127.0.0.1",
 		proxyServerPort: 8091,
+		agentID:         uuid.New().String(),
+		syncInterval:    5,
 	}
 	return &o
 }
@@ -162,14 +173,8 @@ func (a *Agent) runProxyConnection(o *GrpcProxyAgentOptions) error {
 		return err
 	}
 	dialOption := grpc.WithTransportCredentials(credentials.NewTLS(tlsConfig))
-	client, err := agentclient.NewAgentClient(fmt.Sprintf("%s:%d", o.proxyServerHost, o.proxyServerPort), dialOption)
-	if err != nil {
-		return err
-	}
-
-	stopCh := make(chan struct{})
-
-	go client.Serve(stopCh)
+	cs := agentclient.NewAgentClientSet(fmt.Sprintf("%s:%d", o.proxyServerHost, o.proxyServerPort), o.agentID, time.Duration(o.syncInterval)*time.Second, dialOption)
+	cs.Serve()
 
 	return nil
 }

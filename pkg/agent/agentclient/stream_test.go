@@ -53,7 +53,7 @@ func TestReconnectExits(t *testing.T) {
 		}
 	}()
 
-	client.interrupt()
+	client.Close()
 
 	var got1 bool
 	var got2 bool
