@@ -34,6 +34,11 @@ DOCKER_CLI_EXPERIMENTAL ?= enabled
 ## --------------------------------------
 ## Testing
 ## --------------------------------------
+mock_gen:
+	mkdir -p proto/agent/mocks
+	mockgen sigs.k8s.io/apiserver-network-proxy/proto/agent AgentService_ConnectServer > proto/agent/mocks/agent_mock.go
+	cat hack/go-license-header.txt proto/agent/mocks/agent_mock.go > proto/agent/mocks/agent_mock.licensed.go
+	mv proto/agent/mocks/agent_mock.licensed.go proto/agent/mocks/agent_mock.go
 
 .PHONY: test
 test:
@@ -68,7 +73,7 @@ bin/proxy-server: bin cmd/proxy/main.go proto/agent/agent.pb.go proto/proxy.pb.g
 ## --------------------------------------
 
 .PHONY: gen
-gen: proto/agent/agent.pb.go proto/proxy.pb.go
+gen: proto/agent/agent.pb.go proto/proxy.pb.go mock_gen
 
 proto/agent/agent.pb.go: proto/agent/agent.proto
 	protoc -I proto proto/agent/agent.proto --go_out=plugins=grpc:proto
@@ -244,4 +249,4 @@ release-alias-tag: # Adds the tag to the last build tag. BASE_REF comes from the
 
 .PHONY: clean
 clean:
-	rm -rf proto/agent/agent.pb.go proto/proxy.pb.go easy-rsa.tar.gz easy-rsa-master cfssl cfssljson certs bin
+	rm -rf proto/agent/agent.pb.go proto/proxy.pb.go easy-rsa.tar.gz easy-rsa-master cfssl cfssljson certs bin proto/agent/mocks

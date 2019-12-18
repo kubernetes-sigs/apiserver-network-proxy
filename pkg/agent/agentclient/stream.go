@@ -20,6 +20,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"io/ioutil"
 	"strconv"
 	"sync"
 	"time"
@@ -73,6 +74,10 @@ type RedialableAgentClient struct {
 
 	reconnectInterval time.Duration // interval between recoonects
 	probeInterval     time.Duration // interval between probe pings
+
+	// file path contains service account token.
+	// token's value is auto-rotated by kubernetes, based on projected volume configuration.
+	serviceAccountTokenPath string
 }
 
 func copyRedialableAgentClient(in RedialableAgentClient) RedialableAgentClient {
@@ -88,13 +93,14 @@ func copyRedialableAgentClient(in RedialableAgentClient) RedialableAgentClient {
 
 func NewRedialableAgentClient(address, agentID string, cs *ClientSet, opts ...grpc.DialOption) (*RedialableAgentClient, error) {
 	c := &RedialableAgentClient{
-		cs:                cs,
-		address:           address,
-		agentID:           agentID,
-		opts:              opts,
-		probeInterval:     cs.probeInterval,
-		reconnectInterval: cs.reconnectInterval,
-		stopCh:            make(chan struct{}),
+		cs:                      cs,
+		address:                 address,
+		agentID:                 agentID,
+		opts:                    opts,
+		probeInterval:           cs.probeInterval,
+		reconnectInterval:       cs.reconnectInterval,
+		stopCh:                  make(chan struct{}),
+		serviceAccountTokenPath: cs.serviceAccountTokenPath,
 	}
 	serverID, err := c.Connect()
 	if err != nil {
@@ -332,6 +338,20 @@ type connectResult struct {
 	agentServiceClient agent.AgentService_ConnectClient
 }
 
+func (c *RedialableAgentClient) initializeAuthContext(ctx context.Context) (context.Context, error) {
+	var err error
+	var b []byte
+
+	// load current service account's token value
+	if b, err = ioutil.ReadFile(c.serviceAccountTokenPath); err != nil {
+		klog.Errorf("Failed to read token from %q. err: %v", c.serviceAccountTokenPath, err)
+		return nil, err
+	}
+	ctx = metadata.AppendToOutgoingContext(ctx, header.AuthenticationTokenContextKey, header.AuthenticationTokenContextSchemePrefix+string(b))
+
+	return ctx, nil
+}
+
 // tryConnect makes the grpc dial to the proxy server. It returns the serverID
 // it connects to, and the number of servers (1 if server is non-HA). It also
 // updates c.stream.
@@ -344,6 +364,11 @@ func (c *RedialableAgentClient) tryConnect() (connectResult, error) {
 	}
 
 	ctx := metadata.AppendToOutgoingContext(context.Background(), header.AgentID, c.agentID)
+	if c.serviceAccountTokenPath != "" {
+		if ctx, err = c.initializeAuthContext(ctx); err != nil {
+			return connectResult{}, err
+		}
+	}
 	stream, err := agent.NewAgentServiceClient(conn).Connect(ctx)
 	if err != nil {
 		return connectResult{}, err

@@ -17,15 +17,19 @@ limitations under the License.
 package agentserver
 
 import (
+	"context"
 	"fmt"
 	"io"
 	"math/rand"
 	"net"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
 	"google.golang.org/grpc/metadata"
+	authv1 "k8s.io/api/authentication/v1"
+	"k8s.io/client-go/kubernetes"
 	"k8s.io/klog"
 	"sigs.k8s.io/apiserver-network-proxy/proto/agent"
 	"sigs.k8s.io/apiserver-network-proxy/proto/header"
@@ -78,6 +82,17 @@ type ProxyServer struct {
 	serverID    string // unique ID of this server
 	serverCount int    // Number of proxy server instances, should be 1 unless it is a HA server.
 
+	// agent authentication
+	AgentAuthenticationOptions *AgentTokenAuthenticationOptions
+}
+
+// AgentTokenAuthenticationOptions contains list of parameters required for agent token based authentication
+type AgentTokenAuthenticationOptions struct {
+	Enabled                bool
+	AgentNamespace         string
+	AgentServiceAccount    string
+	AuthenticationAudience string
+	KubernetesClient       kubernetes.Interface
 }
 
 var _ agent.AgentServiceServer = &ProxyServer{}
@@ -139,14 +154,15 @@ func (s *ProxyServer) randomBackend() (agent.AgentService_ConnectServer, error) 
 }
 
 // NewProxyServer creates a new ProxyServer instance
-func NewProxyServer(serverID string, serverCount int) *ProxyServer {
+func NewProxyServer(serverID string, serverCount int, agentAuthenticationOptions *AgentTokenAuthenticationOptions) *ProxyServer {
 	return &ProxyServer{
-		Frontends:   make(map[int64]*ProxyClientConnection),
-		PendingDial: make(map[int64]*ProxyClientConnection),
-		serverID:    serverID,
-		serverCount: serverCount,
-		backends:    make(map[string][]agent.AgentService_ConnectServer),
-		random:      rand.New(rand.NewSource(time.Now().UTC().UnixNano())),
+		Frontends:                  make(map[int64]*ProxyClientConnection),
+		PendingDial:                make(map[int64]*ProxyClientConnection),
+		serverID:                   serverID,
+		serverCount:                serverCount,
+		backends:                   make(map[string][]agent.AgentService_ConnectServer),
+		random:                     rand.New(rand.NewSource(time.Now().UTC().UnixNano())),
+		AgentAuthenticationOptions: agentAuthenticationOptions,
 	}
 }
 
@@ -295,6 +311,76 @@ func agentID(stream agent.AgentService_ConnectServer) (string, error) {
 	return agentIDs[0], nil
 }
 
+func (s *ProxyServer) validateAuthToken(token string) error {
+	trReq := &authv1.TokenReview{
+		Spec: authv1.TokenReviewSpec{
+			Token:     token,
+			Audiences: []string{s.AgentAuthenticationOptions.AuthenticationAudience},
+		},
+	}
+	r, err := s.AgentAuthenticationOptions.KubernetesClient.AuthenticationV1().TokenReviews().Create(trReq)
+	if err != nil {
+		return fmt.Errorf("Failed to authenticate request. err:%v", err)
+	}
+
+	if r.Status.Error != "" {
+		return fmt.Errorf("lookup failed: %s", r.Status.Error)
+	}
+
+	if !r.Status.Authenticated {
+		return fmt.Errorf("lookup failed: service account jwt not valid")
+	}
+
+	// The username is of format: system:serviceaccount:(NAMESPACE):(SERVICEACCOUNT)
+	parts := strings.Split(r.Status.User.Username, ":")
+	if len(parts) != 4 {
+		return fmt.Errorf("lookup failed: unexpected username format")
+	}
+	// Validate the user that comes back from token review is a service account
+	if parts[0] != "system" || parts[1] != "serviceaccount" {
+		return fmt.Errorf("lookup failed: username returned is not a service account")
+	}
+
+	ns := parts[2]
+	sa := parts[3]
+	if s.AgentAuthenticationOptions.AgentNamespace != ns {
+		return fmt.Errorf("lookup failed: incoming request from %q namespace. Expected %q", ns, s.AgentAuthenticationOptions.AgentNamespace)
+	}
+
+	if s.AgentAuthenticationOptions.AgentServiceAccount != sa {
+		return fmt.Errorf("lookup failed: incoming request from %q service account. Expected %q", sa, s.AgentAuthenticationOptions.AgentServiceAccount)
+	}
+
+	return nil
+}
+
+func (s *ProxyServer) authenticateAgentViaToken(ctx context.Context) error {
+	md, ok := metadata.FromIncomingContext(ctx)
+	if !ok {
+		return fmt.Errorf("Failed to retrieve metadata from context")
+	}
+
+	authContext := md.Get(header.AuthenticationTokenContextKey)
+	if len(authContext) == 0 {
+		return fmt.Errorf("Authentication context was not found in metadata")
+	}
+
+	if len(authContext) > 1 {
+		return fmt.Errorf("too many (%d) tokens are received", len(authContext))
+	}
+
+	if !strings.HasPrefix(authContext[0], header.AuthenticationTokenContextSchemePrefix) {
+		return fmt.Errorf("received token does not have %q prefix", header.AuthenticationTokenContextSchemePrefix)
+	}
+
+	if err := s.validateAuthToken(strings.TrimPrefix(authContext[0], header.AuthenticationTokenContextSchemePrefix)); err != nil {
+		return fmt.Errorf("Failed to validate authentication token, err:%v", err)
+	}
+
+	klog.Infof("Client successfully authenticated via token")
+	return nil
+}
+
 // Connect is for agent to connect to ProxyServer as next hop
 func (s *ProxyServer) Connect(stream agent.AgentService_ConnectServer) error {
 	agentID, err := agentID(stream)
@@ -312,6 +398,13 @@ func (s *ProxyServer) Connect(stream agent.AgentService_ConnectServer) error {
 
 	recvCh := make(chan *agent.Packet, 10)
 	stopCh := make(chan error)
+
+	if s.AgentAuthenticationOptions.Enabled {
+		if err := s.authenticateAgentViaToken(stream.Context()); err != nil {
+			klog.Infof("Client authentication failed. err:%v", err)
+			return err
+		}
+	}
 
 	go s.serveRecvBackend(stream, recvCh)
 

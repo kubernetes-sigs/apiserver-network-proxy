@@ -20,4 +20,11 @@ const (
 	ServerCount = "serverCount"
 	ServerID    = "serverID"
 	AgentID     = "agentID"
+	// AuthenticationTokenContextKey will be used as a key to store authentication tokens in grpc call
+	// (https://tools.ietf.org/html/rfc6750#section-2.1)
+	AuthenticationTokenContextKey = "Authorization"
+
+	// AuthenticationTokenContextSchemePrefix has a prefix for auth token's content.
+	// (https://tools.ietf.org/html/rfc6750#section-2.1)
+	AuthenticationTokenContextSchemePrefix = "Bearer "
 )

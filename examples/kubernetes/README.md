@@ -20,14 +20,40 @@ KUBIA_IP=$(kubectl get svc kubia -o=jsonpath='{.spec.clusterIP}')
 PROXY_IMAGE=$(docker images | grep "proxy-server-" -m1 | awk '{print $1}')
 AGENT_IMAGE=$(docker images | grep "proxy-agent-" -m1 | awk '{print $1}')
 TEST_CLIENT_IMAGE=$(docker images | grep "proxy-test-client-" -m1 | awk '{print $1}')
+SERVER_TOKEN=$(./examples/kubernetes/token_generation.sh 32)
 CLUSTER_CERT=<yourdirectory/server.crt>
 CLUSTER_KEY=</yourdirectory/server.key>
 ```
 
-#### GKE specific configuration
+#### GCE sample configuration
 ```bash
 CLUSTER_CERT=/etc/srv/kubernetes/pki/apiserver.crt
 CLUSTER_KEY=/etc/srv/kubernetes/pki/apiserver.key
+```
+
+# Register SERVER_TOKEN in [static-token-file](https://kubernetes.io/docs/reference/access-authn-authz/authentication/#static-token-file)
+Append the output of the following line to the [static-token-file](https://kubernetes.io/docs/reference/access-authn-authz/authentication/#static-token-file) and restart **kube-apiserver** on the master
+```bash
+echo "${SERVER_TOKEN},system:konnectivity-server,uid:system:konnectivity-server"
+```
+
+#### GCE sample configuration
+1. [static-token-file](https://kubernetes.io/docs/reference/access-authn-authz/authentication/#static-token-file) location is: **/etc/srv/kubernetes/known_tokens.csv**
+
+1. Restart kube-apiserver
+```bash
+K8S_API_PID=$(sudo crictl ps | grep kube-apiserver | awk '{ print $1; }') 
+sudo crictl stop ${K8S_API_PID}
+```
+
+# Save following config at /etc/srv/kubernetes/konnectivity-server/kubeconfig on master VM
+```bash
+SERVER_TOKEN=${SERVER_TOKEN} envsubst < examples/kubernetes/kubeconfig
+```
+
+# Create a clusterrolebinding allowing proxy-server authenticate proxy-client
+```bash
+kubectl create clusterrolebinding --user system:konnectivity-server --clusterrole system:auth-delegator system:konnectivity-server
 ```
 
 # Start **proxy-server** as a [static pod](https://kubernetes.io/docs/tasks/configure-pod-container/static-pod/) with following configuration

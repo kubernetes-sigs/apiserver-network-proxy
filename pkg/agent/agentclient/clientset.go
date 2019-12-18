@@ -46,6 +46,8 @@ type ClientSet struct {
 	reconnectInterval time.Duration // The interval by which the agent
 	// tries to reconnect.
 	dialOption grpc.DialOption
+	// file path contains service account token
+	serviceAccountTokenPath string
 }
 
 func (cs *ClientSet) ClientsCount() int {
@@ -105,6 +107,7 @@ type ClientSetConfig struct {
 	ProbeInterval     time.Duration
 	ReconnectInterval time.Duration
 	DialOption        grpc.DialOption
+	ServiceAccountTokenPath string
 }
 
 func (cc *ClientSetConfig) NewAgentClientSet() *ClientSet {
@@ -116,6 +119,7 @@ func (cc *ClientSetConfig) NewAgentClientSet() *ClientSet {
 		probeInterval:     cc.ProbeInterval,
 		reconnectInterval: cc.ReconnectInterval,
 		dialOption:        cc.DialOption,
+		serviceAccountTokenPath: cc.ServiceAccountTokenPath,
 	}
 
 }
