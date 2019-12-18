@@ -18,10 +18,8 @@ package main
 
 import (
 	"crypto/tls"
-	"crypto/x509"
 	"flag"
 	"fmt"
-	"io/ioutil"
 	"net/http"
 	"os"
 
@@ -158,26 +156,12 @@ func (a *Agent) run(o *GrpcProxyAgentOptions) error {
 }
 
 func (a *Agent) runProxyConnection(o *GrpcProxyAgentOptions) error {
-	agentCert, err := tls.LoadX509KeyPair(o.agentCert, o.agentKey)
-	if err != nil {
-		return fmt.Errorf("failed to load X509 key pair %s and %s: %v", o.agentCert, o.agentKey, err)
+	var tlsConfig *tls.Config
+	var err error
+	if tlsConfig, err = util.GetClientTLSConfig(o.caCert, o.agentCert, o.agentKey, o.proxyServerHost); err != nil {
+		return err
 	}
-	certPool := x509.NewCertPool()
-	caCert, err := ioutil.ReadFile(o.caCert)
-	if err != nil {
-		return fmt.Errorf("failed to read agent CA cert %s: %v", o.caCert, err)
-	}
-	ok := certPool.AppendCertsFromPEM(caCert)
-	if !ok {
-		return fmt.Errorf("failed to append CA cert to the cert pool")
-	}
-
-	transportCreds := credentials.NewTLS(&tls.Config{
-		ServerName:   o.proxyServerHost,
-		Certificates: []tls.Certificate{agentCert},
-		RootCAs:      certPool,
-	})
-	dialOption := grpc.WithTransportCredentials(transportCreds)
+	dialOption := grpc.WithTransportCredentials(credentials.NewTLS(tlsConfig))
 	client, err := agentclient.NewAgentClient(fmt.Sprintf("%s:%d", o.proxyServerHost, o.proxyServerPort), dialOption)
 	if err != nil {
 		return err

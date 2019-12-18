@@ -20,7 +20,6 @@ import (
 	"bufio"
 	"context"
 	"crypto/tls"
-	"crypto/x509"
 	"flag"
 	"fmt"
 	"io/ioutil"
@@ -57,6 +56,7 @@ func main() {
 		klog.Flush()
 		os.Exit(1)
 	}
+	klog.Flush()
 }
 
 type GrpcProxyClientOptions struct {
@@ -84,7 +84,7 @@ func (o *GrpcProxyClientOptions) Flags() *pflag.FlagSet {
 	flags.IntVar(&o.requestPort, "request-port", o.requestPort, "The port the request server is listening on.")
 	flags.StringVar(&o.proxyHost, "proxy-host", o.proxyHost, "The host of the proxy server.")
 	flags.IntVar(&o.proxyPort, "proxy-port", o.proxyPort, "The port the proxy server is listening on.")
-	flags.StringVar(&o.proxyUdsName, "proxy-uds", o.proxyHost, "The UDS name to connect to.")
+	flags.StringVar(&o.proxyUdsName, "proxy-uds", o.proxyUdsName, "The UDS name to connect to.")
 	flags.StringVar(&o.mode, "mode", o.mode, "Mode can be either 'grpc' or 'http-connect'.")
 
 	return flags
@@ -142,6 +142,9 @@ func (o *GrpcProxyClientOptions) Validate() error {
 		return fmt.Errorf("please do not try to use reserved port %d for the proxy server port", o.proxyPort)
 	}
 	if o.proxyUdsName != "" {
+		if o.proxyHost != "" {
+			return fmt.Errorf("please do set proxy host when using UDS")
+		}
 		if o.proxyPort != 0 {
 			return fmt.Errorf("please do set proxy server port to 0 not %d when using UDS", o.proxyPort)
 		}
@@ -305,25 +308,12 @@ func (c *Client) getUDSDialer(o *GrpcProxyClientOptions) (func(ctx context.Conte
 }
 
 func (c *Client) getMTLSDialer(o *GrpcProxyClientOptions) (func(ctx context.Context, network, addr string) (net.Conn, error), error) {
-	clientCert, err := tls.LoadX509KeyPair(o.clientCert, o.clientKey)
+	var tlsConfig *tls.Config
+	var err error
+	tlsConfig, err = util.GetClientTLSConfig(o.caCert, o.clientCert, o.clientKey, o.proxyHost)
 	if err != nil {
-		return nil, fmt.Errorf("failed to read key pair %s & %s, got %v", o.clientCert, o.clientKey, err)
+		return nil, err
 	}
-	certPool := x509.NewCertPool()
-	caCert, err := ioutil.ReadFile(o.caCert)
-	if err != nil {
-		return nil, fmt.Errorf("failed to read cert file %s, got %v", o.caCert, err)
-	}
-	ok := certPool.AppendCertsFromPEM(caCert)
-	if !ok {
-		return nil, fmt.Errorf("failed to append CA cert to the cert pool")
-	}
-
-	transportCreds := credentials.NewTLS(&tls.Config{
-		ServerName:   "127.0.0.1",
-		Certificates: []tls.Certificate{clientCert},
-		RootCAs:      certPool,
-	})
 
 	var proxyConn net.Conn
 
@@ -339,6 +329,7 @@ func (c *Client) getMTLSDialer(o *GrpcProxyClientOptions) (func(ctx context.Cont
 
 	switch o.mode {
 	case "grpc":
+		transportCreds := credentials.NewTLS(tlsConfig)
 		dialOption := grpc.WithTransportCredentials(transportCreds)
 		serverAddress := fmt.Sprintf("%s:%d", o.proxyHost, o.proxyPort)
 		tunnel, err := client.CreateGrpcTunnel(serverAddress, dialOption)
@@ -355,13 +346,7 @@ func (c *Client) getMTLSDialer(o *GrpcProxyClientOptions) (func(ctx context.Cont
 		proxyAddress := fmt.Sprintf("%s:%d", o.proxyHost, o.proxyPort)
 		requestAddress := fmt.Sprintf("%s:%d", o.requestHost, o.requestPort)
 
-		proxyConn, err = tls.Dial("tcp", proxyAddress,
-			&tls.Config{
-				ServerName:   o.proxyHost,
-				Certificates: []tls.Certificate{clientCert},
-				RootCAs:      certPool,
-			},
-		)
+		proxyConn, err = tls.Dial("tcp", proxyAddress, tlsConfig)
 		if err != nil {
 			return nil, fmt.Errorf("dialing proxy %q failed: %v", proxyAddress, err)
 		}

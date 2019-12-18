@@ -108,6 +108,9 @@ python -m SimpleHTTPServer
 curl -v -p --proxy-key certs/master/private/proxy-client.key --proxy-cert certs/master/issued/proxy-client.crt --proxy-cacert certs/master/issued/ca.crt --proxy-cert-type PEM -x https://127.0.0.1:8090  http://localhost:8000```
 ```
 
+### Running on kubernetes
+See following [README.md](examples/kubernetes/README.md) 
+
 ## Troubleshoot
 
 ### Undefined ProtoPackageIsVersion3
@@ -118,4 +121,3 @@ protoc-gen-go binary has to be built from the vendored version:
 go install ./vendor/github.com/golang/protobuf/protoc-gen-go
 make gen
 ```
-
