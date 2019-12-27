@@ -17,24 +17,28 @@ limitations under the License.
 package main
 
 import (
+	"context"
 	"crypto/tls"
 	"crypto/x509"
 	"flag"
 	"fmt"
 	"io/ioutil"
+	"k8s.io/klog"
 	"net"
 	"net/http"
 	"os"
+	"os/signal"
+	"syscall"
 
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/spf13/cobra"
 	"github.com/spf13/pflag"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials"
-	"k8s.io/klog"
 	"sigs.k8s.io/apiserver-network-proxy/pkg/agent/agentserver"
 	"sigs.k8s.io/apiserver-network-proxy/pkg/util"
 	"sigs.k8s.io/apiserver-network-proxy/proto/agent"
+
 )
 
 func main() {
@@ -68,6 +72,8 @@ type ProxyRunOptions struct {
 	clusterCaCert string
 	// Flag to switch between gRPC and HTTP Connect
 	mode string
+	// Location for use by the "unix" network. Setting enables UDS for server connections.
+	udsName string
 	// Port we listen for server connections on.
 	serverPort uint
 	// Port we listen for agent connections on.
@@ -85,7 +91,8 @@ func (o *ProxyRunOptions) Flags() *pflag.FlagSet {
 	flags.StringVar(&o.clusterKey, "cluster-key", o.clusterKey, "If non-empty secure communication with this key.")
 	flags.StringVar(&o.clusterCaCert, "cluster-ca-cert", o.clusterCaCert, "If non-empty the CA we use to validate Agent clients.")
 	flags.StringVar(&o.mode, "mode", "grpc", "Mode can be either 'grpc' or 'http-connect'.")
-	flags.UintVar(&o.serverPort, "server-port", 8090, "Port we listen for server connections on.")
+	flags.StringVar(&o.udsName, "udsName", "", "UdsName should be empty for TCP traffic. For UDS set to its name.")
+	flags.UintVar(&o.serverPort, "server-port", 8090, "Port we listen for server connections on. Set to 0 for UDS.")
 	flags.UintVar(&o.agentPort, "agent-port", 8091, "Port we listen for agent connections on.")
 	flags.UintVar(&o.adminPort, "admin-port", 8092, "Port we listen for admin connections on.")
 	return flags
@@ -99,6 +106,7 @@ func (o *ProxyRunOptions) Print() {
 	klog.Warningf("ClusterKey set to %q.\n", o.clusterKey)
 	klog.Warningf("ClusterCACert set to %q.\n", o.clusterCaCert)
 	klog.Warningf("Mode set to %q.\n", o.mode)
+	klog.Warningf("UDSName set to %q.\n", o.udsName)
 	klog.Warningf("Server port set to %d.\n", o.serverPort)
 	klog.Warningf("Agent port set to %d.\n", o.agentPort)
 	klog.Warningf("Admin port set to %d.\n", o.adminPort)
@@ -150,6 +158,20 @@ func (o *ProxyRunOptions) Validate() error {
 	if o.mode != "grpc" && o.mode != "http-connect" {
 		return fmt.Errorf("mode must be set to either 'grpc' or 'http-connect' not %q", o.mode)
 	}
+	if o.udsName != "" {
+		if o.serverPort != 0 {
+			return fmt.Errorf("server port should be set to 0 not %d for UDS", o.serverPort)
+		}
+		if o.serverKey != "" {
+			return fmt.Errorf("server key should not be set for UDS")
+		}
+		if o.serverCert != "" {
+			return fmt.Errorf("server cert should not be set for UDS")
+		}
+		if o.serverCaCert != "" {
+			return fmt.Errorf("server ca cert should not be set for UDS")
+		}
+	}
 	if o.serverPort > 49151 {
 		return fmt.Errorf("please do not try to use ephemeral port %d for the server port", o.serverPort)
 	}
@@ -160,7 +182,9 @@ func (o *ProxyRunOptions) Validate() error {
 		return fmt.Errorf("please do not try to use ephemeral port %d for the admin port", o.adminPort)
 	}
 	if o.serverPort < 1024 {
-		return fmt.Errorf("please do not try to use reserved port %d for the server port", o.serverPort)
+		if o.udsName == "" {
+			return fmt.Errorf("please do not try to use reserved port %d for the server port", o.serverPort)
+		}
 	}
 	if o.agentPort < 1024 {
 		return fmt.Errorf("please do not try to use reserved port %d for the agent port", o.agentPort)
@@ -180,6 +204,7 @@ func newProxyRunOptions() *ProxyRunOptions {
 		clusterKey:    "",
 		clusterCaCert: "",
 		mode:          "grpc",
+		udsName:       "",
 		serverPort:    8090,
 		agentPort:     8091,
 		adminPort:     8092,
@@ -202,15 +227,18 @@ func newProxyCommand(p *Proxy, o *ProxyRunOptions) *cobra.Command {
 type Proxy struct {
 }
 
+type StopFunc func()
+
 func (p *Proxy) run(o *ProxyRunOptions) error {
 	o.Print()
 	if err := o.Validate(); err != nil {
 		return fmt.Errorf("failed to validate server options with %v", err)
 	}
+	ctx, cancel := context.WithCancel(context.Background())
 	server := agentserver.NewProxyServer()
 
 	klog.Info("Starting master server for client connections.")
-	err := p.runMasterServer(o, server)
+	masterStop, err := p.runMasterServer(ctx, o, server)
 	if err != nil {
 		return fmt.Errorf("failed to run the master server: %v", err)
 	}
@@ -227,25 +255,95 @@ func (p *Proxy) run(o *ProxyRunOptions) error {
 		return fmt.Errorf("failed to run the admin server: %v", err)
 	}
 
-	stopCh := make(chan struct{})
+	stopCh := SetupSignalHandler()
 	<-stopCh
+	klog.Info("Shutting down server.")
+
+	if masterStop != nil {
+		masterStop()
+	}
+	cancel()
 
 	return nil
 }
 
-func (p *Proxy) runMasterServer(o *ProxyRunOptions, server *agentserver.ProxyServer) error {
+var shutdownSignals = []os.Signal{os.Interrupt, syscall.SIGTERM}
+
+func SetupSignalHandler() (stopCh <-chan struct{}) {
+	stop := make(chan struct{})
+	c := make(chan os.Signal, 2)
+	signal.Notify(c, shutdownSignals...)
+	go func() {
+		<-c
+		close(stop)
+		<-c
+		os.Exit(1) // second signal. Exit directly.
+	}()
+
+	return stop
+}
+
+func (p *Proxy) runMasterServer(ctx context.Context, o *ProxyRunOptions, server *agentserver.ProxyServer) (StopFunc, error) {
+	if o.udsName != "" {
+		return p.runUDSMasterServer(ctx, o, server)
+	}
+	return p.runMTLSMasterServer(ctx, o, server)
+}
+
+func (p *Proxy) runUDSMasterServer(ctx context.Context, o *ProxyRunOptions, server *agentserver.ProxyServer) (StopFunc, error) {
+	var stop StopFunc
+	if o.mode == "grpc" {
+		grpcServer := grpc.NewServer()
+		agent.RegisterProxyServiceServer(grpcServer, server)
+		var lc net.ListenConfig
+		lis, err := lc.Listen(ctx, "unix", o.udsName)
+		if err != nil {
+			return nil, fmt.Errorf("failed to listen(unix) name %s: %v", o.udsName, err)
+		}
+		go grpcServer.Serve(lis)
+		stop = grpcServer.GracefulStop
+	} else {
+		// http-connect
+		server := &http.Server{
+			Handler: &agentserver.Tunnel{
+				Server: server,
+			},
+		}
+		stop = func() { server.Shutdown(ctx) }
+		go func() {
+			var lc net.ListenConfig
+			udsListener, err := lc.Listen(ctx, "unix", o.udsName)
+			if err != nil {
+				klog.Errorf("failed to listen on uds name %s: %v ", o.udsName, err)
+			}
+			defer func() {
+				udsListener.Close()
+			}()
+			err = server.Serve(udsListener)
+			if err != nil {
+				klog.Errorf("failed to serve uds requests: %v", err)
+			}
+		}()
+	}
+
+	return stop, nil
+}
+
+func (p *Proxy) runMTLSMasterServer(ctx context.Context, o *ProxyRunOptions, server *agentserver.ProxyServer) (StopFunc, error) {
+	var stop StopFunc
+
 	proxyCert, err := tls.LoadX509KeyPair(o.serverCert, o.serverKey)
 	if err != nil {
-		return fmt.Errorf("failed to load X509 key pair %s and %s: %v", o.serverCert, o.serverKey, err)
+		return nil, fmt.Errorf("failed to load X509 key pair %s and %s: %v", o.serverCert, o.serverKey, err)
 	}
 	certPool := x509.NewCertPool()
 	caCert, err := ioutil.ReadFile(o.serverCaCert)
 	if err != nil {
-		return fmt.Errorf("failed to read server CA cert %s: %v", o.serverCaCert, err)
+		return nil, fmt.Errorf("failed to read server CA cert %s: %v", o.serverCaCert, err)
 	}
 	ok := certPool.AppendCertsFromPEM(caCert)
 	if !ok {
-		return fmt.Errorf("failed to append master CA cert to the cert pool")
+		return nil, fmt.Errorf("failed to append master CA cert to the cert pool")
 	}
 
 	tlsConfig := &tls.Config{
@@ -261,20 +359,22 @@ func (p *Proxy) runMasterServer(o *ProxyRunOptions, server *agentserver.ProxySer
 		agent.RegisterProxyServiceServer(grpcServer, server)
 		lis, err := net.Listen("tcp", addr)
 		if err != nil {
-			return fmt.Errorf("failed to listen on %s: %v", addr, err)
+			return nil, fmt.Errorf("failed to listen on %s: %v", addr, err)
 		}
 		go grpcServer.Serve(lis)
+		stop = grpcServer.GracefulStop
 	} else {
+		// http-connect
+		server := &http.Server{
+			Addr:      addr,
+			TLSConfig: tlsConfig,
+			Handler: &agentserver.Tunnel{
+				Server: server,
+			},
+			TLSNextProto: make(map[string]func(*http.Server, *tls.Conn, http.Handler)),
+		}
+		stop = func() { server.Shutdown(ctx) }
 		go func() {
-			// http-connect
-			server := &http.Server{
-				Addr:      addr,
-				TLSConfig: tlsConfig,
-				Handler: &agentserver.Tunnel{
-					Server: server,
-				},
-				TLSNextProto: make(map[string]func(*http.Server, *tls.Conn, http.Handler)),
-			}
 			err := server.ListenAndServeTLS("", "") // empty files defaults to tlsConfig
 			if err != nil {
 				klog.Errorf("failed to listen on master port %v", err)
@@ -282,7 +382,7 @@ func (p *Proxy) runMasterServer(o *ProxyRunOptions, server *agentserver.ProxySer
 		}()
 	}
 
-	return nil
+	return stop, nil
 }
 
 func (p *Proxy) runAgentServer(o *ProxyRunOptions, server *agentserver.ProxyServer) error {

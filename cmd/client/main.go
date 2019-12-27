@@ -28,6 +28,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"time"
 
 	"github.com/spf13/cobra"
 	"github.com/spf13/pflag"
@@ -68,6 +69,7 @@ type GrpcProxyClientOptions struct {
 	requestPort  int
 	proxyHost    string
 	proxyPort    int
+	proxyUdsName string
 	mode         string
 }
 
@@ -82,6 +84,7 @@ func (o *GrpcProxyClientOptions) Flags() *pflag.FlagSet {
 	flags.IntVar(&o.requestPort, "request-port", o.requestPort, "The port the request server is listening on.")
 	flags.StringVar(&o.proxyHost, "proxy-host", o.proxyHost, "The host of the proxy server.")
 	flags.IntVar(&o.proxyPort, "proxy-port", o.proxyPort, "The port the proxy server is listening on.")
+	flags.StringVar(&o.proxyUdsName, "proxy-uds", o.proxyHost, "The UDS name to connect to.")
 	flags.StringVar(&o.mode, "mode", o.mode, "Mode can be either 'grpc' or 'http-connect'.")
 
 	return flags
@@ -97,6 +100,7 @@ func (o *GrpcProxyClientOptions) Print() {
 	klog.Warningf("RequestPort set to %d.\n", o.requestPort)
 	klog.Warningf("ProxyHost set to %q.\n", o.proxyHost)
 	klog.Warningf("ProxyPort set to %d.\n", o.proxyPort)
+	klog.Warningf("ProxyUdsName set to %q.\n", o.proxyUdsName)
 	klog.Warningf("Mode set to %q.\n", o.mode)
 }
 
@@ -134,8 +138,17 @@ func (o *GrpcProxyClientOptions) Validate() error {
 	if o.proxyPort > 49151 {
 		return fmt.Errorf("please do not try to use ephemeral port %d for the proxy server port", o.proxyPort)
 	}
-	if o.proxyPort < 1024 {
+	if o.proxyPort < 1024 && o.proxyUdsName == "" {
 		return fmt.Errorf("please do not try to use reserved port %d for the proxy server port", o.proxyPort)
+	}
+	if o.proxyUdsName != "" {
+		if o.proxyPort != 0 {
+			return fmt.Errorf("please do set proxy server port to 0 not %d when using UDS", o.proxyPort)
+		}
+		if o.clientKey != "" || o.clientCert != "" || o.caCert != "" {
+			return fmt.Errorf("please do set cert materials when using UDS, key = %s, cert = %s, CA = %s",
+				o.clientKey, o.clientCert, o.caCert)
+		}
 	}
 	return nil
 }
@@ -151,6 +164,7 @@ func newGrpcProxyClientOptions() *GrpcProxyClientOptions {
 		requestPort:  8000,
 		proxyHost:    "localhost",
 		proxyPort:    8090,
+		proxyUdsName: "",
 		mode:         "grpc",
 	}
 	return &o
@@ -211,6 +225,86 @@ func (c *Client) run(o *GrpcProxyClientOptions) error {
 }
 
 func (c *Client) getDialer(o *GrpcProxyClientOptions) (func(ctx context.Context, network, addr string) (net.Conn, error), error) {
+	if o.proxyUdsName != "" {
+		return c.getUDSDialer(o)
+	}
+	return c.getMTLSDialer(o)
+}
+
+func (c *Client) getUDSDialer(o *GrpcProxyClientOptions) (func(ctx context.Context, network, addr string) (net.Conn, error), error) {
+	var proxyConn net.Conn
+	var err error
+
+	// Setup signal handler
+	ch := make(chan os.Signal, 1)
+	signal.Notify(ch)
+
+	go func() {
+		<-ch
+		if proxyConn != nil {
+			err := proxyConn.Close()
+			klog.Infof("connection closed: %v", err)
+		}
+	}()
+
+	switch o.mode {
+	case "grpc":
+		dialOption := grpc.WithDialer(func(string, time.Duration) (net.Conn, error) {
+			// Ignoring addr and timeout arguments:
+			// addr - comes from the closure
+			// timeout - is turned off as this is test code and eases debugging.
+			c, err := net.DialTimeout("unix", o.proxyUdsName, 0)
+			if err != nil {
+				klog.Errorf("failed to create connection to uds name %s, error: %v", o.proxyUdsName, err)
+			}
+			return c, err
+		})
+		tunnel, err := client.CreateGrpcTunnel(o.proxyUdsName, dialOption, grpc.WithInsecure())
+		if err != nil {
+			return nil, fmt.Errorf("failed to create tunnel %s, got %v", o.proxyUdsName, err)
+		}
+
+		requestAddress := fmt.Sprintf("%s:%d", o.requestHost, o.requestPort)
+		proxyConn, err = tunnel.Dial("tcp", requestAddress)
+		if err != nil {
+			return nil, fmt.Errorf("failed to dial request %s, got %v", requestAddress, err)
+		}
+	case "http-connect":
+		requestAddress := fmt.Sprintf("%s:%d", o.requestHost, o.requestPort)
+
+		proxyConn, err = net.Dial("unix", o.proxyUdsName)
+		if err != nil {
+			return nil, fmt.Errorf("dialing proxy %q failed: %v", o.proxyUdsName, err)
+		}
+		fmt.Fprintf(proxyConn, "CONNECT %s HTTP/1.1\r\nHost: %s\r\n\r\n", requestAddress, "127.0.0.1")
+		br := bufio.NewReader(proxyConn)
+		res, err := http.ReadResponse(br, nil)
+		if err != nil {
+			return nil, fmt.Errorf("reading HTTP response from CONNECT to %s via uds proxy %s failed: %v",
+				requestAddress, o.proxyUdsName, err)
+		}
+		if res.StatusCode != 200 {
+			return nil, fmt.Errorf("proxy error from %s while dialing %s: %v", o.proxyUdsName, requestAddress, res.Status)
+		}
+
+		// It's safe to discard the bufio.Reader here and return the
+		// original TCP conn directly because we only use this for
+		// TLS, and in TLS the client speaks first, so we know there's
+		// no unbuffered data. But we can double-check.
+		if br.Buffered() > 0 {
+			return nil, fmt.Errorf("unexpected %d bytes of buffered data from CONNECT uds proxy %q",
+				br.Buffered(), o.proxyUdsName)
+		}
+	default:
+		return nil, fmt.Errorf("failed to process mode %s", o.mode)
+	}
+
+	return func(ctx context.Context, network, addr string) (net.Conn, error) {
+		return proxyConn, nil
+	}, nil
+}
+
+func (c *Client) getMTLSDialer(o *GrpcProxyClientOptions) (func(ctx context.Context, network, addr string) (net.Conn, error), error) {
 	clientCert, err := tls.LoadX509KeyPair(o.clientCert, o.clientKey)
 	if err != nil {
 		return nil, fmt.Errorf("failed to read key pair %s & %s, got %v", o.clientCert, o.clientKey, err)
