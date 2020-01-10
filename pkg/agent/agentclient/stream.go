@@ -109,8 +109,11 @@ func (c *RedialableAgentClient) probe() {
 		case <-c.stopCh:
 			return
 		case <-time.After(c.Interval):
+			if c.conn == nil {
+				continue
+			}
 			// health check
-			if c.conn != nil && c.conn.GetState() == connectivity.Ready {
+			if c.conn.GetState() == connectivity.Ready {
 				continue
 			} else {
 				klog.Infof("Connection state %v", c.conn.GetState())
@@ -256,7 +259,7 @@ func (c *RedialableAgentClient) reconnect() {
 		}
 		switch {
 		case r.serverID == c.serverID:
-			klog.Info("reconnected to %s", serverID)
+			klog.Infof("reconnected to %s", r.serverID)
 			c.conn = r.grpcConn
 			c.stream = r.agentServiceClient
 			c.doneReconnect(nil)
@@ -308,6 +311,7 @@ func serverCount(stream agent.AgentService_ConnectClient) (int, error) {
 }
 
 func serverID(stream agent.AgentService_ConnectClient) (string, error) {
+	// TODO: this is a blocking call. Add a timeout?
 	md, err := stream.Header()
 	if err != nil {
 		return "", err

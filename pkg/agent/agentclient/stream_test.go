@@ -7,9 +7,12 @@ import (
 	"testing"
 	"time"
 
+	"github.com/google/uuid"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/metadata"
 	"k8s.io/klog"
 	"sigs.k8s.io/apiserver-network-proxy/proto/agent"
+	"sigs.k8s.io/apiserver-network-proxy/proto/header"
 )
 
 func TestReconnectExits(t *testing.T) {
@@ -19,7 +22,7 @@ func TestReconnectExits(t *testing.T) {
 
 	time.Sleep(time.Millisecond)
 
-	client, err := NewRedialableAgentClient("localhost:8899", grpc.WithInsecure())
+	client, err := NewRedialableAgentClient("localhost:8899", uuid.New().String(), &ClientSet{}, grpc.WithInsecure())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -82,6 +85,11 @@ func newTestServer(addr string) *testServer {
 
 func (s *testServer) Connect(stream agent.AgentService_ConnectServer) error {
 	stopCh := make(chan error)
+
+	h := metadata.Pairs(header.ServerID, "", header.ServerCount, "1")
+	if err := stream.SendHeader(h); err != nil {
+		return err
+	}
 
 	// Recv only
 	go func() {

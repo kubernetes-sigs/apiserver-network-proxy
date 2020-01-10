@@ -12,6 +12,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/google/uuid"
 	"google.golang.org/grpc"
 	"sigs.k8s.io/apiserver-network-proxy/pkg/agent/agentclient"
 	"sigs.k8s.io/apiserver-network-proxy/pkg/agent/agentserver"
@@ -227,7 +228,7 @@ func runGRPCProxyServer() (proxy, func(), error) {
 	var err error
 	var lis, lis2 net.Listener
 
-	server := agentserver.NewProxyServer()
+	server := agentserver.NewProxyServer(uuid.New().String(), 0)
 	grpcServer := grpc.NewServer()
 	agentServer := grpc.NewServer()
 	cleanup := func() {
@@ -262,7 +263,7 @@ func runGRPCProxyServer() (proxy, func(), error) {
 
 func runHTTPConnProxyServer() (proxy, func(), error) {
 	var proxy proxy
-	server := agentserver.NewProxyServer()
+	server := agentserver.NewProxyServer(uuid.New().String(), 0)
 	agentServer := grpc.NewServer()
 
 	agent.RegisterAgentServiceServer(agentServer, server)
@@ -304,12 +305,8 @@ func runHTTPConnProxyServer() (proxy, func(), error) {
 }
 
 func runAgent(addr string, stopCh <-chan struct{}) error {
-	client, err := agentclient.NewAgentClient(addr, grpc.WithInsecure())
-	if err != nil {
-		return err
-	}
-
-	go client.Serve(stopCh)
+	client := agentclient.NewAgentClientSet(addr, uuid.New().String(), 5*time.Second, grpc.WithInsecure())
+	go client.Serve()
 
 	return nil
 }
