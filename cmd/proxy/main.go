@@ -38,7 +38,6 @@ import (
 	"sigs.k8s.io/apiserver-network-proxy/pkg/agent/agentserver"
 	"sigs.k8s.io/apiserver-network-proxy/pkg/util"
 	"sigs.k8s.io/apiserver-network-proxy/proto/agent"
-
 )
 
 func main() {
@@ -329,28 +328,43 @@ func (p *Proxy) runUDSMasterServer(ctx context.Context, o *ProxyRunOptions, serv
 	return stop, nil
 }
 
-func (p *Proxy) runMTLSMasterServer(ctx context.Context, o *ProxyRunOptions, server *agentserver.ProxyServer) (StopFunc, error) {
-	var stop StopFunc
-
-	proxyCert, err := tls.LoadX509KeyPair(o.serverCert, o.serverKey)
+func (p *Proxy) getTLSConfig(caFile, certFile, keyFile string) (*tls.Config, error) {
+	cert, err := tls.LoadX509KeyPair(certFile, keyFile)
 	if err != nil {
-		return nil, fmt.Errorf("failed to load X509 key pair %s and %s: %v", o.serverCert, o.serverKey, err)
+		return nil, fmt.Errorf("failed to load X509 key pair %s and %s: %v", certFile, keyFile, err)
 	}
+
+	if caFile == "" {
+		return &tls.Config{Certificates: []tls.Certificate{cert}}, nil
+	}
+
 	certPool := x509.NewCertPool()
-	caCert, err := ioutil.ReadFile(o.serverCaCert)
+	caCert, err := ioutil.ReadFile(caFile)
 	if err != nil {
-		return nil, fmt.Errorf("failed to read server CA cert %s: %v", o.serverCaCert, err)
+		return nil, fmt.Errorf("failed to read cluster CA cert %s: %v", caFile, err)
 	}
 	ok := certPool.AppendCertsFromPEM(caCert)
 	if !ok {
-		return nil, fmt.Errorf("failed to append master CA cert to the cert pool")
+		return nil, fmt.Errorf("failed to append cluster CA cert to the cert pool")
 	}
-
 	tlsConfig := &tls.Config{
 		ClientAuth:   tls.RequireAndVerifyClientCert,
-		Certificates: []tls.Certificate{proxyCert},
+		Certificates: []tls.Certificate{cert},
 		ClientCAs:    certPool,
 	}
+
+	return tlsConfig, nil
+}
+
+func (p *Proxy) runMTLSMasterServer(ctx context.Context, o *ProxyRunOptions, server *agentserver.ProxyServer) (StopFunc, error) {
+	var stop StopFunc
+
+	var tlsConfig *tls.Config
+	var err error
+	if tlsConfig, err = p.getTLSConfig(o.serverCaCert, o.serverCert, o.serverKey); err != nil {
+		return nil, err
+	}
+
 	addr := fmt.Sprintf(":%d", o.serverPort)
 
 	if o.mode == "grpc" {
@@ -386,26 +400,13 @@ func (p *Proxy) runMTLSMasterServer(ctx context.Context, o *ProxyRunOptions, ser
 }
 
 func (p *Proxy) runAgentServer(o *ProxyRunOptions, server *agentserver.ProxyServer) error {
-	clusterCert, err := tls.LoadX509KeyPair(o.clusterCert, o.clusterKey)
-	if err != nil {
-		return fmt.Errorf("failed to load X509 key pair %s and %s: %v", o.clusterCert, o.clusterKey, err)
+	var tlsConfig *tls.Config
+	var err error
+	if tlsConfig, err = p.getTLSConfig(o.clusterCaCert, o.clusterCert, o.clusterKey); err != nil {
+		return err
 	}
-	certPool := x509.NewCertPool()
-	caCert, err := ioutil.ReadFile(o.clusterCaCert)
-	if err != nil {
-		return fmt.Errorf("failed to read cluster CA cert %s: %v", o.clusterCaCert, err)
-	}
-	ok := certPool.AppendCertsFromPEM(caCert)
-	if !ok {
-		return fmt.Errorf("failed to append cluster CA cert to the cert pool")
-	}
-	tlsConfig := &tls.Config{
-		ClientAuth:   tls.RequireAndVerifyClientCert,
-		Certificates: []tls.Certificate{clusterCert},
-		ClientCAs:    certPool,
-	}
-	addr := fmt.Sprintf(":%d", o.agentPort)
 
+	addr := fmt.Sprintf(":%d", o.agentPort)
 	serverOption := grpc.Creds(credentials.NewTLS(tlsConfig))
 	grpcServer := grpc.NewServer(serverOption)
 	agent.RegisterAgentServiceServer(grpcServer, server)

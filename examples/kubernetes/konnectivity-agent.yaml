@@ -1,0 +1,35 @@
+apiVersion: v1
+kind: Pod
+metadata:
+  name: konnectivity-agent
+  namespace: default
+  annotations:
+    scheduler.alpha.kubernetes.io/critical-pod: ''
+    seccomp.security.alpha.kubernetes.io/pod: 'docker/default'
+spec:
+  hostNetwork: true
+  containers:
+  - name: konnectivity-agent-container
+    image: ${AGENT_IMAGE}:${TAG}
+    resources:
+      requests:
+        cpu: 40m
+    command: [ "/proxy-agent"]
+    args: [
+      "--logtostderr=true",
+      "--ca-cert=/var/run/secrets/kubernetes.io/serviceaccount/ca.crt",
+      "--proxy-server-host=${CLUSTER_IP}",
+      "--proxy-server-port=8091",
+      ]
+    livenessProbe:
+      httpGet:
+        scheme: HTTP
+        host: 127.0.0.1
+        port: 8093
+        path: /healthz
+      initialDelaySeconds: 15
+      timeoutSeconds: 15
+    resources:
+      limits:
+        cpu: 50m
+        memory: 30Mi
