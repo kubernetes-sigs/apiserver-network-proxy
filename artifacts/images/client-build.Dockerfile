@@ -9,6 +9,7 @@ COPY go.mod go.mod
 COPY go.sum go.sum
 
 # Cache dependencies
+ENV GO111MODULE=on
 RUN go mod download
 
 # Copy the sources
