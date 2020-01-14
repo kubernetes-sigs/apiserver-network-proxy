@@ -27,7 +27,6 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
-	"time"
 
 	"github.com/spf13/cobra"
 	"github.com/spf13/pflag"
@@ -252,7 +251,7 @@ func (c *Client) getUDSDialer(o *GrpcProxyClientOptions) (func(ctx context.Conte
 
 	switch o.mode {
 	case "grpc":
-		dialOption := grpc.WithDialer(func(string, time.Duration) (net.Conn, error) {
+		dialOption := grpc.WithContextDialer(func(context.Context, string) (net.Conn, error) {
 			// Ignoring addr and timeout arguments:
 			// addr - comes from the closure
 			// timeout - is turned off as this is test code and eases debugging.
