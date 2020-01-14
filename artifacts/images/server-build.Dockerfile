@@ -16,7 +16,6 @@ RUN go mod download
 COPY pkg/    pkg/
 COPY cmd/    cmd/
 COPY proto/  proto/
-COPY vendor/ vendor/
 
 # Build
 ARG ARCH
