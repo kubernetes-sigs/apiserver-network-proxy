@@ -1,6 +1,6 @@
 module sigs.k8s.io/apiserver-network-proxy
 
-go 1.12
+go 1.13
 
 require (
 	github.com/beorn7/perks v1.0.0 // indirect

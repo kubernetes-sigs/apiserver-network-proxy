@@ -37,7 +37,7 @@ DOCKER_CLI_EXPERIMENTAL ?= enabled
 
 .PHONY: test
 test:
-	GO111MODULE=on go test ./...
+	go test ./...
 
 ## --------------------------------------
 ## Binaries
