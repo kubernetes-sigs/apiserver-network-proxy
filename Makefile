@@ -37,7 +37,7 @@ DOCKER_CLI_EXPERIMENTAL ?= enabled
 
 .PHONY: test
 test:
-	go test ./...
+	GO111MODULE=on go test ./...
 
 ## --------------------------------------
 ## Binaries
@@ -50,13 +50,13 @@ bin:
 build: bin/proxy-agent bin/proxy-server bin/proxy-test-client
 
 bin/proxy-agent: bin cmd/agent/main.go proto/agent/agent.pb.go
-	go build -o bin/proxy-agent cmd/agent/main.go
+	GO111MODULE=on go build -o bin/proxy-agent cmd/agent/main.go
 
 bin/proxy-test-client: bin cmd/client/main.go proto/proxy.pb.go
-	go build -o bin/proxy-test-client cmd/client/main.go
+	GO111MODULE=on go build -o bin/proxy-test-client cmd/client/main.go
 
 bin/proxy-server: bin cmd/proxy/main.go proto/agent/agent.pb.go proto/proxy.pb.go
-	go build -o bin/proxy-server cmd/proxy/main.go
+	GO111MODULE=on go build -o bin/proxy-server cmd/proxy/main.go
 
 ## --------------------------------------
 ## Linting
