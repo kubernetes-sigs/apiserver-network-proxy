@@ -1,5 +1,5 @@
 # Build the proxy-server binary
-FROM golang:1.12.1 as builder
+FROM golang:1.13.4 as builder
 
 # Copy in the go src
 WORKDIR /go/src/sigs.k8s.io/apiserver-network-proxy
@@ -9,7 +9,6 @@ COPY go.mod go.mod
 COPY go.sum go.sum
 
 # Cache dependencies
-ENV GO111MODULE=on
 RUN go mod download
 
 # Copy the sources
