@@ -33,7 +33,7 @@ import (
 )
 
 const (
-	defaultInterval = 5 * time.Second
+	defaultReconnectInterval = 5 * time.Second
 )
 
 type ReconnectError struct {
@@ -71,8 +71,8 @@ type RedialableAgentClient struct {
 	recvLock   sync.Mutex
 	reconnLock sync.Mutex
 
-	// Interval between every reconnect
-	Interval time.Duration
+	reconnectInterval time.Duration // interval between recoonects
+	probeInterval     time.Duration // interval between probe pings
 }
 
 func copyRedialableAgentClient(in RedialableAgentClient) RedialableAgentClient {
@@ -88,12 +88,13 @@ func copyRedialableAgentClient(in RedialableAgentClient) RedialableAgentClient {
 
 func NewRedialableAgentClient(address, agentID string, cs *ClientSet, opts ...grpc.DialOption) (*RedialableAgentClient, error) {
 	c := &RedialableAgentClient{
-		cs:       cs,
-		address:  address,
-		agentID:  agentID,
-		opts:     opts,
-		Interval: defaultInterval,
-		stopCh:   make(chan struct{}),
+		cs:                cs,
+		address:           address,
+		agentID:           agentID,
+		opts:              opts,
+		probeInterval:     cs.probeInterval,
+		reconnectInterval: cs.reconnectInterval,
+		stopCh:            make(chan struct{}),
 	}
 	serverID, err := c.Connect()
 	if err != nil {
@@ -108,7 +109,7 @@ func (c *RedialableAgentClient) probe() {
 		select {
 		case <-c.stopCh:
 			return
-		case <-time.After(c.Interval):
+		case <-time.After(c.probeInterval):
 			if c.conn == nil {
 				continue
 			}
@@ -253,8 +254,8 @@ func (c *RedialableAgentClient) reconnect() {
 		r, err := c.tryConnect()
 		if err != nil {
 			retry++
-			klog.Infof("Failed to connect to proxy server, retry %d in %v: %v", retry, c.Interval, err)
-			time.Sleep(c.Interval)
+			klog.Infof("Failed to connect to proxy server, retry %d in %v: %v", retry, c.reconnectInterval, err)
+			time.Sleep(c.reconnectInterval)
 			continue
 		}
 		switch {
@@ -272,8 +273,8 @@ func (c *RedialableAgentClient) reconnect() {
 				klog.Infof("failed to close connection to %s: %v", r.serverID, err)
 			}
 			retry++
-			klog.Infof("Trying to reconnect to proxy server %s, got connected to proxy server %s, for which there is already a connection, retry %d in %v", c.serverID, r.serverID, retry, c.Interval)
-			time.Sleep(c.Interval)
+			klog.Infof("Trying to reconnect to proxy server %s, got connected to proxy server %s, for which there is already a connection, retry %d in %v", c.serverID, r.serverID, retry, c.reconnectInterval)
+			time.Sleep(c.reconnectInterval)
 		case r.serverID != c.serverID && !c.cs.HasID(r.serverID):
 			// create a new client
 			cc := copyRedialableAgentClient(*c)
@@ -287,8 +288,8 @@ func (c *RedialableAgentClient) reconnect() {
 			}
 			go ac.Serve()
 			retry++
-			klog.Infof("Trying to reconnect to proxy server %s, got connected to proxy server %s. We will add this connection to the client set, but keep retrying connecting to proxy server %s, retry %d in %v", c.serverID, r.serverID, c.serverID, retry, c.Interval)
-			time.Sleep(c.Interval)
+			klog.Infof("Trying to reconnect to proxy server %s, got connected to proxy server %s. We will add this connection to the client set, but keep retrying connecting to proxy server %s, retry %d in %v", c.serverID, r.serverID, c.serverID, retry, c.reconnectInterval)
+			time.Sleep(c.reconnectInterval)
 		}
 	}
 

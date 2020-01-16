@@ -54,9 +54,7 @@ func TestEchoServer(t *testing.T) {
 	}
 	defer cleanup()
 
-	if err := runAgent(proxy.agent, stopCh); err != nil {
-		t.Fatal(err)
-	}
+	runAgent(proxy.agent, stopCh)
 
 	// Wait for agent to register on proxy server
 	time.Sleep(time.Second)

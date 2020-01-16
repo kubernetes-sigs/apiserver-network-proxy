@@ -23,6 +23,7 @@ import (
 	"time"
 
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/connectivity"
 	"k8s.io/klog"
 )
 
@@ -40,13 +41,29 @@ type ClientSet struct {
 	syncInterval time.Duration // The interval by which the agent
 	// periodically checks that it has connections to all instances of the
 	// proxy server.
+	probeInterval time.Duration // The interval by which the agent
+	// periodically checks if its connections to the proxy server is ready.
+	reconnectInterval time.Duration // The interval by which the agent
+	// tries to reconnect.
 	dialOption grpc.DialOption
 }
 
-func (cs *ClientSet) clientsCount() int {
+func (cs *ClientSet) ClientsCount() int {
 	cs.mu.Lock()
 	defer cs.mu.Unlock()
 	return len(cs.clients)
+}
+func (cs *ClientSet) HealthyClientsCount() int {
+	cs.mu.Lock()
+	defer cs.mu.Unlock()
+	var count int
+	for _, c := range cs.clients {
+		if c.stream.conn.GetState() == connectivity.Ready {
+			count++
+		}
+	}
+	return count
+
 }
 
 func (cs *ClientSet) hasIDLocked(serverID string) bool {
@@ -81,14 +98,26 @@ func (cs *ClientSet) RemoveClient(serverID string) {
 	delete(cs.clients, serverID)
 }
 
-func NewAgentClientSet(address, agentID string, syncInterval time.Duration, dialOption grpc.DialOption) *ClientSet {
+type ClientSetConfig struct {
+	Address           string
+	AgentID           string
+	SyncInterval      time.Duration
+	ProbeInterval     time.Duration
+	ReconnectInterval time.Duration
+	DialOption        grpc.DialOption
+}
+
+func (cc *ClientSetConfig) NewAgentClientSet() *ClientSet {
 	return &ClientSet{
-		clients:      make(map[string]*AgentClient),
-		agentID:      agentID,
-		address:      address,
-		syncInterval: syncInterval,
-		dialOption:   dialOption,
+		clients:           make(map[string]*AgentClient),
+		agentID:           cc.AgentID,
+		address:           cc.Address,
+		syncInterval:      cc.SyncInterval,
+		probeInterval:     cc.ProbeInterval,
+		reconnectInterval: cc.ReconnectInterval,
+		dialOption:        cc.DialOption,
 	}
+
 }
 
 func (cs *ClientSet) newAgentClient() (*AgentClient, error) {
@@ -103,7 +132,7 @@ func (cs *ClientSet) sync() {
 			sleep := cs.syncInterval + time.Duration(rand.Float64()*jitter*float64(cs.syncInterval))
 			time.Sleep(sleep)
 		}
-		if cs.serverCount == 0 || cs.clientsCount() < cs.serverCount {
+		if cs.serverCount == 0 || cs.ClientsCount() < cs.serverCount {
 			c, err := cs.newAgentClient()
 			if err != nil {
 				klog.Error(err)

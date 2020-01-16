@@ -59,9 +59,7 @@ func TestBasicProxy_GRPC(t *testing.T) {
 	}
 	defer cleanup()
 
-	if err := runAgent(proxy.agent, stopCh); err != nil {
-		t.Fatal(err)
-	}
+	runAgent(proxy.agent, stopCh)
 
 	// Wait for agent to register on proxy server
 	time.Sleep(time.Second)
@@ -108,9 +106,7 @@ func TestProxy_LargeResponse(t *testing.T) {
 	}
 	defer cleanup()
 
-	if err := runAgent(proxy.agent, stopCh); err != nil {
-		t.Fatal(err)
-	}
+	runAgent(proxy.agent, stopCh)
 
 	// Wait for agent to register on proxy server
 	time.Sleep(time.Second)
@@ -155,9 +151,7 @@ func TestBasicProxy_HTTPCONN(t *testing.T) {
 	}
 	defer cleanup()
 
-	if err := runAgent(proxy.agent, stopCh); err != nil {
-		t.Fatal(err)
-	}
+	runAgent(proxy.agent, stopCh)
 
 	// Wait for agent to register on proxy server
 	time.Sleep(time.Second)
@@ -224,11 +218,15 @@ type proxy struct {
 }
 
 func runGRPCProxyServer() (proxy, func(), error) {
+	return runGRPCProxyServerWithServerCount(1)
+}
+
+func runGRPCProxyServerWithServerCount(serverCount int) (proxy, func(), error) {
 	var proxy proxy
 	var err error
 	var lis, lis2 net.Listener
 
-	server := agentserver.NewProxyServer(uuid.New().String(), 0)
+	server := agentserver.NewProxyServer(uuid.New().String(), serverCount)
 	grpcServer := grpc.NewServer()
 	agentServer := grpc.NewServer()
 	cleanup := func() {
@@ -238,6 +236,8 @@ func runGRPCProxyServer() (proxy, func(), error) {
 		if lis2 != nil {
 			lis2.Close()
 		}
+		agentServer.Stop()
+		grpcServer.Stop()
 	}
 
 	agent.RegisterProxyServiceServer(grpcServer, server)
@@ -304,9 +304,16 @@ func runHTTPConnProxyServer() (proxy, func(), error) {
 	return proxy, cleanup, nil
 }
 
-func runAgent(addr string, stopCh <-chan struct{}) error {
-	client := agentclient.NewAgentClientSet(addr, uuid.New().String(), 5*time.Second, grpc.WithInsecure())
+func runAgent(addr string, stopCh <-chan struct{}) *agentclient.ClientSet {
+	cc := agentclient.ClientSetConfig{
+		Address:           addr,
+		AgentID:           uuid.New().String(),
+		SyncInterval:      1 * time.Millisecond,
+		ProbeInterval:     10 * time.Millisecond,
+		ReconnectInterval: 10 * time.Millisecond,
+		DialOption:        grpc.WithInsecure(),
+	}
+	client := cc.NewAgentClientSet()
 	go client.Serve()
-
-	return nil
+	return client
 }
