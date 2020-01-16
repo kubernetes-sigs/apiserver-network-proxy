@@ -19,7 +19,7 @@ spec:
       "--log-file=/var/log/konnectivity-server.log",
       "--logtostderr=false",
       "--log-file-max-size=0",
-      "--udsName=/etc/srv/kubernetes/konnectivity/konnectivity-server.socket",
+      "--uds-name=/etc/srv/kubernetes/konnectivity/konnectivity-server.socket",
       "--cluster-cert=/etc/srv/kubernetes/pki/apiserver.crt",
       "--cluster-key=/etc/srv/kubernetes/pki/apiserver.key",
       "--server-port=0",

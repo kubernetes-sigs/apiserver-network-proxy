@@ -89,11 +89,11 @@ func (o *ProxyRunOptions) Flags() *pflag.FlagSet {
 	flags.StringVar(&o.clusterCert, "cluster-cert", o.clusterCert, "If non-empty secure communication with this cert.")
 	flags.StringVar(&o.clusterKey, "cluster-key", o.clusterKey, "If non-empty secure communication with this key.")
 	flags.StringVar(&o.clusterCaCert, "cluster-ca-cert", o.clusterCaCert, "If non-empty the CA we use to validate Agent clients.")
-	flags.StringVar(&o.mode, "mode", "grpc", "Mode can be either 'grpc' or 'http-connect'.")
-	flags.StringVar(&o.udsName, "udsName", "", "UdsName should be empty for TCP traffic. For UDS set to its name.")
-	flags.UintVar(&o.serverPort, "server-port", 8090, "Port we listen for server connections on. Set to 0 for UDS.")
-	flags.UintVar(&o.agentPort, "agent-port", 8091, "Port we listen for agent connections on.")
-	flags.UintVar(&o.adminPort, "admin-port", 8092, "Port we listen for admin connections on.")
+	flags.StringVar(&o.mode, "mode", o.mode, "Mode can be either 'grpc' or 'http-connect'.")
+	flags.StringVar(&o.udsName, "uds-name", o.udsName, "uds-name should be empty for TCP traffic. For UDS set to its name.")
+	flags.UintVar(&o.serverPort, "server-port", o.serverPort, "Port we listen for server connections on. Set to 0 for UDS.")
+	flags.UintVar(&o.agentPort, "agent-port", o.agentPort, "Port we listen for agent connections on.")
+	flags.UintVar(&o.adminPort, "admin-port", o.adminPort, "Port we listen for admin connections on.")
 	return flags
 }
 
