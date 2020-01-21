@@ -1,12 +1,20 @@
 # Build the proxy-server binary
-FROM golang:1.12.1 as builder
+FROM golang:1.13.4 as builder
 
 # Copy in the go src
 WORKDIR /go/src/sigs.k8s.io/apiserver-network-proxy
+
+# Copy the Go Modules manifests
+COPY go.mod go.mod
+COPY go.sum go.sum
+
+# Cache dependencies
+RUN go mod download
+
+# Copy the sources
 COPY pkg/    pkg/
 COPY cmd/    cmd/
 COPY proto/  proto/
-COPY vendor/ vendor/
 
 # Build
 ARG ARCH
