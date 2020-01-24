@@ -33,10 +33,8 @@ type AgentClient struct {
 	nextConnID  int64
 	connContext map[int64]*connContext
 
-	stream      *RedialableAgentClient
-	serverID    string // the proxy server this client connects to
-	serverCount int    // number of proxy servers, 1 if server is not HA.
-	stopCh      <-chan struct{}
+	stream *RedialableAgentClient
+	stopCh <-chan struct{}
 }
 
 func newAgentClient(address, agentID string, cs *ClientSet, opts ...grpc.DialOption) (*AgentClient, error) {
@@ -51,8 +49,6 @@ func newAgentClientWithRedialableAgentClient(rac *RedialableAgentClient) *AgentC
 	return &AgentClient{
 		connContext: make(map[int64]*connContext),
 		stream:      rac,
-		serverID:    rac.serverID,
-		serverCount: rac.serverCount,
 		stopCh:      rac.stopCh,
 	}
 }
@@ -88,7 +84,7 @@ func (c *connContext) cleanup() {
 // The requests include things like opening a connection to a server,
 // streaming data and close the connection.
 func (a *AgentClient) Serve() {
-	klog.Infof("Start serving for serverID %s", a.serverID)
+	klog.Infof("Start serving for serverID %s", a.stream.serverID)
 	go a.stream.probe()
 	for {
 		select {

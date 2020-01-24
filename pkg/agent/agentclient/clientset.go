@@ -138,13 +138,13 @@ func (cs *ClientSet) sync() {
 				klog.Error(err)
 				continue
 			}
-			cs.serverCount = c.serverCount
-			if err := cs.AddClient(c.serverID, c); err != nil {
+			cs.serverCount = c.stream.serverCount
+			if err := cs.AddClient(c.stream.serverID, c); err != nil {
 				klog.Infof("closing connection: %v", err)
 				c.Close()
 				continue
 			}
-			klog.Infof("sync added client connecting to proxy server %s", c.serverID)
+			klog.Infof("sync added client connecting to proxy server %s", c.stream.serverID)
 			go c.Serve()
 		}
 	}
