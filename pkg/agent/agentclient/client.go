@@ -55,6 +55,10 @@ func newAgentClientWithRedialableAgentClient(rac *RedialableAgentClient) *AgentC
 
 // Close closes the underlying stream.
 func (c *AgentClient) Close() {
+	if c.stream == nil {
+		klog.Warning("Unexpected empty AgentClient.stream")
+		return
+	}
 	c.stream.Close()
 }
 

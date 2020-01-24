@@ -102,7 +102,7 @@ func (o *GrpcProxyAgentOptions) Print() {
 	klog.Warningf("ProxyServerHost set to \"%s\".\n", o.proxyServerHost)
 	klog.Warningf("ProxyServerPort set to %d.\n", o.proxyServerPort)
 	klog.Warningf("AgentID set to %s.\n", o.agentID)
-	klog.Warningf("SyncInterval set to %d.\n", o.syncInterval)
+	klog.Warningf("SyncInterval set to %d seconds.\n", o.syncInterval)
 	klog.Warningf("ProbeInterval set to %d.\n", o.probeInterval)
 	klog.Warningf("ReconnectInterval set to %d.\n", o.reconnectInterval)
 }

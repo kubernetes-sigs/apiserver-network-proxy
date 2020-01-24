@@ -1,5 +1,5 @@
 /*
-Copyright 2019 The Kubernetes Authors.
+Copyright 2020 The Kubernetes Authors.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -29,7 +29,7 @@ import (
 
 // ClientSet consists of clients connected to each instance of an HA proxy server.
 type ClientSet struct {
-	mu      sync.Mutex              //protects the following
+	mu      sync.Mutex              //protects the clients.
 	clients map[string]*AgentClient // map between serverID and the client
 	// connects to this server.
 

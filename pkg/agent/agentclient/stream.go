@@ -365,5 +365,8 @@ func (c *RedialableAgentClient) tryConnect() (connectResult, error) {
 }
 
 func (c *RedialableAgentClient) Close() {
+	if c.conn == nil {
+		klog.Warning("Unexpected empty RedialableAgentClient.stream")
+	}
 	c.conn.Close()
 }
