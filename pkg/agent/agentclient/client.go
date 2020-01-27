@@ -34,20 +34,32 @@ type AgentClient struct {
 	connContext map[int64]*connContext
 
 	stream *RedialableAgentClient
+	stopCh <-chan struct{}
 }
 
-// NewAgentClient creates an AgentClient
-func NewAgentClient(address string, opts ...grpc.DialOption) (*AgentClient, error) {
-	stream, err := NewRedialableAgentClient(address, opts...)
+func newAgentClient(address, agentID string, cs *ClientSet, opts ...grpc.DialOption) (*AgentClient, error) {
+	stream, err := NewRedialableAgentClient(address, agentID, cs, opts...)
 	if err != nil {
 		return nil, err
 	}
+	return newAgentClientWithRedialableAgentClient(stream), nil
+}
 
-	a := &AgentClient{
+func newAgentClientWithRedialableAgentClient(rac *RedialableAgentClient) *AgentClient {
+	return &AgentClient{
 		connContext: make(map[int64]*connContext),
-		stream:      stream,
+		stream:      rac,
+		stopCh:      rac.stopCh,
 	}
-	return a, nil
+}
+
+// Close closes the underlying stream.
+func (c *AgentClient) Close() {
+	if c.stream == nil {
+		klog.Warning("Unexpected empty AgentClient.stream")
+		return
+	}
+	c.stream.Close()
 }
 
 // connContext tracks a connection from agent to node network.
@@ -75,10 +87,12 @@ func (c *connContext) cleanup() {
 // gRPC stream. Successful Connect is required before Serve. The
 // The requests include things like opening a connection to a server,
 // streaming data and close the connection.
-func (a *AgentClient) Serve(stopCh <-chan struct{}) {
+func (a *AgentClient) Serve() {
+	klog.Infof("Start serving for serverID %s", a.stream.serverID)
+	go a.stream.probe()
 	for {
 		select {
-		case <-stopCh:
+		case <-a.stopCh:
 			klog.Info("stop agent client.")
 			return
 		default:

@@ -23,13 +23,15 @@ import (
 	"flag"
 	"fmt"
 	"io/ioutil"
-	"k8s.io/klog"
 	"net"
 	"net/http"
 	"os"
 	"os/signal"
 	"syscall"
 
+	"k8s.io/klog"
+
+	"github.com/google/uuid"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/spf13/cobra"
 	"github.com/spf13/pflag"
@@ -79,6 +81,11 @@ type ProxyRunOptions struct {
 	agentPort uint
 	// Port we listen for admin connections on.
 	adminPort uint
+
+	// ID of this server.
+	serverID string
+	// Number of proxy server instances, should be 1 unless it is a HA server.
+	serverCount uint
 }
 
 func (o *ProxyRunOptions) Flags() *pflag.FlagSet {
@@ -94,6 +101,8 @@ func (o *ProxyRunOptions) Flags() *pflag.FlagSet {
 	flags.UintVar(&o.serverPort, "server-port", o.serverPort, "Port we listen for server connections on. Set to 0 for UDS.")
 	flags.UintVar(&o.agentPort, "agent-port", o.agentPort, "Port we listen for agent connections on.")
 	flags.UintVar(&o.adminPort, "admin-port", o.adminPort, "Port we listen for admin connections on.")
+	flags.StringVar(&o.serverID, "server-id", o.serverID, "The unique ID of this server.")
+	flags.UintVar(&o.serverCount, "server-count", o.serverCount, "The number of proxy server instances, should be 1 unless it is an HA server.")
 	return flags
 }
 
@@ -109,6 +118,8 @@ func (o *ProxyRunOptions) Print() {
 	klog.Warningf("Server port set to %d.\n", o.serverPort)
 	klog.Warningf("Agent port set to %d.\n", o.agentPort)
 	klog.Warningf("Admin port set to %d.\n", o.adminPort)
+	klog.Warningf("ServerID set to %s.\n", o.serverID)
+	klog.Warningf("ServerCount set to %d.\n", o.serverCount)
 }
 
 func (o *ProxyRunOptions) Validate() error {
@@ -207,6 +218,8 @@ func newProxyRunOptions() *ProxyRunOptions {
 		serverPort:    8090,
 		agentPort:     8091,
 		adminPort:     8092,
+		serverID:      uuid.New().String(),
+		serverCount:   1,
 	}
 	return &o
 }
@@ -234,7 +247,7 @@ func (p *Proxy) run(o *ProxyRunOptions) error {
 		return fmt.Errorf("failed to validate server options with %v", err)
 	}
 	ctx, cancel := context.WithCancel(context.Background())
-	server := agentserver.NewProxyServer()
+	server := agentserver.NewProxyServer(o.serverID, int(o.serverCount))
 
 	klog.Info("Starting master server for client connections.")
 	masterStop, err := p.runMasterServer(ctx, o, server)

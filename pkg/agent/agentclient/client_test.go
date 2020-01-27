@@ -17,14 +17,15 @@ import (
 func TestServeData_HTTP(t *testing.T) {
 	var err error
 	var stream agent.AgentService_ConnectClient
+	stopCh := make(chan struct{})
 	client := &AgentClient{
 		connContext: make(map[int64]*connContext),
+		stopCh:      stopCh,
 	}
 	client.stream, stream = pipe2()
-	stopCh := make(chan struct{})
 
 	// Start agent
-	go client.Serve(stopCh)
+	go client.Serve()
 	defer close(stopCh)
 
 	// Start test http server as remote service
@@ -112,14 +113,15 @@ func TestServeData_HTTP(t *testing.T) {
 
 func TestClose_Client(t *testing.T) {
 	var stream agent.AgentService_ConnectClient
+	stopCh := make(chan struct{})
 	client := &AgentClient{
 		connContext: make(map[int64]*connContext),
+		stopCh:      stopCh,
 	}
 	client.stream, stream = pipe2()
-	stopCh := make(chan struct{})
 
 	// Start agent
-	go client.Serve(stopCh)
+	go client.Serve()
 	defer close(stopCh)
 
 	// Start test http server as remote service
