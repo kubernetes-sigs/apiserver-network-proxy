@@ -31,7 +31,7 @@ import (
 type ClientSet struct {
 	mu      sync.Mutex              //protects the clients.
 	clients map[string]*AgentClient // map between serverID and the client
-	// connects to this server.
+	// connects to this proxy server.
 
 	agentID     string // ID of this agent
 	address     string // proxy server address. Assuming HA proxy server
