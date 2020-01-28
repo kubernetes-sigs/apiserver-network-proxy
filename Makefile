@@ -182,7 +182,7 @@ docker-build-all: $(addprefix docker-build/proxy-agent-,$(ALL_ARCH)) $(addprefix
 docker-push-all: $(addprefix docker-push/proxy-agent-,$(ALL_ARCH)) $(addprefix docker-push/proxy-server-,$(ALL_ARCH)) $(addprefix docker-push/proxy-test-client-,$(ALL_ARCH))
 	$(MAKE) docker-push-manifest/proxy-agent
 	$(MAKE) docker-push-manifest/proxy-server
-	$(MAKE) docker-push-manifest/test-client
+	$(MAKE) docker-push-manifest/proxy-test-client
 
 docker-build/proxy-agent-%:
 	$(MAKE) ARCH=$* docker-build/proxy-agent
