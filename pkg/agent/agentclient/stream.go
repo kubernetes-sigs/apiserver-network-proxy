@@ -55,8 +55,8 @@ type RedialableAgentClient struct {
 	stream agent.AgentService_ConnectClient
 
 	agentID     string
-	serverID    string
-	serverCount int
+	serverID    string // the id of the proxy server this client connects to.
+	serverCount int    // the number of the proxy server instances.
 
 	// connect opts
 	address       string
@@ -240,6 +240,7 @@ func retryLimit(serverCount int) (retries int) {
 		return 3 + 21
 	default:
 		// we don't expect HA server with more than 5 instances.
+		klog.Warningf("unexpected to handle %d proxy servers, the limit is 5.", serverCount)
 		return 3 + 21
 	}
 }

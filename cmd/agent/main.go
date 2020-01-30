@@ -65,18 +65,18 @@ type GrpcProxyAgentOptions struct {
 	proxyServerPort int
 
 	agentID           string
-	syncInterval      int
-	probeInterval     int
-	reconnectInterval int
+	syncInterval      time.Duration
+	probeInterval     time.Duration
+	reconnectInterval time.Duration
 }
 
 func (o *GrpcProxyAgentOptions) ClientSetConfig(dialOption grpc.DialOption) *agentclient.ClientSetConfig {
 	return &agentclient.ClientSetConfig{
 		Address:           fmt.Sprintf("%s:%d", o.proxyServerHost, o.proxyServerPort),
 		AgentID:           o.agentID,
-		SyncInterval:      time.Duration(o.syncInterval) * time.Second,
-		ProbeInterval:     time.Duration(o.probeInterval) * time.Second,
-		ReconnectInterval: time.Duration(o.reconnectInterval) * time.Second,
+		SyncInterval:      o.syncInterval,
+		ProbeInterval:     o.probeInterval,
+		ReconnectInterval: o.reconnectInterval,
 		DialOption:        dialOption,
 	}
 }
@@ -89,9 +89,9 @@ func (o *GrpcProxyAgentOptions) Flags() *pflag.FlagSet {
 	flags.StringVar(&o.proxyServerHost, "proxy-server-host", o.proxyServerHost, "The hostname to use to connect to the proxy-server.")
 	flags.IntVar(&o.proxyServerPort, "proxy-server-port", o.proxyServerPort, "The port the proxy server is listening on.")
 	flags.StringVar(&o.agentID, "agent-id", o.agentID, "The unique ID of this agent. Default to a generated uuid if not set.")
-	flags.IntVar(&o.syncInterval, "sync-interval", o.syncInterval, "The seconds by which the agent periodically checks that it has connections to all instances of the proxy server.")
-	flags.IntVar(&o.probeInterval, "probe-interval", o.probeInterval, "The seconds by which the agent periodically checks if its connections to the proxy server are ready.")
-	flags.IntVar(&o.reconnectInterval, "reconnect-interval", o.reconnectInterval, "The seconds by which the agent tries to reconnect.")
+	flags.DurationVar(&o.syncInterval, "sync-interval", o.syncInterval, "The interval by which the agent periodically checks that it has connections to all instances of the proxy server.")
+	flags.DurationVar(&o.probeInterval, "probe-interval", o.probeInterval, "The interval by which the agent periodically checks if its connections to the proxy server are ready.")
+	flags.DurationVar(&o.reconnectInterval, "reconnect-interval", o.reconnectInterval, "The interval by which the agent tries to reconnect.")
 	return flags
 }
 
@@ -102,9 +102,9 @@ func (o *GrpcProxyAgentOptions) Print() {
 	klog.Warningf("ProxyServerHost set to \"%s\".\n", o.proxyServerHost)
 	klog.Warningf("ProxyServerPort set to %d.\n", o.proxyServerPort)
 	klog.Warningf("AgentID set to %s.\n", o.agentID)
-	klog.Warningf("SyncInterval set to %d seconds.\n", o.syncInterval)
-	klog.Warningf("ProbeInterval set to %d.\n", o.probeInterval)
-	klog.Warningf("ReconnectInterval set to %d.\n", o.reconnectInterval)
+	klog.Warningf("SyncInterval set to %v.\n", o.syncInterval)
+	klog.Warningf("ProbeInterval set to %v.\n", o.probeInterval)
+	klog.Warningf("ReconnectInterval set to %v.\n", o.reconnectInterval)
 }
 
 func (o *GrpcProxyAgentOptions) Validate() error {
@@ -143,9 +143,9 @@ func newGrpcProxyAgentOptions() *GrpcProxyAgentOptions {
 		proxyServerHost:   "127.0.0.1",
 		proxyServerPort:   8091,
 		agentID:           uuid.New().String(),
-		syncInterval:      5,
-		probeInterval:     5,
-		reconnectInterval: 5,
+		syncInterval:      5 * time.Second,
+		probeInterval:     5 * time.Second,
+		reconnectInterval: 5 * time.Second,
 	}
 	return &o
 }

@@ -82,9 +82,9 @@ type ProxyRunOptions struct {
 	// Port we listen for admin connections on.
 	adminPort uint
 
-	// ID of this server.
+	// ID of this proxy server.
 	serverID string
-	// Number of proxy server instances, should be 1 unless it is a HA server.
+	// Number of proxy server instances, should be 1 unless it is a HA proxy server.
 	serverCount uint
 }
 
