@@ -34,8 +34,7 @@ make build
 ### Build images
 
 ```console
-build docker/proxy-server
-build docker/proxy-agent
+make docker-build
 ```
 
 ## Examples
@@ -114,14 +113,3 @@ See following [README.md](examples/kubernetes/README.md)
 ### Clients
 
 `apiserver-network-proxy` components are intended to run as standalone binaries and should not be imported as a library. Clients communicating with the network proxy can import the `konnectivity-client` module.
-
-## Troubleshoot
-
-### Undefined ProtoPackageIsVersion3
-As explained in https://github.com/golang/protobuf/issues/763#issuecomment-442767135,
-protoc-gen-go binary has to be built from the vendored version:
-
-```console
-go install ./vendor/github.com/golang/protobuf/protoc-gen-go
-make gen
-```
