@@ -219,10 +219,11 @@ type proxy struct {
 }
 
 func runGRPCProxyServer() (proxy, func(), error) {
-	return runGRPCProxyServerWithServerCount(1)
+	p, _, cleanup, err := runGRPCProxyServerWithServerCount(1)
+	return p, cleanup, err
 }
 
-func runGRPCProxyServerWithServerCount(serverCount int) (proxy, func(), error) {
+func runGRPCProxyServerWithServerCount(serverCount int) (proxy, *agentserver.ProxyServer, func(), error) {
 	var proxy proxy
 	var err error
 	var lis, lis2 net.Listener
@@ -244,7 +245,7 @@ func runGRPCProxyServerWithServerCount(serverCount int) (proxy, func(), error) {
 	clientproto.RegisterProxyServiceServer(grpcServer, server)
 	lis, err = net.Listen("tcp", "")
 	if err != nil {
-		return proxy, cleanup, err
+		return proxy, server, cleanup, err
 	}
 	go grpcServer.Serve(lis)
 	proxy.front = localAddr(lis.Addr())
@@ -252,14 +253,14 @@ func runGRPCProxyServerWithServerCount(serverCount int) (proxy, func(), error) {
 	agent.RegisterAgentServiceServer(agentServer, server)
 	lis2, err = net.Listen("tcp", "")
 	if err != nil {
-		return proxy, cleanup, err
+		return proxy, server, cleanup, err
 	}
 	go func() {
 		agentServer.Serve(lis2)
 	}()
 	proxy.agent = localAddr(lis2.Addr())
 
-	return proxy, cleanup, nil
+	return proxy, server, cleanup, nil
 }
 
 func runHTTPConnProxyServer() (proxy, func(), error) {

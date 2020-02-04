@@ -86,17 +86,17 @@ func (lb *tcpLB) randomBackend() string {
 const haServerCount = 3
 
 func setupHAProxyServer(t *testing.T) ([]proxy, []func()) {
-	proxy1, cleanup1, err := runGRPCProxyServerWithServerCount(haServerCount)
+	proxy1, _, cleanup1, err := runGRPCProxyServerWithServerCount(haServerCount)
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	proxy2, cleanup2, err := runGRPCProxyServerWithServerCount(haServerCount)
+	proxy2, _, cleanup2, err := runGRPCProxyServerWithServerCount(haServerCount)
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	proxy3, cleanup3, err := runGRPCProxyServerWithServerCount(haServerCount)
+	proxy3, _, cleanup3, err := runGRPCProxyServerWithServerCount(haServerCount)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -150,7 +150,7 @@ func TestBasicHAProxyServer_GRPC(t *testing.T) {
 	lb.removeBackend(proxy[0].agent)
 	cleanups[0]()
 
-	proxy4, cleanup4, err := runGRPCProxyServerWithServerCount(haServerCount)
+	proxy4, _, cleanup4, err := runGRPCProxyServerWithServerCount(haServerCount)
 	if err != nil {
 		t.Fatal(err)
 	}
