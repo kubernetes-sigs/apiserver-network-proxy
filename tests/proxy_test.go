@@ -16,8 +16,8 @@ import (
 	"google.golang.org/grpc"
 	"sigs.k8s.io/apiserver-network-proxy/pkg/agent/agentclient"
 	"sigs.k8s.io/apiserver-network-proxy/pkg/agent/agentserver"
-	"sigs.k8s.io/apiserver-network-proxy/pkg/agent/client"
-	"sigs.k8s.io/apiserver-network-proxy/proto/agent"
+	"sigs.k8s.io/apiserver-network-proxy/konnectivity-client/pkg/client"
+	"sigs.k8s.io/apiserver-network-proxy/konnectivity-client/proto/agent"
 )
 
 // test remote server

@@ -11,8 +11,8 @@ import (
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/metadata"
 	"k8s.io/klog"
-	"sigs.k8s.io/apiserver-network-proxy/proto/agent"
-	"sigs.k8s.io/apiserver-network-proxy/proto/header"
+	"sigs.k8s.io/apiserver-network-proxy/konnectivity-client/proto/agent"
+	"sigs.k8s.io/apiserver-network-proxy/konnectivity-client/proto/header"
 )
 
 func TestReconnectExits(t *testing.T) {

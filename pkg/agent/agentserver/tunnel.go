@@ -23,7 +23,7 @@ import (
 	"net/http"
 
 	"k8s.io/klog"
-	"sigs.k8s.io/apiserver-network-proxy/proto/agent"
+	"sigs.k8s.io/apiserver-network-proxy/konnectivity-client/proto/agent"
 )
 
 // Tunnel implements Proxy based on HTTP Connect, which tunnels the traffic to

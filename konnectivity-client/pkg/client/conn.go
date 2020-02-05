@@ -23,7 +23,7 @@ import (
 	"time"
 
 	"k8s.io/klog"
-	"sigs.k8s.io/apiserver-network-proxy/proto/agent"
+	"sigs.k8s.io/apiserver-network-proxy/konnectivity-client/proto/agent"
 )
 
 // CloseTimeout is the timeout to wait CLOSE_RSP packet after a

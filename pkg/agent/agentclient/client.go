@@ -24,7 +24,7 @@ import (
 
 	"google.golang.org/grpc"
 	"k8s.io/klog"
-	"sigs.k8s.io/apiserver-network-proxy/proto/agent"
+	"sigs.k8s.io/apiserver-network-proxy/konnectivity-client/proto/agent"
 )
 
 // AgentClient runs on the node network side. It connects to proxy server and establishes

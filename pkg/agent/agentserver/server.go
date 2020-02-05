@@ -31,8 +31,8 @@ import (
 	authv1 "k8s.io/api/authentication/v1"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/klog"
-	"sigs.k8s.io/apiserver-network-proxy/proto/agent"
-	"sigs.k8s.io/apiserver-network-proxy/proto/header"
+	"sigs.k8s.io/apiserver-network-proxy/konnectivity-client/proto/agent"
+	"sigs.k8s.io/apiserver-network-proxy/konnectivity-client/proto/header"
 )
 
 // ProxyClientConnection...
