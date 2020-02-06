@@ -23,7 +23,7 @@ import (
 	"net/http"
 
 	"k8s.io/klog"
-	"sigs.k8s.io/apiserver-network-proxy/konnectivity-client/proto/agent"
+	"sigs.k8s.io/apiserver-network-proxy/konnectivity-client/proto/client"
 )
 
 // Tunnel implements Proxy based on HTTP Connect, which tunnels the traffic to
@@ -56,10 +56,10 @@ func (t *Tunnel) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 
 	random := rand.Int63()
-	dialRequest := &agent.Packet{
-		Type: agent.PacketType_DIAL_REQ,
-		Payload: &agent.Packet_DialRequest{
-			DialRequest: &agent.DialRequest{
+	dialRequest := &client.Packet{
+		Type: client.PacketType_DIAL_REQ,
+		Payload: &client.Packet_DialRequest{
+			DialRequest: &client.DialRequest{
 				Protocol: "tcp",
 				Address:  r.Host,
 				Random:   random,
@@ -113,10 +113,10 @@ func (t *Tunnel) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			break
 		}
 
-		packet := &agent.Packet{
-			Type: agent.PacketType_DATA,
-			Payload: &agent.Packet_Data{
-				Data: &agent.Data{
+		packet := &client.Packet{
+			Type: client.PacketType_DATA,
+			Payload: &client.Packet_Data{
+				Data: &client.Data{
 					ConnectID: connection.connectID,
 					Data:      pkt[:n],
 				},

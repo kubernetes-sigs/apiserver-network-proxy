@@ -17,14 +17,10 @@ syntax = "proto3";
 // Retransmit?
 // Sliding windows?
 
+option go_package = "sigs.k8s.io/apiserver-network-proxy/konnectivity-client/proto/client";
 
 service ProxyService {
   rpc Proxy(stream Packet) returns (stream Packet) {}
-}
-
-service AgentService {
-  // Agent Identifier?
-  rpc Connect(stream Packet) returns (stream Packet) {}
 }
 
 enum PacketType {
@@ -97,4 +93,3 @@ message Data {
     // stream data
     bytes data = 3;
 }
-

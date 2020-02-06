@@ -11,8 +11,9 @@ import (
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/metadata"
 	"k8s.io/klog"
-	"sigs.k8s.io/apiserver-network-proxy/konnectivity-client/proto/agent"
-	"sigs.k8s.io/apiserver-network-proxy/konnectivity-client/proto/header"
+	"sigs.k8s.io/apiserver-network-proxy/konnectivity-client/proto/client"
+	"sigs.k8s.io/apiserver-network-proxy/proto/agent"
+	"sigs.k8s.io/apiserver-network-proxy/proto/header"
 )
 
 func TestReconnectExits(t *testing.T) {
@@ -22,13 +23,13 @@ func TestReconnectExits(t *testing.T) {
 
 	time.Sleep(time.Millisecond)
 
-	client, err := NewRedialableAgentClient("localhost:8899", uuid.New().String(), &ClientSet{}, grpc.WithInsecure())
+	testClient, err := NewRedialableAgentClient("localhost:8899", uuid.New().String(), &ClientSet{}, grpc.WithInsecure())
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	err = client.Send(&agent.Packet{
-		Type: agent.PacketType_DIAL_REQ,
+	err = testClient.Send(&client.Packet{
+		Type: client.PacketType_DIAL_REQ,
 	})
 	if err != nil {
 		t.Error(err)
@@ -36,7 +37,7 @@ func TestReconnectExits(t *testing.T) {
 
 	client1 := make(chan bool)
 	go func() {
-		_, err := client.Recv()
+		_, err := testClient.Recv()
 		if err != nil {
 			if err2, ok := err.(*ReconnectError); ok {
 				err2.Wait()
@@ -47,7 +48,7 @@ func TestReconnectExits(t *testing.T) {
 
 	client2 := make(chan bool)
 	go func() {
-		_, err := client.Recv()
+		_, err := testClient.Recv()
 		if err != nil {
 			if err2, ok := err.(*ReconnectError); ok {
 				err2.Wait()
@@ -56,7 +57,7 @@ func TestReconnectExits(t *testing.T) {
 		}
 	}()
 
-	client.Close()
+	testClient.Close()
 
 	var got1 bool
 	var got2 bool

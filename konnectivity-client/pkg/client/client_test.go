@@ -24,7 +24,7 @@ import (
 
 	"google.golang.org/grpc"
 	"k8s.io/klog"
-	"sigs.k8s.io/apiserver-network-proxy/konnectivity-client/proto/agent"
+	"sigs.k8s.io/apiserver-network-proxy/konnectivity-client/proto/client"
 )
 
 func TestDial(t *testing.T) {
@@ -48,8 +48,8 @@ func TestDial(t *testing.T) {
 		t.Fatalf("expect nil; got %v", err)
 	}
 
-	if ts.packets[0].Type != agent.PacketType_DIAL_REQ {
-		t.Fatalf("expect packet.type %v; got %v", agent.PacketType_CLOSE_REQ, ts.packets[0].Type)
+	if ts.packets[0].Type != client.PacketType_DIAL_REQ {
+		t.Fatalf("expect packet.type %v; got %v", client.PacketType_CLOSE_REQ, ts.packets[0].Type)
 	}
 
 	if ts.packets[0].GetDialRequest().Address != "127.0.0.1:80" {
@@ -139,8 +139,8 @@ func TestClose(t *testing.T) {
 		t.Error(err)
 	}
 
-	if ts.packets[1].Type != agent.PacketType_CLOSE_REQ {
-		t.Fatalf("expect packet.type %v; got %v", agent.PacketType_CLOSE_REQ, ts.packets[1].Type)
+	if ts.packets[1].Type != client.PacketType_CLOSE_REQ {
+		t.Fatalf("expect packet.type %v; got %v", client.PacketType_CLOSE_REQ, ts.packets[1].Type)
 	}
 	if ts.packets[1].GetCloseRequest().ConnectID != 100 {
 		t.Errorf("expect connectID=100; got %d", ts.packets[1].GetCloseRequest().ConnectID)
@@ -152,21 +152,21 @@ func TestClose(t *testing.T) {
 // fakeStream implements ProxyService_ProxyClient
 type fakeStream struct {
 	grpc.ClientStream
-	r <-chan *agent.Packet
-	w chan<- *agent.Packet
+	r <-chan *client.Packet
+	w chan<- *client.Packet
 }
 
-var _ agent.ProxyService_ProxyClient = &fakeStream{}
+var _ client.ProxyService_ProxyClient = &fakeStream{}
 
 func pipe() (*fakeStream, *fakeStream) {
-	r, w := make(chan *agent.Packet, 2), make(chan *agent.Packet, 2)
+	r, w := make(chan *client.Packet, 2), make(chan *client.Packet, 2)
 	s1, s2 := &fakeStream{}, &fakeStream{}
 	s1.r, s1.w = r, w
 	s2.r, s2.w = w, r
 	return s1, s2
 }
 
-func (s *fakeStream) Send(packet *agent.Packet) error {
+func (s *fakeStream) Send(packet *client.Packet) error {
 	klog.Infof("[DEBUG] send packet %+v", packet)
 	if packet == nil {
 		return nil
@@ -175,7 +175,7 @@ func (s *fakeStream) Send(packet *agent.Packet) error {
 	return nil
 }
 
-func (s *fakeStream) Recv() (*agent.Packet, error) {
+func (s *fakeStream) Recv() (*client.Packet, error) {
 	select {
 	case pkt := <-s.r:
 		klog.Infof("[DEBUG] recv packet %+v", pkt)
@@ -191,24 +191,24 @@ func (s *fakeStream) Close() {
 
 type proxyServer struct {
 	t        testing.T
-	s        agent.ProxyService_ProxyClient
-	handlers map[agent.PacketType]handler
+	s        client.ProxyService_ProxyClient
+	handlers map[client.PacketType]handler
 	connid   int64
 	data     bytes.Buffer
-	packets  []*agent.Packet
+	packets  []*client.Packet
 }
 
-func testServer(s agent.ProxyService_ProxyClient, connid int64) *proxyServer {
+func testServer(s client.ProxyService_ProxyClient, connid int64) *proxyServer {
 	server := &proxyServer{
 		s:        s,
 		connid:   connid,
-		handlers: make(map[agent.PacketType]handler),
-		packets:  []*agent.Packet{},
+		handlers: make(map[client.PacketType]handler),
+		packets:  []*client.Packet{},
 	}
 
-	server.handlers[agent.PacketType_CLOSE_REQ] = server.handleClose
-	server.handlers[agent.PacketType_DIAL_REQ] = server.handleDial
-	server.handlers[agent.PacketType_DATA] = server.handleData
+	server.handlers[client.PacketType_CLOSE_REQ] = server.handleClose
+	server.handlers[client.PacketType_DIAL_REQ] = server.handleDial
+	server.handlers[client.PacketType_DATA] = server.handleData
 
 	return server
 }
@@ -234,19 +234,19 @@ func (s *proxyServer) serve() {
 
 }
 
-func (s *proxyServer) handle(t agent.PacketType, h handler) *proxyServer {
+func (s *proxyServer) handle(t client.PacketType, h handler) *proxyServer {
 	s.handlers[t] = h
 	return s
 }
 
-type handler func(pkt *agent.Packet) *agent.Packet
+type handler func(pkt *client.Packet) *client.Packet
 
-func (s *proxyServer) handleDial(pkt *agent.Packet) *agent.Packet {
+func (s *proxyServer) handleDial(pkt *client.Packet) *client.Packet {
 	s.packets = append(s.packets, pkt)
-	return &agent.Packet{
-		Type: agent.PacketType_DIAL_RSP,
-		Payload: &agent.Packet_DialResponse{
-			DialResponse: &agent.DialResponse{
+	return &client.Packet{
+		Type: client.PacketType_DIAL_RSP,
+		Payload: &client.Packet_DialResponse{
+			DialResponse: &client.DialResponse{
 				Random:    pkt.GetDialRequest().Random,
 				ConnectID: s.connid,
 			},
@@ -254,26 +254,26 @@ func (s *proxyServer) handleDial(pkt *agent.Packet) *agent.Packet {
 	}
 }
 
-func (s *proxyServer) handleClose(pkt *agent.Packet) *agent.Packet {
+func (s *proxyServer) handleClose(pkt *client.Packet) *client.Packet {
 	s.packets = append(s.packets, pkt)
-	return &agent.Packet{
-		Type: agent.PacketType_CLOSE_RSP,
-		Payload: &agent.Packet_CloseResponse{
-			CloseResponse: &agent.CloseResponse{
+	return &client.Packet{
+		Type: client.PacketType_CLOSE_RSP,
+		Payload: &client.Packet_CloseResponse{
+			CloseResponse: &client.CloseResponse{
 				ConnectID: pkt.GetCloseRequest().ConnectID,
 			},
 		},
 	}
 }
 
-func (s *proxyServer) handleData(pkt *agent.Packet) *agent.Packet {
+func (s *proxyServer) handleData(pkt *client.Packet) *client.Packet {
 	s.packets = append(s.packets, pkt)
 	s.data.Write(pkt.GetData().Data)
 
-	return &agent.Packet{
-		Type: agent.PacketType_DATA,
-		Payload: &agent.Packet_Data{
-			Data: &agent.Data{
+	return &client.Packet{
+		Type: client.PacketType_DATA,
+		Payload: &client.Packet_Data{
+			Data: &client.Data{
 				ConnectID: pkt.GetData().ConnectID,
 				Data:      append([]byte("echo: "), pkt.GetData().Data...),
 			},

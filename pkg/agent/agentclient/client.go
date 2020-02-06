@@ -24,7 +24,7 @@ import (
 
 	"google.golang.org/grpc"
 	"k8s.io/klog"
-	"sigs.k8s.io/apiserver-network-proxy/konnectivity-client/proto/agent"
+	"sigs.k8s.io/apiserver-network-proxy/konnectivity-client/proto/client"
 )
 
 // AgentClient runs on the node network side. It connects to proxy server and establishes
@@ -125,11 +125,11 @@ func (a *AgentClient) Serve() {
 		}
 
 		switch pkt.Type {
-		case agent.PacketType_DIAL_REQ:
+		case client.PacketType_DIAL_REQ:
 			klog.Info("received DIAL_REQ")
-			resp := &agent.Packet{
-				Type:    agent.PacketType_DIAL_RSP,
-				Payload: &agent.Packet_DialResponse{DialResponse: &agent.DialResponse{}},
+			resp := &client.Packet{
+				Type:    client.PacketType_DIAL_RSP,
+				Payload: &client.Packet_DialResponse{DialResponse: &client.DialResponse{}},
 			}
 
 			dialReq := pkt.GetDialRequest()
@@ -151,9 +151,9 @@ func (a *AgentClient) Serve() {
 				dataCh: dataCh,
 				cleanFunc: func() {
 					klog.Infof("close connection(id=%d)", connID)
-					resp := &agent.Packet{
-						Type:    agent.PacketType_CLOSE_RSP,
-						Payload: &agent.Packet_CloseResponse{CloseResponse: &agent.CloseResponse{}},
+					resp := &client.Packet{
+						Type:    client.PacketType_CLOSE_RSP,
+						Payload: &client.Packet_CloseResponse{CloseResponse: &client.CloseResponse{}},
 					}
 					resp.GetCloseResponse().ConnectID = connID
 
@@ -180,7 +180,7 @@ func (a *AgentClient) Serve() {
 			go a.remoteToProxy(conn, connID)
 			go a.proxyToRemote(conn, connID)
 
-		case agent.PacketType_DATA:
+		case client.PacketType_DATA:
 			data := pkt.GetData()
 			klog.Infof("received DATA(id=%d)", data.ConnectID)
 			klog.Infof("[tracing] %v", data)
@@ -189,7 +189,7 @@ func (a *AgentClient) Serve() {
 				ctx.dataCh <- data.Data
 			}
 
-		case agent.PacketType_CLOSE_REQ:
+		case client.PacketType_CLOSE_REQ:
 			closeReq := pkt.GetCloseRequest()
 			connID := closeReq.ConnectID
 
@@ -198,9 +198,9 @@ func (a *AgentClient) Serve() {
 			if ctx, ok := a.connContext[connID]; ok {
 				ctx.cleanup()
 			} else {
-				resp := &agent.Packet{
-					Type:    agent.PacketType_CLOSE_RSP,
-					Payload: &agent.Packet_CloseResponse{CloseResponse: &agent.CloseResponse{}},
+				resp := &client.Packet{
+					Type:    client.PacketType_CLOSE_RSP,
+					Payload: &client.Packet_CloseResponse{CloseResponse: &client.CloseResponse{}},
 				}
 				resp.GetCloseResponse().ConnectID = connID
 				resp.GetCloseResponse().Error = "Unknown connectID"
@@ -225,8 +225,8 @@ func (a *AgentClient) remoteToProxy(conn net.Conn, connID int64) {
 	defer ctx.cleanup()
 
 	var buf [1 << 12]byte
-	resp := &agent.Packet{
-		Type: agent.PacketType_DATA,
+	resp := &client.Packet{
+		Type: client.PacketType_DATA,
 	}
 
 	for {
@@ -241,7 +241,7 @@ func (a *AgentClient) remoteToProxy(conn net.Conn, connID int64) {
 			klog.Warningf("connection read error: %v", err)
 			return
 		} else {
-			resp.Payload = &agent.Packet_Data{Data: &agent.Data{
+			resp.Payload = &client.Packet_Data{Data: &client.Data{
 				Data:      buf[:n],
 				ConnectID: connID,
 			}}

@@ -24,7 +24,7 @@ import (
 	gomock "github.com/golang/mock/gomock"
 	metadata "google.golang.org/grpc/metadata"
 	reflect "reflect"
-	agent "sigs.k8s.io/apiserver-network-proxy/proto/agent"
+	client "sigs.k8s.io/apiserver-network-proxy/konnectivity-client/proto/client"
 )
 
 // MockAgentService_ConnectServer is a mock of AgentService_ConnectServer interface
@@ -65,10 +65,10 @@ func (mr *MockAgentService_ConnectServerMockRecorder) Context() *gomock.Call {
 }
 
 // Recv mocks base method
-func (m *MockAgentService_ConnectServer) Recv() (*agent.Packet, error) {
+func (m *MockAgentService_ConnectServer) Recv() (*client.Packet, error) {
 	m.ctrl.T.Helper()
 	ret := m.ctrl.Call(m, "Recv")
-	ret0, _ := ret[0].(*agent.Packet)
+	ret0, _ := ret[0].(*client.Packet)
 	ret1, _ := ret[1].(error)
 	return ret0, ret1
 }
@@ -94,7 +94,7 @@ func (mr *MockAgentService_ConnectServerMockRecorder) RecvMsg(arg0 interface{}) 
 }
 
 // Send mocks base method
-func (m *MockAgentService_ConnectServer) Send(arg0 *agent.Packet) error {
+func (m *MockAgentService_ConnectServer) Send(arg0 *client.Packet) error {
 	m.ctrl.T.Helper()
 	ret := m.ctrl.Call(m, "Send", arg0)
 	ret0, _ := ret[0].(error)

@@ -15,6 +15,8 @@
 ARCH ?= amd64
 ALL_ARCH = amd64 arm arm64 ppc64le s390x
 
+GOPATH ?= $(GOPATH)
+
 REGISTRY ?= gcr.io/$(shell gcloud config get-value project)
 STAGING_REGISTRY := gcr.io/k8s-staging-kas-network-proxy
 
@@ -54,13 +56,13 @@ bin:
 .PHONY: build
 build: bin/proxy-agent bin/proxy-server bin/proxy-test-client
 
-bin/proxy-agent: bin cmd/agent/main.go proto/agent/agent.pb.go
+bin/proxy-agent: proto/agent/agent.pb.go proto/client/client.pb.go bin cmd/agent/main.go
 	GO111MODULE=on go build -o bin/proxy-agent cmd/agent/main.go
 
-bin/proxy-test-client: bin cmd/client/main.go proto/agent/agent.pb.go
+bin/proxy-test-client: proto/client/client.pb.go bin cmd/client/main.go
 	GO111MODULE=on go build -o bin/proxy-test-client cmd/client/main.go
 
-bin/proxy-server: bin cmd/proxy/main.go proto/agent/agent.pb.go proto/agent/agent.pb.go
+bin/proxy-server: proto/agent/agent.pb.go proto/client/client.pb.go bin cmd/proxy/main.go
 	GO111MODULE=on go build -o bin/proxy-server cmd/proxy/main.go
 
 ## --------------------------------------
@@ -73,12 +75,17 @@ bin/proxy-server: bin cmd/proxy/main.go proto/agent/agent.pb.go proto/agent/agen
 ## --------------------------------------
 
 .PHONY: gen
-gen: proto/agent/agent.pb.go mock_gen
+gen: proto/agent/agent.pb.go proto/client/client.pb.go mock_gen
 
-proto/agent/agent.pb.go: konnectivity-client/proto/agent/agent.proto
-	protoc -I konnectivity-client/proto konnectivity-client/proto/agent/agent.proto --go_out=plugins=grpc:konnectivity-client/proto
-	cat hack/go-license-header.txt konnectivity-client/proto/agent/agent.pb.go > konnectivity-client/proto/agent/agent.licensed.go
-	mv konnectivity-client/proto/agent/agent.licensed.go konnectivity-client/proto/agent/agent.pb.go
+proto/client/client.pb.go: konnectivity-client/proto/client/client.proto
+	protoc -I . konnectivity-client/proto/client/client.proto --go_out=plugins=grpc:${GOPATH}/src
+	cat hack/go-license-header.txt konnectivity-client/proto/client/client.pb.go > konnectivity-client/proto/client/client.licensed.go
+	mv konnectivity-client/proto/client/client.licensed.go konnectivity-client/proto/client/client.pb.go
+
+proto/agent/agent.pb.go: proto/agent/agent.proto
+	protoc -I . proto/agent/agent.proto --go_out=plugins=grpc:${GOPATH}/src
+	cat hack/go-license-header.txt proto/agent/agent.pb.go > proto/agent/agent.licensed.go
+	mv proto/agent/agent.licensed.go proto/agent/agent.pb.go
 
 ## --------------------------------------
 ## Certs
@@ -244,4 +251,4 @@ release-alias-tag: # Adds the tag to the last build tag. BASE_REF comes from the
 
 .PHONY: clean
 clean:
-	rm -rf proto/agent/agent.pb.go easy-rsa.tar.gz easy-rsa-master cfssl cfssljson certs bin proto/agent/mocks
+	rm -rf proto/agent/agent.pb.go konnectivity-client/proto/client/client.pb.go easy-rsa.tar.gz easy-rsa-master cfssl cfssljson certs bin proto/agent/mocks

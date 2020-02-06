@@ -23,7 +23,7 @@ import (
 	"time"
 
 	"k8s.io/klog"
-	"sigs.k8s.io/apiserver-network-proxy/konnectivity-client/proto/agent"
+	"sigs.k8s.io/apiserver-network-proxy/konnectivity-client/proto/client"
 )
 
 // CloseTimeout is the timeout to wait CLOSE_RSP packet after a
@@ -33,7 +33,7 @@ const CloseTimeout = 10 * time.Second
 // conn is an implementation of net.Conn, where the data is transported
 // over an established tunnel defined by a gRPC service ProxyService.
 type conn struct {
-	stream  agent.ProxyService_ProxyClient
+	stream  client.ProxyService_ProxyClient
 	connID  int64
 	readCh  chan []byte
 	closeCh chan string
@@ -44,10 +44,10 @@ var _ net.Conn = &conn{}
 
 // Write sends the data thru the connection over proxy service
 func (c *conn) Write(data []byte) (n int, err error) {
-	req := &agent.Packet{
-		Type: agent.PacketType_DATA,
-		Payload: &agent.Packet_Data{
-			Data: &agent.Data{
+	req := &client.Packet{
+		Type: client.PacketType_DATA,
+		Payload: &client.Packet_Data{
+			Data: &client.Data{
 				ConnectID: c.connID,
 				Data:      data,
 			},
@@ -113,10 +113,10 @@ func (c *conn) SetWriteDeadline(t time.Time) error {
 // proxy service to notify remote to drop the connection.
 func (c *conn) Close() error {
 	klog.Info("conn.Close()")
-	req := &agent.Packet{
-		Type: agent.PacketType_CLOSE_REQ,
-		Payload: &agent.Packet_CloseRequest{
-			CloseRequest: &agent.CloseRequest{
+	req := &client.Packet{
+		Type: client.PacketType_CLOSE_REQ,
+		Payload: &client.Packet_CloseRequest{
+			CloseRequest: &client.CloseRequest{
 				ConnectID: c.connID,
 			},
 		},

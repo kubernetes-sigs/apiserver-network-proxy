@@ -33,7 +33,6 @@ import (
 	k8stesting "k8s.io/client-go/testing"
 
 	agentmock "sigs.k8s.io/apiserver-network-proxy/proto/agent/mocks"
-	"sigs.k8s.io/apiserver-network-proxy/konnectivity-client/proto/agent"
 	"sigs.k8s.io/apiserver-network-proxy/proto/agent"
 	"sigs.k8s.io/apiserver-network-proxy/proto/header"
 )

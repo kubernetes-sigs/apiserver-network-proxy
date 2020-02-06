@@ -27,7 +27,7 @@ import (
 
 	"google.golang.org/grpc"
 	"k8s.io/klog"
-	"sigs.k8s.io/apiserver-network-proxy/konnectivity-client/proto/agent"
+	"sigs.k8s.io/apiserver-network-proxy/konnectivity-client/proto/client"
 )
 
 // Tunnel provides ability to dial a connection through a tunnel.
@@ -44,7 +44,7 @@ type dialResult struct {
 
 // grpcTunnel implements Tunnel
 type grpcTunnel struct {
-	stream          agent.ProxyService_ProxyClient
+	stream          client.ProxyService_ProxyClient
 	pendingDial     map[int64]chan<- dialResult
 	conns           map[int64]*conn
 	pendingDialLock sync.RWMutex
@@ -59,9 +59,9 @@ func CreateGrpcTunnel(address string, opts ...grpc.DialOption) (Tunnel, error) {
 		return nil, err
 	}
 
-	client := agent.NewProxyServiceClient(c)
+	grpcClient := client.NewProxyServiceClient(c)
 
-	stream, err := client.Proxy(context.Background())
+	stream, err := grpcClient.Proxy(context.Background())
 	if err != nil {
 		return nil, err
 	}
@@ -91,7 +91,7 @@ func (t *grpcTunnel) serve() {
 		klog.Infof("[tracing] recv packet %+v", pkt)
 
 		switch pkt.Type {
-		case agent.PacketType_DIAL_RSP:
+		case client.PacketType_DIAL_RSP:
 			resp := pkt.GetDialResponse()
 			t.pendingDialLock.RLock()
 			ch, ok := t.pendingDial[resp.Random]
@@ -105,7 +105,7 @@ func (t *grpcTunnel) serve() {
 					connid: resp.ConnectID,
 				}
 			}
-		case agent.PacketType_DATA:
+		case client.PacketType_DATA:
 			resp := pkt.GetData()
 			// TODO: flow control
 			t.connsLock.RLock()
@@ -117,7 +117,7 @@ func (t *grpcTunnel) serve() {
 			} else {
 				klog.Warningf("connection id %d not recognized", resp.ConnectID)
 			}
-		case agent.PacketType_CLOSE_RSP:
+		case client.PacketType_CLOSE_RSP:
 			resp := pkt.GetCloseResponse()
 			t.connsLock.RLock()
 			conn, ok := t.conns[resp.ConnectID]
@@ -155,10 +155,10 @@ func (t *grpcTunnel) Dial(protocol, address string) (net.Conn, error) {
 		t.pendingDialLock.Unlock()
 	}()
 
-	req := &agent.Packet{
-		Type: agent.PacketType_DIAL_REQ,
-		Payload: &agent.Packet_DialRequest{
-			DialRequest: &agent.DialRequest{
+	req := &client.Packet{
+		Type: client.PacketType_DIAL_REQ,
+		Payload: &client.Packet_DialRequest{
+			DialRequest: &client.DialRequest{
 				Protocol: protocol,
 				Address:  address,
 				Random:   random,

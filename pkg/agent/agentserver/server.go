@@ -31,30 +31,31 @@ import (
 	authv1 "k8s.io/api/authentication/v1"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/klog"
-	"sigs.k8s.io/apiserver-network-proxy/konnectivity-client/proto/agent"
-	"sigs.k8s.io/apiserver-network-proxy/konnectivity-client/proto/header"
+	"sigs.k8s.io/apiserver-network-proxy/konnectivity-client/proto/client"
+	"sigs.k8s.io/apiserver-network-proxy/proto/agent"
+	"sigs.k8s.io/apiserver-network-proxy/proto/header"
 )
 
 // ProxyClientConnection...
 type ProxyClientConnection struct {
 	Mode      string
-	Grpc      agent.ProxyService_ProxyServer
+	Grpc      client.ProxyService_ProxyServer
 	HTTP      net.Conn
 	connected chan struct{}
 	connectID int64
 }
 
-func (c *ProxyClientConnection) send(pkt *agent.Packet) error {
+func (c *ProxyClientConnection) send(pkt *client.Packet) error {
 	if c.Mode == "grpc" {
 		stream := c.Grpc
 		return stream.Send(pkt)
 	} else if c.Mode == "http-connect" {
-		if pkt.Type == agent.PacketType_CLOSE_RSP {
+		if pkt.Type == client.PacketType_CLOSE_RSP {
 			return c.HTTP.Close()
-		} else if pkt.Type == agent.PacketType_DATA {
+		} else if pkt.Type == client.PacketType_DATA {
 			_, err := c.HTTP.Write(pkt.GetData().Data)
 			return err
-		} else if pkt.Type == agent.PacketType_DIAL_RSP {
+		} else if pkt.Type == client.PacketType_DIAL_RSP {
 			return nil
 		} else {
 			return fmt.Errorf("attempt to send via unrecognized connection type %v", pkt.Type)
@@ -97,7 +98,7 @@ type AgentTokenAuthenticationOptions struct {
 
 var _ agent.AgentServiceServer = &ProxyServer{}
 
-var _ agent.ProxyServiceServer = &ProxyServer{}
+var _ client.ProxyServiceServer = &ProxyServer{}
 
 func (s *ProxyServer) addBackend(agentID string, conn agent.AgentService_ConnectServer) {
 	klog.Infof("register Backend %v for agentID %s", conn, agentID)
@@ -167,10 +168,10 @@ func NewProxyServer(serverID string, serverCount int, agentAuthenticationOptions
 }
 
 // Proxy handles incoming streams from gRPC frontend.
-func (s *ProxyServer) Proxy(stream agent.ProxyService_ProxyServer) error {
+func (s *ProxyServer) Proxy(stream client.ProxyService_ProxyServer) error {
 	klog.Info("proxy request from client")
 
-	recvCh := make(chan *agent.Packet, 10)
+	recvCh := make(chan *client.Packet, 10)
 	stopCh := make(chan error)
 
 	go s.serveRecvFrontend(stream, recvCh)
@@ -200,7 +201,7 @@ func (s *ProxyServer) Proxy(stream agent.ProxyService_ProxyServer) error {
 	return <-stopCh
 }
 
-func (s *ProxyServer) serveRecvFrontend(stream agent.ProxyService_ProxyServer, recvCh <-chan *agent.Packet) {
+func (s *ProxyServer) serveRecvFrontend(stream client.ProxyService_ProxyServer, recvCh <-chan *client.Packet) {
 	klog.Info("start serving frontend stream")
 
 	var firstConnID int64
@@ -211,7 +212,7 @@ func (s *ProxyServer) serveRecvFrontend(stream agent.ProxyService_ProxyServer, r
 
 	for pkt := range recvCh {
 		switch pkt.Type {
-		case agent.PacketType_DIAL_REQ:
+		case client.PacketType_DIAL_REQ:
 			klog.Info(">>> Received DIAL_REQ")
 			// TODO: if we track what agent has historically served
 			// the address, then we can send the Dial_REQ to the
@@ -232,7 +233,7 @@ func (s *ProxyServer) serveRecvFrontend(stream agent.ProxyService_ProxyServer, r
 			}
 			klog.Info(">>> DIAL_REQ sent to backend") // got this. but backend didn't receive anything.
 
-		case agent.PacketType_CLOSE_REQ:
+		case client.PacketType_CLOSE_REQ:
 			connID := pkt.GetCloseRequest().ConnectID
 			klog.Infof(">>> Received CLOSE_REQ(id=%d)", connID)
 			if backend == nil {
@@ -245,7 +246,7 @@ func (s *ProxyServer) serveRecvFrontend(stream agent.ProxyService_ProxyServer, r
 			}
 			klog.Info(">>> CLOSE_REQ sent to backend")
 
-		case agent.PacketType_DATA:
+		case client.PacketType_DATA:
 			connID := pkt.GetData().ConnectID
 			klog.Infof(">>> Received DATA(id=%d)", connID)
 			if firstConnID == 0 {
@@ -271,10 +272,10 @@ func (s *ProxyServer) serveRecvFrontend(stream agent.ProxyService_ProxyServer, r
 
 	klog.Infof(">>> Close streaming (id=%d)", firstConnID)
 
-	pkt := &agent.Packet{
-		Type: agent.PacketType_CLOSE_REQ,
-		Payload: &agent.Packet_CloseRequest{
-			CloseRequest: &agent.CloseRequest{
+	pkt := &client.Packet{
+		Type: client.PacketType_CLOSE_REQ,
+		Payload: &client.Packet_CloseRequest{
+			CloseRequest: &client.CloseRequest{
 				ConnectID: firstConnID,
 			},
 		},
@@ -289,7 +290,7 @@ func (s *ProxyServer) serveRecvFrontend(stream agent.ProxyService_ProxyServer, r
 	}
 }
 
-func (s *ProxyServer) serveSend(stream agent.ProxyService_ProxyServer, sendCh <-chan *agent.Packet) {
+func (s *ProxyServer) serveSend(stream client.ProxyService_ProxyServer, sendCh <-chan *client.Packet) {
 	klog.Info("start serve send ...")
 	for pkt := range sendCh {
 		err := stream.Send(pkt)
@@ -396,7 +397,7 @@ func (s *ProxyServer) Connect(stream agent.AgentService_ConnectServer) error {
 		return err
 	}
 
-	recvCh := make(chan *agent.Packet, 10)
+	recvCh := make(chan *client.Packet, 10)
 	stopCh := make(chan error)
 
 	if s.AgentAuthenticationOptions.Enabled {
@@ -433,12 +434,12 @@ func (s *ProxyServer) Connect(stream agent.AgentService_ConnectServer) error {
 }
 
 // route the packet back to the correct client
-func (s *ProxyServer) serveRecvBackend(stream agent.AgentService_ConnectServer, recvCh <-chan *agent.Packet) {
+func (s *ProxyServer) serveRecvBackend(stream agent.AgentService_ConnectServer, recvCh <-chan *client.Packet) {
 	var firstConnID int64
 
 	for pkt := range recvCh {
 		switch pkt.Type {
-		case agent.PacketType_DIAL_RSP:
+		case client.PacketType_DIAL_RSP:
 			resp := pkt.GetDialResponse()
 			firstConnID = resp.ConnectID
 			klog.Infof("<<< Received DIAL_RSP(rand=%d, id=%d)", resp.Random, resp.ConnectID)
@@ -457,7 +458,7 @@ func (s *ProxyServer) serveRecvBackend(stream agent.AgentService_ConnectServer, 
 				}
 			}
 
-		case agent.PacketType_DATA:
+		case client.PacketType_DATA:
 			resp := pkt.GetData()
 			klog.Infof("<<< Received DATA(id=%d)", resp.ConnectID)
 			if client, ok := s.Frontends[resp.ConnectID]; ok {
@@ -468,7 +469,7 @@ func (s *ProxyServer) serveRecvBackend(stream agent.AgentService_ConnectServer, 
 				}
 			}
 
-		case agent.PacketType_CLOSE_RSP:
+		case client.PacketType_CLOSE_RSP:
 			resp := pkt.GetCloseResponse()
 			klog.Infof("<<< Received CLOSE_RSP(id=%d)", resp.ConnectID)
 			if client, ok := s.Frontends[resp.ConnectID]; ok {

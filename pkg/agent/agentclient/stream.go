@@ -29,8 +29,9 @@ import (
 	"google.golang.org/grpc/connectivity"
 	"google.golang.org/grpc/metadata"
 	"k8s.io/klog"
-	"sigs.k8s.io/apiserver-network-proxy/konnectivity-client/proto/agent"
-	"sigs.k8s.io/apiserver-network-proxy/konnectivity-client/proto/header"
+	"sigs.k8s.io/apiserver-network-proxy/konnectivity-client/proto/client"
+	"sigs.k8s.io/apiserver-network-proxy/proto/agent"
+	"sigs.k8s.io/apiserver-network-proxy/proto/header"
 )
 
 const (
@@ -134,7 +135,7 @@ func (c *RedialableAgentClient) probe() {
 	}
 }
 
-func (c *RedialableAgentClient) Send(pkt *agent.Packet) error {
+func (c *RedialableAgentClient) Send(pkt *client.Packet) error {
 	c.sendLock.Lock()
 	defer c.sendLock.Unlock()
 
@@ -151,7 +152,7 @@ func (c *RedialableAgentClient) Send(pkt *agent.Packet) error {
 	return nil
 }
 
-func (c *RedialableAgentClient) RetrySend(pkt *agent.Packet) error {
+func (c *RedialableAgentClient) RetrySend(pkt *client.Packet) error {
 	err := c.Send(pkt)
 	if err == nil {
 		return nil
@@ -194,11 +195,11 @@ func (c *RedialableAgentClient) doneReconnect(err error) {
 	c.reconnWaiters = nil
 }
 
-func (c *RedialableAgentClient) Recv() (*agent.Packet, error) {
+func (c *RedialableAgentClient) Recv() (*client.Packet, error) {
 	c.recvLock.Lock()
 	defer c.recvLock.Unlock()
 
-	var pkt *agent.Packet
+	var pkt *client.Packet
 	var err error
 
 	if pkt, err = c.stream.Recv(); err != nil {
