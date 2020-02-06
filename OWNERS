@@ -4,8 +4,10 @@ reviewers:
   - caesarxuchao
   - Sh4d1
   - dberkov
+  - jefftree
 approvers:
   - cheftako
   - mcrute
   - anfernee
   - andrewsykim
+  - caesarxuchao
