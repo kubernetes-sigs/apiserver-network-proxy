@@ -23,6 +23,7 @@ import (
 	"io/ioutil"
 )
 
+// getCACertPool loads CA certificates to pool
 func getCACertPool(caFile string) (*x509.CertPool, error) {
 	certPool := x509.NewCertPool()
 	caCert, err := ioutil.ReadFile(caFile)

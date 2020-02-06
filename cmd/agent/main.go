@@ -68,16 +68,20 @@ type GrpcProxyAgentOptions struct {
 	syncInterval      time.Duration
 	probeInterval     time.Duration
 	reconnectInterval time.Duration
+
+	// file contains service account authorization token for enabling proxy-server token based authorization
+	serviceAccountTokenPath string
 }
 
 func (o *GrpcProxyAgentOptions) ClientSetConfig(dialOption grpc.DialOption) *agentclient.ClientSetConfig {
 	return &agentclient.ClientSetConfig{
-		Address:           fmt.Sprintf("%s:%d", o.proxyServerHost, o.proxyServerPort),
-		AgentID:           o.agentID,
-		SyncInterval:      o.syncInterval,
-		ProbeInterval:     o.probeInterval,
-		ReconnectInterval: o.reconnectInterval,
-		DialOption:        dialOption,
+		Address:                 fmt.Sprintf("%s:%d", o.proxyServerHost, o.proxyServerPort),
+		AgentID:                 o.agentID,
+		SyncInterval:            o.syncInterval,
+		ProbeInterval:           o.probeInterval,
+		ReconnectInterval:       o.reconnectInterval,
+		DialOption:              dialOption,
+		ServiceAccountTokenPath: o.serviceAccountTokenPath,
 	}
 }
 
@@ -92,6 +96,7 @@ func (o *GrpcProxyAgentOptions) Flags() *pflag.FlagSet {
 	flags.DurationVar(&o.syncInterval, "sync-interval", o.syncInterval, "The interval by which the agent periodically checks that it has connections to all instances of the proxy server.")
 	flags.DurationVar(&o.probeInterval, "probe-interval", o.probeInterval, "The interval by which the agent periodically checks if its connections to the proxy server are ready.")
 	flags.DurationVar(&o.reconnectInterval, "reconnect-interval", o.reconnectInterval, "The interval by which the agent tries to reconnect.")
+	flags.StringVar(&o.serviceAccountTokenPath, "service-account-token-path", o.serviceAccountTokenPath, "If non-empty proxy agent uses this token to prove its identity to the proxy server.")
 	return flags
 }
 
@@ -105,6 +110,7 @@ func (o *GrpcProxyAgentOptions) Print() {
 	klog.Warningf("SyncInterval set to %v.\n", o.syncInterval)
 	klog.Warningf("ProbeInterval set to %v.\n", o.probeInterval)
 	klog.Warningf("ReconnectInterval set to %v.\n", o.reconnectInterval)
+	klog.Warningf("ServiceAccountTokenPath set to \"%s\".\n", o.serviceAccountTokenPath)
 }
 
 func (o *GrpcProxyAgentOptions) Validate() error {
@@ -132,20 +138,26 @@ func (o *GrpcProxyAgentOptions) Validate() error {
 	if o.proxyServerPort <= 0 {
 		return fmt.Errorf("proxy server port %d must be greater than 0", o.proxyServerPort)
 	}
+	if o.serviceAccountTokenPath != "" {
+		if _, err := os.Stat(o.serviceAccountTokenPath); os.IsNotExist(err) {
+			return fmt.Errorf("error checking service account token path %s, got %v", o.serviceAccountTokenPath, err)
+		}
+	}
 	return nil
 }
 
 func newGrpcProxyAgentOptions() *GrpcProxyAgentOptions {
 	o := GrpcProxyAgentOptions{
-		agentCert:         "",
-		agentKey:          "",
-		caCert:            "",
-		proxyServerHost:   "127.0.0.1",
-		proxyServerPort:   8091,
-		agentID:           uuid.New().String(),
-		syncInterval:      5 * time.Second,
-		probeInterval:     5 * time.Second,
-		reconnectInterval: 5 * time.Second,
+		agentCert:               "",
+		agentKey:                "",
+		caCert:                  "",
+		proxyServerHost:         "127.0.0.1",
+		proxyServerPort:         8091,
+		agentID:                 uuid.New().String(),
+		syncInterval:            5 * time.Second,
+		probeInterval:           5 * time.Second,
+		reconnectInterval:       5 * time.Second,
+		serviceAccountTokenPath: "",
 	}
 	return &o
 }

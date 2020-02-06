@@ -226,7 +226,7 @@ func runGRPCProxyServerWithServerCount(serverCount int) (proxy, func(), error) {
 	var err error
 	var lis, lis2 net.Listener
 
-	server := agentserver.NewProxyServer(uuid.New().String(), serverCount)
+	server := agentserver.NewProxyServer(uuid.New().String(), serverCount, &agentserver.AgentTokenAuthenticationOptions{})
 	grpcServer := grpc.NewServer()
 	agentServer := grpc.NewServer()
 	cleanup := func() {
@@ -263,7 +263,7 @@ func runGRPCProxyServerWithServerCount(serverCount int) (proxy, func(), error) {
 
 func runHTTPConnProxyServer() (proxy, func(), error) {
 	var proxy proxy
-	server := agentserver.NewProxyServer(uuid.New().String(), 0)
+	server := agentserver.NewProxyServer(uuid.New().String(), 0, &agentserver.AgentTokenAuthenticationOptions{})
 	agentServer := grpc.NewServer()
 
 	agent.RegisterAgentServiceServer(agentServer, server)

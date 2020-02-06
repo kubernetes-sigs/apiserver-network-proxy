@@ -29,14 +29,15 @@ import (
 	"os/signal"
 	"syscall"
 
-	"k8s.io/klog"
-
 	"github.com/google/uuid"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/spf13/cobra"
 	"github.com/spf13/pflag"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials"
+	"k8s.io/klog"
+	"k8s.io/client-go/kubernetes"
+	"k8s.io/client-go/tools/clientcmd"
 	"sigs.k8s.io/apiserver-network-proxy/pkg/agent/agentserver"
 	"sigs.k8s.io/apiserver-network-proxy/pkg/util"
 	"sigs.k8s.io/apiserver-network-proxy/proto/agent"
@@ -86,6 +87,14 @@ type ProxyRunOptions struct {
 	serverID string
 	// Number of proxy server instances, should be 1 unless it is a HA proxy server.
 	serverCount uint
+	// Agent pod's namespace for token-based agent authentication
+	agentNamespace string
+	// Agent pod's service account for token-based agent authentication
+	agentServiceAccount string
+	// Token's audience for token-based agent authentication
+	authenticationAudience string
+	// Path to kubeconfig (used by kubernetes client)
+	kubeconfigPath string
 }
 
 func (o *ProxyRunOptions) Flags() *pflag.FlagSet {
@@ -103,6 +112,10 @@ func (o *ProxyRunOptions) Flags() *pflag.FlagSet {
 	flags.UintVar(&o.adminPort, "admin-port", o.adminPort, "Port we listen for admin connections on.")
 	flags.StringVar(&o.serverID, "server-id", o.serverID, "The unique ID of this server.")
 	flags.UintVar(&o.serverCount, "server-count", o.serverCount, "The number of proxy server instances, should be 1 unless it is an HA server.")
+	flags.StringVar(&o.agentNamespace, "agent-namespace", o.agentNamespace, "Expected agent's namespace during agent authentication (used with agent-service-account, authentication-audience, kubeconfig).")
+	flags.StringVar(&o.agentServiceAccount, "agent-service-account", o.agentServiceAccount, "Expected agent's service account during agent authentication (used with agent-namespace, authentication-audience, kubeconfig).")
+	flags.StringVar(&o.kubeconfigPath, "kubeconfig", o.kubeconfigPath, "absolute path to the kubeconfig file (used with agent-namespace, agent-service-account, authentication-audience).")
+	flags.StringVar(&o.authenticationAudience, "authentication-audience", o.authenticationAudience, "Expected agent's token authentication audience (used with agent-namespace, agent-service-account, kubeconfig).")
 	return flags
 }
 
@@ -120,6 +133,10 @@ func (o *ProxyRunOptions) Print() {
 	klog.Warningf("Admin port set to %d.\n", o.adminPort)
 	klog.Warningf("ServerID set to %s.\n", o.serverID)
 	klog.Warningf("ServerCount set to %d.\n", o.serverCount)
+	klog.Warningf("AgentNamespace set to %q.\n", o.agentNamespace)
+	klog.Warningf("AgentServiceAccount set to %q.\n", o.agentServiceAccount)
+	klog.Warningf("AuthenticationAudience set to %q.\n", o.authenticationAudience)
+	klog.Warningf("KubeconfigPath set to %q.\n", o.kubeconfigPath)
 }
 
 func (o *ProxyRunOptions) Validate() error {
@@ -202,24 +219,48 @@ func (o *ProxyRunOptions) Validate() error {
 	if o.adminPort < 1024 {
 		return fmt.Errorf("please do not try to use reserved port %d for the admin port", o.adminPort)
 	}
+
+	// validate agent authentication params
+	// all 4 parametes must be empty or must have value (except kubeconfigPath that might be empty)
+	if o.agentNamespace != "" || o.agentServiceAccount != "" || o.authenticationAudience != "" || o.kubeconfigPath != "" {
+		if o.agentNamespace == "" {
+			return fmt.Errorf("agentNamespace cannot be empty when agent authentication is enabled")
+		}
+		if o.agentServiceAccount == "" {
+			return fmt.Errorf("agentServiceAccount cannot be empty when agent authentication is enabled")
+		}
+		if o.authenticationAudience == "" {
+			return fmt.Errorf("authenticationAudience cannot be empty when agent authentication is enabled")
+		}
+		if o.kubeconfigPath != "" {
+			if _, err := os.Stat(o.kubeconfigPath); os.IsNotExist(err) {
+				return fmt.Errorf("error checking kubeconfigPath %q, got %v", o.kubeconfigPath, err)
+			}
+		}
+	}
+
 	return nil
 }
 
 func newProxyRunOptions() *ProxyRunOptions {
 	o := ProxyRunOptions{
-		serverCert:    "",
-		serverKey:     "",
-		serverCaCert:  "",
-		clusterCert:   "",
-		clusterKey:    "",
-		clusterCaCert: "",
-		mode:          "grpc",
-		udsName:       "",
-		serverPort:    8090,
-		agentPort:     8091,
-		adminPort:     8092,
-		serverID:      uuid.New().String(),
-		serverCount:   1,
+		serverCert:             "",
+		serverKey:              "",
+		serverCaCert:           "",
+		clusterCert:            "",
+		clusterKey:             "",
+		clusterCaCert:          "",
+		mode:                   "grpc",
+		udsName:                "",
+		serverPort:             8090,
+		agentPort:              8091,
+		adminPort:              8092,
+		serverID:               uuid.New().String(),
+		serverCount:            1,
+		agentNamespace:         "",
+		agentServiceAccount:    "",
+		kubeconfigPath:         "",
+		authenticationAudience: "",
 	}
 	return &o
 }
@@ -247,7 +288,29 @@ func (p *Proxy) run(o *ProxyRunOptions) error {
 		return fmt.Errorf("failed to validate server options with %v", err)
 	}
 	ctx, cancel := context.WithCancel(context.Background())
-	server := agentserver.NewProxyServer(o.serverID, int(o.serverCount))
+	defer cancel()
+
+	var k8sClient *kubernetes.Clientset
+	if o.agentNamespace != "" {
+		config, err := clientcmd.BuildConfigFromFlags("", o.kubeconfigPath)
+		if err != nil {
+			return fmt.Errorf("failed to load kubernetes client config: %v", err)
+		}
+
+		k8sClient, err = kubernetes.NewForConfig(config)
+		if err != nil {
+			return fmt.Errorf("failed to create kubernetes clientset: %v", err)
+		}
+	}
+
+	authOpt := &agentserver.AgentTokenAuthenticationOptions{
+		Enabled:                o.agentNamespace != "",
+		AgentNamespace:         o.agentNamespace,
+		AgentServiceAccount:    o.agentServiceAccount,
+		KubernetesClient:       k8sClient,
+		AuthenticationAudience: o.authenticationAudience,
+	}
+	server := agentserver.NewProxyServer(o.serverID, int(o.serverCount), authOpt)
 
 	klog.Info("Starting master server for client connections.")
 	masterStop, err := p.runMasterServer(ctx, o, server)
@@ -274,7 +337,6 @@ func (p *Proxy) run(o *ProxyRunOptions) error {
 	if masterStop != nil {
 		masterStop()
 	}
-	cancel()
 
 	return nil
 }

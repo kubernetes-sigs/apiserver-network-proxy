@@ -19,13 +19,17 @@ spec:
       "--log-file=/var/log/konnectivity-server.log",
       "--logtostderr=false",
       "--log-file-max-size=0",
-      "--uds-name=/etc/srv/kubernetes/konnectivity/konnectivity-server.socket",
+      "--uds-name=/etc/srv/kubernetes/konnectivity-server/konnectivity-server.socket",
       "--cluster-cert=/etc/srv/kubernetes/pki/apiserver.crt",
       "--cluster-key=/etc/srv/kubernetes/pki/apiserver.key",
       "--server-port=0",
       "--agent-port=8091",
       "--admin-port=8092",
-      "--mode=http-connect"
+      "--mode=http-connect",
+      "--agent-namespace=kube-system",
+      "--agent-service-account=konnectivity-agent",
+      "--kubeconfig=/etc/srv/kubernetes/konnectivity-server/kubeconfig",
+      "--authentication-audience=system:konnectivity-server",
       ]
     livenessProbe:
       httpGet:
@@ -53,7 +57,7 @@ spec:
       mountPath: /etc/srv/kubernetes/pki
       readOnly: true
     - name: konnectivity-home
-      mountPath: /etc/srv/kubernetes/konnectivity
+      mountPath: /etc/srv/kubernetes/konnectivity-server
   volumes:
   - name: varlogkonnectivityserver
     hostPath:
@@ -64,6 +68,5 @@ spec:
       path: /etc/srv/kubernetes/pki
   - name: konnectivity-home
     hostPath:
-      path: /etc/srv/kubernetes/konnectivity
+      path: /etc/srv/kubernetes/konnectivity-server
       type: DirectoryOrCreate
-

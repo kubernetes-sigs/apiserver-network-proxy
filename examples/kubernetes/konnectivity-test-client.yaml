@@ -19,7 +19,7 @@ spec:
     args: [
       "--log-file=/var/log/konnectivity-test-client.log",
       "--logtostderr=false",
-      "--proxy-uds=/etc/srv/kubernetes/konnectivity/konnectivity-server.socket",
+      "--proxy-uds=/etc/srv/kubernetes/konnectivity-server/konnectivity-server.socket",
       "--proxy-host=",
       "--proxy-port=0",
       "--mode=http-connect",
@@ -31,7 +31,7 @@ spec:
       mountPath: /var/log/konnectivity-test-client.log
       readOnly: false
     - name: konnectivity-home
-      mountPath: /etc/srv/kubernetes/konnectivity
+      mountPath: /etc/srv/kubernetes/konnectivity-server
   volumes:
   - name: konnectivity-test-log
     hostPath:
@@ -39,5 +39,5 @@ spec:
       type: FileOrCreate
   - name: konnectivity-home
     hostPath:
-      path: /etc/srv/kubernetes/konnectivity
+      path: /etc/srv/kubernetes/konnectivity-server
       type: DirectoryOrCreate
