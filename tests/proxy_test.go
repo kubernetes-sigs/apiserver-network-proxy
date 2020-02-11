@@ -16,7 +16,8 @@ import (
 	"google.golang.org/grpc"
 	"sigs.k8s.io/apiserver-network-proxy/pkg/agent/agentclient"
 	"sigs.k8s.io/apiserver-network-proxy/pkg/agent/agentserver"
-	"sigs.k8s.io/apiserver-network-proxy/pkg/agent/client"
+	"sigs.k8s.io/apiserver-network-proxy/konnectivity-client/pkg/client"
+	clientproto "sigs.k8s.io/apiserver-network-proxy/konnectivity-client/proto/client"
 	"sigs.k8s.io/apiserver-network-proxy/proto/agent"
 )
 
@@ -240,7 +241,7 @@ func runGRPCProxyServerWithServerCount(serverCount int) (proxy, func(), error) {
 		grpcServer.Stop()
 	}
 
-	agent.RegisterProxyServiceServer(grpcServer, server)
+	clientproto.RegisterProxyServiceServer(grpcServer, server)
 	lis, err = net.Listen("tcp", "")
 	if err != nil {
 		return proxy, cleanup, err

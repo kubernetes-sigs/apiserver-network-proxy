@@ -19,4 +19,7 @@ require (
 	k8s.io/apimachinery v0.17.1
 	k8s.io/client-go v0.17.1
 	k8s.io/klog v1.0.0
+	sigs.k8s.io/apiserver-network-proxy/konnectivity-client v0.0.0
 )
+
+replace sigs.k8s.io/apiserver-network-proxy/konnectivity-client => ./konnectivity-client

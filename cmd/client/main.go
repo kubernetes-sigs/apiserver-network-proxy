@@ -34,7 +34,7 @@ import (
 	"google.golang.org/grpc/credentials"
 	"k8s.io/klog"
 
-	"sigs.k8s.io/apiserver-network-proxy/pkg/agent/client"
+	"sigs.k8s.io/apiserver-network-proxy/konnectivity-client/pkg/client"
 	"sigs.k8s.io/apiserver-network-proxy/pkg/util"
 )
 
