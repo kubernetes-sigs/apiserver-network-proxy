@@ -40,7 +40,7 @@ build docker/proxy-agent
 
 ## Examples
 
-The current examples run two actual services as well as a sample client on one end and a sample destination for 
+The current examples run two actual services as well as a sample client on one end and a sample destination for
 requests on the other.
 - *Proxy service:* The proxy service takes the API server requests and forwards them appropriately.
 - *Agent service:* The agent service connects to the proxy and then allows traffic to be forwarded to it.
@@ -109,7 +109,11 @@ curl -v -p --proxy-key certs/master/private/proxy-client.key --proxy-cert certs/
 ```
 
 ### Running on kubernetes
-See following [README.md](examples/kubernetes/README.md) 
+See following [README.md](examples/kubernetes/README.md)
+
+### Clients
+
+`apiserver-network-proxy` components are intended to run as standalone binaries and should not be imported as a library. Clients communicating with the network proxy can import the `konnectivity-client` module.
 
 ## Troubleshoot
 
