@@ -227,7 +227,7 @@ func (a *Agent) runAdminServer(o *GrpcProxyAgentOptions) error {
 	muxHandler.HandleFunc("/ready", readinessHandler)
 	muxHandler.HandleFunc("/metrics", metricsHandler)
 	adminServer := &http.Server{
-		Addr:           "127.0.0.1:8093",
+		Addr:           ":8093",
 		Handler:        muxHandler,
 		MaxHeaderBytes: 1 << 20,
 	}

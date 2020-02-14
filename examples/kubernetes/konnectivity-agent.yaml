@@ -3,7 +3,7 @@ kind: ServiceAccount
 metadata:
   name: konnectivity-agent
   namespace: kube-system
---- 
+---
 apiVersion: v1
 kind: Pod
 metadata:
@@ -31,7 +31,6 @@ spec:
     livenessProbe:
       httpGet:
         scheme: HTTP
-        host: 127.0.0.1
         port: 8093
         path: /healthz
       initialDelaySeconds: 15
