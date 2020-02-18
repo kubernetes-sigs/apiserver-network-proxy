@@ -56,13 +56,13 @@ bin:
 .PHONY: build
 build: bin/proxy-agent bin/proxy-server bin/proxy-test-client
 
-bin/proxy-agent: proto/agent/agent.pb.go proto/client/client.pb.go bin cmd/agent/main.go
+bin/proxy-agent: proto/agent/agent.pb.go konnectivity-client/proto/client/client.pb.go bin cmd/agent/main.go
 	GO111MODULE=on go build -o bin/proxy-agent cmd/agent/main.go
 
-bin/proxy-test-client: proto/client/client.pb.go bin cmd/client/main.go
+bin/proxy-test-client: konnectivity-client/proto/client/client.pb.go bin cmd/client/main.go
 	GO111MODULE=on go build -o bin/proxy-test-client cmd/client/main.go
 
-bin/proxy-server: proto/agent/agent.pb.go proto/client/client.pb.go bin cmd/proxy/main.go
+bin/proxy-server: proto/agent/agent.pb.go konnectivity-client/proto/client/client.pb.go bin cmd/proxy/main.go
 	GO111MODULE=on go build -o bin/proxy-server cmd/proxy/main.go
 
 ## --------------------------------------
@@ -75,9 +75,9 @@ bin/proxy-server: proto/agent/agent.pb.go proto/client/client.pb.go bin cmd/prox
 ## --------------------------------------
 
 .PHONY: gen
-gen: proto/agent/agent.pb.go proto/client/client.pb.go mock_gen
+gen: proto/agent/agent.pb.go konnectivity-client/proto/client/client.pb.go mock_gen
 
-proto/client/client.pb.go: konnectivity-client/proto/client/client.proto
+konnectivity-client/proto/client/client.pb.go: konnectivity-client/proto/client/client.proto
 	protoc -I . konnectivity-client/proto/client/client.proto --go_out=plugins=grpc:${GOPATH}/src
 	cat hack/go-license-header.txt konnectivity-client/proto/client/client.pb.go > konnectivity-client/proto/client/client.licensed.go
 	mv konnectivity-client/proto/client/client.licensed.go konnectivity-client/proto/client/client.pb.go

@@ -8,6 +8,11 @@ WORKDIR /go/src/sigs.k8s.io/apiserver-network-proxy
 COPY go.mod go.mod
 COPY go.sum go.sum
 
+# This is required before go mod download because we have a
+# replace directive for konnectivity-client in go.mod
+# The download will fail without the directory present
+COPY konnectivity-client/ konnectivity-client/
+
 # Cache dependencies
 RUN go mod download
 
