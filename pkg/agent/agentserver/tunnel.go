@@ -127,7 +127,7 @@ func (t *Tunnel) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			klog.Errorf("error sending packet %v", err)
 			continue
 		}
-		klog.Infof("Forwarding on tunnel, packet %v", string(pkt[:n]))
+		klog.Infof("Forwarding on tunnel, packet type: %s", packet.Type)
 	}
 
 	klog.Infof("Stopping transfer to %q", r.Host)
