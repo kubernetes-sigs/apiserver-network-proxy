@@ -117,7 +117,7 @@ func (a *AgentClient) Serve() {
 			return
 		}
 
-		klog.Infof("[tracing] recv packet %+v", pkt)
+		klog.Infof("[tracing] recv packet, type: %s", pkt.Type)
 
 		if pkt == nil {
 			klog.Warningf("empty packet received")
@@ -183,7 +183,6 @@ func (a *AgentClient) Serve() {
 		case client.PacketType_DATA:
 			data := pkt.GetData()
 			klog.Infof("received DATA(id=%d)", data.ConnectID)
-			klog.Infof("[tracing] %v", data)
 
 			if ctx, ok := a.connContext[data.ConnectID]; ok {
 				ctx.dataCh <- data.Data
