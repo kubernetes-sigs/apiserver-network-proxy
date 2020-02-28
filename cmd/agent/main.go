@@ -64,6 +64,10 @@ type GrpcProxyAgentOptions struct {
 	proxyServerHost string
 	proxyServerPort int
 
+	// Ports for the health and admin server
+	healthServerPort int
+	adminServerPort  int
+
 	agentID           string
 	syncInterval      time.Duration
 	probeInterval     time.Duration
@@ -92,6 +96,8 @@ func (o *GrpcProxyAgentOptions) Flags() *pflag.FlagSet {
 	flags.StringVar(&o.caCert, "ca-cert", o.caCert, "If non-empty the CAs we use to validate clients.")
 	flags.StringVar(&o.proxyServerHost, "proxy-server-host", o.proxyServerHost, "The hostname to use to connect to the proxy-server.")
 	flags.IntVar(&o.proxyServerPort, "proxy-server-port", o.proxyServerPort, "The port the proxy server is listening on.")
+	flags.IntVar(&o.healthServerPort, "health-server-port", o.healthServerPort, "The port the health server is listening on.")
+	flags.IntVar(&o.adminServerPort, "admin-server-port", o.adminServerPort, "The port the admin server is listening on.")
 	flags.StringVar(&o.agentID, "agent-id", o.agentID, "The unique ID of this agent. Default to a generated uuid if not set.")
 	flags.DurationVar(&o.syncInterval, "sync-interval", o.syncInterval, "The initial interval by which the agent periodically checks if it has connections to all instances of the proxy server.")
 	flags.DurationVar(&o.probeInterval, "probe-interval", o.probeInterval, "The interval by which the agent periodically checks if its connections to the proxy server are ready.")
@@ -106,6 +112,8 @@ func (o *GrpcProxyAgentOptions) Print() {
 	klog.Warningf("CACert set to \"%s\".\n", o.caCert)
 	klog.Warningf("ProxyServerHost set to \"%s\".\n", o.proxyServerHost)
 	klog.Warningf("ProxyServerPort set to %d.\n", o.proxyServerPort)
+	klog.Warningf("HealthServerPort set to %d.\n", o.healthServerPort)
+	klog.Warningf("AdminServerPort set to %d.\n", o.adminServerPort)
 	klog.Warningf("AgentID set to %s.\n", o.agentID)
 	klog.Warningf("SyncInterval set to %v.\n", o.syncInterval)
 	klog.Warningf("ProbeInterval set to %v.\n", o.probeInterval)
@@ -138,6 +146,13 @@ func (o *GrpcProxyAgentOptions) Validate() error {
 	if o.proxyServerPort <= 0 {
 		return fmt.Errorf("proxy server port %d must be greater than 0", o.proxyServerPort)
 	}
+	if o.healthServerPort <= 0 {
+		return fmt.Errorf("health server port %d must be greater than 0", o.healthServerPort)
+	}
+	if o.adminServerPort <= 0 {
+		return fmt.Errorf("admin server port %d must be greater than 0", o.adminServerPort)
+	}
+
 	if o.serviceAccountTokenPath != "" {
 		if _, err := os.Stat(o.serviceAccountTokenPath); os.IsNotExist(err) {
 			return fmt.Errorf("error checking service account token path %s, got %v", o.serviceAccountTokenPath, err)
@@ -153,6 +168,8 @@ func newGrpcProxyAgentOptions() *GrpcProxyAgentOptions {
 		caCert:                  "",
 		proxyServerHost:         "127.0.0.1",
 		proxyServerPort:         8091,
+		healthServerPort:        8093,
+		adminServerPort:         8094,
 		agentID:                 uuid.New().String(),
 		syncInterval:            5 * time.Second,
 		probeInterval:           5 * time.Second,
@@ -187,6 +204,10 @@ func (a *Agent) run(o *GrpcProxyAgentOptions) error {
 		return fmt.Errorf("failed to run proxy connection with %v", err)
 	}
 
+	if err := a.runHealthServer(o); err != nil {
+		return fmt.Errorf("failed to run health server with %v", err)
+	}
+
 	if err := a.runAdminServer(o); err != nil {
 		return fmt.Errorf("failed to run admin server with %v", err)
 	}
@@ -211,23 +232,43 @@ func (a *Agent) runProxyConnection(o *GrpcProxyAgentOptions) error {
 	return nil
 }
 
-func (a *Agent) runAdminServer(o *GrpcProxyAgentOptions) error {
+func (a *Agent) runHealthServer(o *GrpcProxyAgentOptions) error {
 	livenessHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		fmt.Fprintf(w, "ok")
 	})
 	readinessHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		fmt.Fprintf(w, "ok")
 	})
+
+	muxHandler := http.NewServeMux()
+	muxHandler.HandleFunc("/healthz", livenessHandler)
+	muxHandler.HandleFunc("/ready", readinessHandler)
+	healthServer := &http.Server{
+		Addr:           fmt.Sprintf(":%d", o.healthServerPort),
+		Handler:        muxHandler,
+		MaxHeaderBytes: 1 << 20,
+	}
+
+	go func() {
+		err := healthServer.ListenAndServe()
+		if err != nil {
+			klog.Warningf("health server received %v.\n", err)
+		}
+		klog.Warningf("Health server stopped listening\n")
+	}()
+
+	return nil
+}
+
+func (a *Agent) runAdminServer(o *GrpcProxyAgentOptions) error {
 	metricsHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		prometheus.Handler().ServeHTTP(w, r)
 	})
 
 	muxHandler := http.NewServeMux()
-	muxHandler.HandleFunc("/healthz", livenessHandler)
-	muxHandler.HandleFunc("/ready", readinessHandler)
 	muxHandler.HandleFunc("/metrics", metricsHandler)
 	adminServer := &http.Server{
-		Addr:           ":8093",
+		Addr:           fmt.Sprintf("127.0.0.1:%d", o.adminServerPort),
 		Handler:        muxHandler,
 		MaxHeaderBytes: 1 << 20,
 	}
@@ -235,9 +276,9 @@ func (a *Agent) runAdminServer(o *GrpcProxyAgentOptions) error {
 	go func() {
 		err := adminServer.ListenAndServe()
 		if err != nil {
-			klog.Warningf("health server received %v.\n", err)
+			klog.Warningf("admin server received %v.\n", err)
 		}
-		klog.Warningf("Health server stopped listening\n")
+		klog.Warningf("Admin server stopped listening\n")
 	}()
 
 	return nil
