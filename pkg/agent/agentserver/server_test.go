@@ -33,54 +33,8 @@ import (
 	k8stesting "k8s.io/client-go/testing"
 
 	agentmock "sigs.k8s.io/apiserver-network-proxy/proto/agent/mocks"
-	"sigs.k8s.io/apiserver-network-proxy/proto/agent"
 	"sigs.k8s.io/apiserver-network-proxy/proto/header"
 )
-
-type fakeAgentService_ConnectServer struct {
-	agent.AgentService_ConnectServer
-}
-
-func TestAddRemoveBackends(t *testing.T) {
-	conn1 := new(fakeAgentService_ConnectServer)
-	conn12 := new(fakeAgentService_ConnectServer)
-	conn2 := new(fakeAgentService_ConnectServer)
-	conn22 := new(fakeAgentService_ConnectServer)
-	conn3 := new(fakeAgentService_ConnectServer)
-
-	p := NewProxyServer("", 1, &AgentTokenAuthenticationOptions{})
-	p.addBackend("agent1", conn1)
-	p.removeBackend("agent1", conn1)
-	expectedBackends := make(map[string][]agent.AgentService_ConnectServer)
-	expectedAgentIDs := []string{}
-	if e, a := expectedBackends, p.backends; !reflect.DeepEqual(e, a) {
-		t.Errorf("expected %v, got %v", e, a)
-	}
-	if e, a := expectedAgentIDs, p.agentIDs; !reflect.DeepEqual(e, a) {
-		t.Errorf("expected %v, got %v", e, a)
-	}
-
-	p = NewProxyServer("", 1, &AgentTokenAuthenticationOptions{})
-	p.addBackend("agent1", conn1)
-	p.addBackend("agent1", conn12)
-	p.addBackend("agent2", conn2)
-	p.addBackend("agent2", conn22)
-	p.addBackend("agent3", conn3)
-	p.removeBackend("agent2", conn2)
-	p.removeBackend("agent2", conn22)
-	p.removeBackend("agent1", conn1)
-	expectedBackends = map[string][]agent.AgentService_ConnectServer{
-		"agent1": []agent.AgentService_ConnectServer{conn12},
-		"agent3": []agent.AgentService_ConnectServer{conn3},
-	}
-	expectedAgentIDs = []string{"agent1", "agent3"}
-	if e, a := expectedBackends, p.backends; !reflect.DeepEqual(e, a) {
-		t.Errorf("expected %v, got %v", e, a)
-	}
-	if e, a := expectedAgentIDs, p.agentIDs; !reflect.DeepEqual(e, a) {
-		t.Errorf("expected %v, got %v", e, a)
-	}
-}
 
 func TestAgentTokenAuthenticationErrorsToken(t *testing.T) {
 	stub := gomock.NewController(t)
@@ -223,5 +177,42 @@ func TestAgentTokenAuthenticationErrorsToken(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func TestAddRemoveFrontends(t *testing.T) {
+	agent1ConnID1 := new(ProxyClientConnection)
+	agent1ConnID2 := new(ProxyClientConnection)
+	agent2ConnID1 := new(ProxyClientConnection)
+	agent2ConnID2 := new(ProxyClientConnection)
+	agent3ConnID1 := new(ProxyClientConnection)
+
+	p := NewProxyServer("", 1, nil)
+	p.addFrontend("agent1", int64(1), agent1ConnID1)
+	p.removeFrontend("agent1", int64(1))
+	expectedFrontends := make(map[string]map[int64]*ProxyClientConnection)
+	if e, a := expectedFrontends, p.frontends; !reflect.DeepEqual(e, a) {
+		t.Errorf("expected %v, got %v", e, a)
+	}
+
+	p = NewProxyServer("", 1, nil)
+	p.addFrontend("agent1", int64(1), agent1ConnID1)
+	p.addFrontend("agent1", int64(2), agent1ConnID2)
+	p.addFrontend("agent2", int64(1), agent2ConnID1)
+	p.addFrontend("agent2", int64(2), agent2ConnID2)
+	p.addFrontend("agent3", int64(1), agent3ConnID1)
+	p.removeFrontend("agent2", int64(1))
+	p.removeFrontend("agent2", int64(2))
+	p.removeFrontend("agent1", int64(1))
+	expectedFrontends = map[string]map[int64]*ProxyClientConnection{
+		"agent1": map[int64]*ProxyClientConnection{
+			int64(2): agent1ConnID2,
+		},
+		"agent3": map[int64]*ProxyClientConnection{
+			int64(1): agent3ConnID1,
+		},
+	}
+	if e, a := expectedFrontends, p.frontends; !reflect.DeepEqual(e, a) {
+		t.Errorf("expected %v, got %v", e, a)
 	}
 }

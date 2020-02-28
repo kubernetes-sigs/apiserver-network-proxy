@@ -74,7 +74,7 @@ func (t *Tunnel) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		connected: connected,
 	}
 	t.Server.PendingDial[random] = connection
-	backend, err := t.Server.randomBackend()
+	backend, err := t.Server.BackendManager.Backend()
 	if err != nil {
 		http.Error(w, fmt.Sprintf("currently no tunnels available: %v", err), http.StatusInternalServerError)
 	}
@@ -131,5 +131,4 @@ func (t *Tunnel) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 
 	klog.Infof("Stopping transfer to %q", r.Host)
-	delete(t.Server.Frontends, connection.connectID)
 }
