@@ -96,7 +96,7 @@ func (s *DefaultBackendManager) RemoveBackend(agentID string, conn agent.AgentSe
 	for i, c := range backends {
 		if c == conn {
 			s.backends[agentID] = append(s.backends[agentID][:i], s.backends[agentID][i+1:]...)
-			if i == 0 && len(s.backends) != 0 {
+			if i == 0 && len(s.backends[agentID]) != 0 {
 				klog.Warningf("this should not happen. Removed connection %v that is not the first connection, remaining connections are %v", conn, s.backends[agentID])
 			}
 			found = true
