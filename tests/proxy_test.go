@@ -14,10 +14,10 @@ import (
 
 	"github.com/google/uuid"
 	"google.golang.org/grpc"
-	"sigs.k8s.io/apiserver-network-proxy/pkg/agent/agentclient"
-	"sigs.k8s.io/apiserver-network-proxy/pkg/agent/agentserver"
 	"sigs.k8s.io/apiserver-network-proxy/konnectivity-client/pkg/client"
 	clientproto "sigs.k8s.io/apiserver-network-proxy/konnectivity-client/proto/client"
+	"sigs.k8s.io/apiserver-network-proxy/pkg/agent/agentclient"
+	"sigs.k8s.io/apiserver-network-proxy/pkg/agent/agentserver"
 	"sigs.k8s.io/apiserver-network-proxy/proto/agent"
 )
 

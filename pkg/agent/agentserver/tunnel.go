@@ -82,6 +82,8 @@ func (t *Tunnel) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		klog.Errorf("failed to tunnel dial request %v", err)
 		return
 	}
+	klog.Infof("Sent dial request to backend")
+
 	ctxt := backend.Context()
 	if ctxt.Err() != nil {
 		klog.Errorf("context reports error %v", err)

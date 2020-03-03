@@ -182,7 +182,7 @@ func (a *AgentClient) Serve() {
 
 		case client.PacketType_DATA:
 			data := pkt.GetData()
-			klog.Infof("received DATA(id=%d)", data.ConnectID)
+			klog.Infof("received DATA(id=%d, size=%d)", data.ConnectID, len(data.Data))
 
 			if ctx, ok := a.connContext[data.ConnectID]; ok {
 				ctx.dataCh <- data.Data
@@ -230,7 +230,7 @@ func (a *AgentClient) remoteToProxy(conn net.Conn, connID int64) {
 
 	for {
 		n, err := conn.Read(buf[:])
-		klog.Infof("received %d bytes from proxy server", n)
+		klog.Infof("received %d bytes from remote service", n)
 
 		if err == io.EOF {
 			klog.Info("connection EOF")
@@ -263,6 +263,7 @@ func (a *AgentClient) proxyToRemote(conn net.Conn, connID int64) {
 		pos := 0
 		for {
 			n, err := conn.Write(d[pos:])
+			klog.Infof("write %d bytes to remote connection", n)
 			if err == nil {
 				break
 			} else if n > 0 {
