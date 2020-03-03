@@ -233,7 +233,7 @@ func (s *ProxyServer) serveRecvFrontend(stream client.ProxyService_ProxyServer, 
 
 		case client.PacketType_DATA:
 			connID := pkt.GetData().ConnectID
-			klog.Infof(">>> Received DATA(id=%d)", connID)
+			klog.Infof(">>> Received DATA(id=%d, size=%d)", connID, len(pkt.GetData().Data))
 			if firstConnID == 0 {
 				firstConnID = connID
 			} else if firstConnID != connID {
@@ -442,7 +442,7 @@ func (s *ProxyServer) serveRecvBackend(stream agent.AgentService_ConnectServer, 
 
 		case client.PacketType_DATA:
 			resp := pkt.GetData()
-			klog.Infof("<<< Received DATA(id=%d)", resp.ConnectID)
+			klog.Infof("<<< Received DATA(id=%d, size=%d)", resp.ConnectID, len(resp.Data))
 			client, err := s.getFrontend(agentID, resp.ConnectID)
 			if err != nil {
 				klog.Warning(err)

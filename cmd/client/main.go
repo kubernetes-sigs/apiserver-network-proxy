@@ -239,10 +239,11 @@ func (c *Client) getUDSDialer(o *GrpcProxyClientOptions) (func(ctx context.Conte
 
 	// Setup signal handler
 	ch := make(chan os.Signal, 1)
-	signal.Notify(ch)
+	signal.Notify(ch, os.Interrupt)
 
 	go func() {
-		<-ch
+		sig := <-ch
+		klog.Infof("Got signal %v", sig)
 		if proxyConn != nil {
 			err := proxyConn.Close()
 			klog.Infof("connection closed: %v", err)
