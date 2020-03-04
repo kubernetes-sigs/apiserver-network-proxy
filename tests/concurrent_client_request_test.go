@@ -78,7 +78,7 @@ func (s *singleTimeManager) RemoveBackend(agentID string, conn agent.AgentServic
 	delete(s.backends, agentID)
 }
 
-func (s *singleTimeManager) Backend() (agent.AgentService_ConnectServer, error) {
+func (s *singleTimeManager) Backend() (agentserver.Backend, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	for k, v := range s.backends {

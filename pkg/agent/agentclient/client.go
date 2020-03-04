@@ -74,7 +74,7 @@ func (c *connContext) cleanup() {
 	c.cleanOnce.Do(c.cleanFunc)
 }
 
-// Connect connnects to proxy server to establish a gRPC stream,
+// Connect connects to proxy server to establish a gRPC stream,
 // on which the proxied traffic is multiplexed through the stream
 // and piped to the local connection. It register itself as a
 // backend from proxy server, so proxy server will route traffic
@@ -230,7 +230,7 @@ func (a *AgentClient) remoteToProxy(conn net.Conn, connID int64) {
 
 	for {
 		n, err := conn.Read(buf[:])
-		klog.Infof("received %d bytes from proxy server", n)
+		klog.Infof("received %d bytes from remote for connID[%d]", n, connID)
 
 		if err == io.EOF {
 			klog.Info("connection EOF")
@@ -264,8 +264,10 @@ func (a *AgentClient) proxyToRemote(conn net.Conn, connID int64) {
 		for {
 			n, err := conn.Write(d[pos:])
 			if err == nil {
+				klog.Infof("[connID: %d] write last %d data to remote", connID, n)
 				break
 			} else if n > 0 {
+				klog.Infof("[connID: %d] write %d data to remote with error: %v", connID, n, err)
 				pos += n
 			} else {
 				klog.Errorf("conn write error: %v", err)

@@ -73,7 +73,7 @@ func (t *Tunnel) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		HTTP:      conn,
 		connected: connected,
 	}
-	t.Server.PendingDial[random] = connection
+	t.Server.PendingDial.Add(random, connection)
 	backend, err := t.Server.BackendManager.Backend()
 	if err != nil {
 		http.Error(w, fmt.Sprintf("currently no tunnels available: %v", err), http.StatusInternalServerError)
@@ -102,8 +102,13 @@ func (t *Tunnel) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	klog.Infof("Starting proxy to %q", r.Host)
 	pkt := make([]byte, 1<<12)
 
+	connID := connection.connectID
+	agentID := connection.agentID
+	var acc int
+
 	for {
 		n, err := bufrw.Read(pkt[:])
+		acc += n
 		if err == io.EOF {
 			klog.Warningf("EOF from %v", r.Host)
 			break
@@ -117,7 +122,7 @@ func (t *Tunnel) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			Type: client.PacketType_DATA,
 			Payload: &client.Packet_Data{
 				Data: &client.Data{
-					ConnectID: connection.connectID,
+					ConnectID: connID,
 					Data:      pkt[:n],
 				},
 			},
@@ -127,8 +132,8 @@ func (t *Tunnel) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			klog.Errorf("error sending packet %v", err)
 			continue
 		}
-		klog.Infof("Forwarding on tunnel, packet type: %s", packet.Type)
+		klog.Infof("Forwarding %d (total %d) bytes of DATA on tunnel for agentID %s, connID %d", n, acc, connection.agentID, connection.connectID)
 	}
 
-	klog.Infof("Stopping transfer to %q", r.Host)
+	klog.Infof("Stopping transfer to %q, agentID %s, connID %d", r.Host, agentID, connID)
 }

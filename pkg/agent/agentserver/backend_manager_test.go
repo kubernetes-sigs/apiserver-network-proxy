@@ -38,7 +38,7 @@ func TestAddRemoveBackends(t *testing.T) {
 
 	p.AddBackend("agent1", conn1)
 	p.RemoveBackend("agent1", conn1)
-	expectedBackends := make(map[string][]agent.AgentService_ConnectServer)
+	expectedBackends := make(map[string][]*backend)
 	expectedAgentIDs := []string{}
 	if e, a := expectedBackends, p.backends; !reflect.DeepEqual(e, a) {
 		t.Errorf("expected %v, got %v", e, a)
@@ -60,9 +60,9 @@ func TestAddRemoveBackends(t *testing.T) {
 	p.RemoveBackend("agent1", conn1)
 	// This is invalid. agent1 doesn't have conn3. This should be a no-op.
 	p.RemoveBackend("agent1", conn3)
-	expectedBackends = map[string][]agent.AgentService_ConnectServer{
-		"agent1": []agent.AgentService_ConnectServer{conn12},
-		"agent3": []agent.AgentService_ConnectServer{conn3},
+	expectedBackends = map[string][]*backend{
+		"agent1": []*backend{newBackend(conn12)},
+		"agent3": []*backend{newBackend(conn3)},
 	}
 	expectedAgentIDs = []string{"agent1", "agent3"}
 	if e, a := expectedBackends, p.backends; !reflect.DeepEqual(e, a) {
