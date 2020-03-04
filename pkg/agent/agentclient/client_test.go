@@ -11,8 +11,8 @@ import (
 
 	"google.golang.org/grpc"
 	"k8s.io/klog"
-	"sigs.k8s.io/apiserver-network-proxy/proto/agent"
 	"sigs.k8s.io/apiserver-network-proxy/konnectivity-client/proto/client"
+	"sigs.k8s.io/apiserver-network-proxy/proto/agent"
 )
 
 func TestServeData_HTTP(t *testing.T) {
@@ -20,7 +20,7 @@ func TestServeData_HTTP(t *testing.T) {
 	var stream agent.AgentService_ConnectClient
 	stopCh := make(chan struct{})
 	testClient := &AgentClient{
-		connContext: make(map[int64]*connContext),
+		connManager: newConnectionManager(),
 		stopCh:      stopCh,
 	}
 	testClient.stream, stream = pipe2()
@@ -107,7 +107,7 @@ func TestServeData_HTTP(t *testing.T) {
 	}
 
 	// Verify internal state is consistent
-	if _, ok := testClient.connContext[connID]; ok {
+	if _, ok := testClient.connManager.Get(connID); ok {
 		t.Error("client.connContext not released")
 	}
 }
@@ -116,7 +116,7 @@ func TestClose_Client(t *testing.T) {
 	var stream agent.AgentService_ConnectClient
 	stopCh := make(chan struct{})
 	testClient := &AgentClient{
-		connContext: make(map[int64]*connContext),
+		connManager: newConnectionManager(),
 		stopCh:      stopCh,
 	}
 	testClient.stream, stream = pipe2()
@@ -171,7 +171,7 @@ func TestClose_Client(t *testing.T) {
 	}
 
 	// Verify internal state is consistent
-	if _, ok := testClient.connContext[connID]; ok {
+	if _, ok := testClient.connManager.Get(connID); ok {
 		t.Error("client.connContext not released")
 	}
 

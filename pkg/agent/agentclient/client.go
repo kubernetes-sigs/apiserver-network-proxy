@@ -27,11 +27,54 @@ import (
 	"sigs.k8s.io/apiserver-network-proxy/konnectivity-client/proto/client"
 )
 
+// connContext tracks a connection from agent to node network.
+type connContext struct {
+	conn      net.Conn
+	cleanFunc func()
+	dataCh    chan []byte
+	cleanOnce sync.Once
+}
+
+func (c *connContext) cleanup() {
+	c.cleanOnce.Do(c.cleanFunc)
+}
+
+type connectionManager struct {
+	mu          sync.RWMutex
+	connections map[int64]*connContext
+}
+
+func (cm *connectionManager) Add(connID int64, ctx *connContext) {
+	cm.mu.Lock()
+	defer cm.mu.Unlock()
+	cm.connections[connID] = ctx
+}
+
+func (cm *connectionManager) Get(connID int64) (*connContext, bool) {
+	cm.mu.RLock()
+	defer cm.mu.RUnlock()
+	ctx, ok := cm.connections[connID]
+	return ctx, ok
+}
+
+func (cm *connectionManager) Delete(connID int64) {
+	cm.mu.Lock()
+	defer cm.mu.Unlock()
+	delete(cm.connections, connID)
+}
+
+func newConnectionManager() *connectionManager {
+	return &connectionManager{
+		connections: make(map[int64]*connContext),
+	}
+}
+
 // AgentClient runs on the node network side. It connects to proxy server and establishes
 // a stream connection from which it sends and receives network traffic.
 type AgentClient struct {
-	nextConnID  int64
-	connContext map[int64]*connContext
+	nextConnID int64
+
+	connManager *connectionManager
 
 	stream *RedialableAgentClient
 	stopCh <-chan struct{}
@@ -47,7 +90,7 @@ func newAgentClient(address, agentID string, cs *ClientSet, opts ...grpc.DialOpt
 
 func newAgentClientWithRedialableAgentClient(rac *RedialableAgentClient) *AgentClient {
 	return &AgentClient{
-		connContext: make(map[int64]*connContext),
+		connManager: newConnectionManager(),
 		stream:      rac,
 		stopCh:      rac.stopCh,
 	}
@@ -60,18 +103,6 @@ func (c *AgentClient) Close() {
 		return
 	}
 	c.stream.Close()
-}
-
-// connContext tracks a connection from agent to node network.
-type connContext struct {
-	conn      net.Conn
-	cleanFunc func()
-	dataCh    chan []byte
-	cleanOnce sync.Once
-}
-
-func (c *connContext) cleanup() {
-	c.cleanOnce.Do(c.cleanFunc)
 }
 
 // Connect connects to proxy server to establish a gRPC stream,
@@ -146,7 +177,7 @@ func (a *AgentClient) Serve() {
 
 			connID := atomic.AddInt64(&a.nextConnID, 1)
 			dataCh := make(chan []byte, 5)
-			a.connContext[connID] = &connContext{
+			ctx := &connContext{
 				conn:   conn,
 				dataCh: dataCh,
 				cleanFunc: func() {
@@ -167,9 +198,10 @@ func (a *AgentClient) Serve() {
 					}
 
 					close(dataCh)
-					delete(a.connContext, connID)
+					a.connManager.Delete(connID)
 				},
 			}
+			a.connManager.Add(connID, ctx)
 
 			resp.GetDialResponse().ConnectID = connID
 			if err := a.stream.RetrySend(resp); err != nil {
@@ -177,14 +209,15 @@ func (a *AgentClient) Serve() {
 				continue
 			}
 
-			go a.remoteToProxy(conn, connID)
-			go a.proxyToRemote(conn, connID)
+			go a.remoteToProxy(connID, ctx)
+			go a.proxyToRemote(connID, ctx)
 
 		case client.PacketType_DATA:
 			data := pkt.GetData()
 			klog.Infof("received DATA(id=%d)", data.ConnectID)
 
-			if ctx, ok := a.connContext[data.ConnectID]; ok {
+			ctx, ok := a.connManager.Get(data.ConnectID)
+			if ok {
 				ctx.dataCh <- data.Data
 			}
 
@@ -194,7 +227,8 @@ func (a *AgentClient) Serve() {
 
 			klog.Infof("received CLOSE_REQ(id=%d)", connID)
 
-			if ctx, ok := a.connContext[connID]; ok {
+			ctx, ok := a.connManager.Get(connID)
+			if ok {
 				ctx.cleanup()
 			} else {
 				resp := &client.Packet{
@@ -215,12 +249,7 @@ func (a *AgentClient) Serve() {
 	}
 }
 
-func (a *AgentClient) remoteToProxy(conn net.Conn, connID int64) {
-	ctx := a.connContext[connID]
-	if ctx == nil {
-		return
-	}
-
+func (a *AgentClient) remoteToProxy(connID int64, ctx *connContext) {
 	defer ctx.cleanup()
 
 	var buf [1 << 12]byte
@@ -229,7 +258,7 @@ func (a *AgentClient) remoteToProxy(conn net.Conn, connID int64) {
 	}
 
 	for {
-		n, err := conn.Read(buf[:])
+		n, err := ctx.conn.Read(buf[:])
 		klog.Infof("received %d bytes from remote for connID[%d]", n, connID)
 
 		if err == io.EOF {
@@ -251,18 +280,13 @@ func (a *AgentClient) remoteToProxy(conn net.Conn, connID int64) {
 	}
 }
 
-func (a *AgentClient) proxyToRemote(conn net.Conn, connID int64) {
-	ctx := a.connContext[connID]
-	if ctx == nil {
-		return
-	}
-
+func (a *AgentClient) proxyToRemote(connID int64, ctx *connContext) {
 	defer ctx.cleanup()
 
 	for d := range ctx.dataCh {
 		pos := 0
 		for {
-			n, err := conn.Write(d[pos:])
+			n, err := ctx.conn.Write(d[pos:])
 			if err == nil {
 				klog.Infof("[connID: %d] write last %d data to remote", connID, n)
 				break
