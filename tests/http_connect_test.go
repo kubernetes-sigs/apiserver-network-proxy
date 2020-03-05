@@ -1,8 +1,11 @@
 package tests
 
 import (
+	"bufio"
 	"fmt"
+	"io/ioutil"
 	"net"
+	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
@@ -12,7 +15,7 @@ import (
 )
 
 func TestProxy_HTTPConnect(t *testing.T) {
-	s := newSizedServer(1<<10, 1)
+	s := newSizedServer(1<<10, 10)
 	server := httptest.NewServer(s)
 	defer server.Close()
 
@@ -42,17 +45,15 @@ func TestProxy_HTTPConnect(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	msg := fmt.Sprintf("CONNECT %s HTTP/1.1\r\nHost: %s\r\n\r\n", httpConnAddr, serverAddr)
-	fmt.Println("sending ", msg)
-
+	msg := fmt.Sprintf("CONNECT %s HTTP/1.1\r\nHost: %s\r\n\r\n", serverAddr, serverAddr)
 	_, err = conn.Write([]byte(msg))
 	if err != nil {
 		t.Fatal(err)
 	}
 
+	// Read CONNECT result
 	var buf [4096]byte
-	n, err := conn.Read(buf[:])
-	if err != nil {
+	if _, err := conn.Read(buf[:]); err != nil {
 		t.Fatal(err)
 	}
 
@@ -60,16 +61,19 @@ func TestProxy_HTTPConnect(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	fmt.Println("response:")
-	fmt.Println(string(buf[:n]))
-
-	n, err = conn.Read(buf[:])
+	resp, err := http.ReadResponse(bufio.NewReader(conn), nil)
 	if err != nil {
 		t.Fatal(err)
 	}
 
 	fmt.Println("response 2:")
-	fmt.Println(string(buf[:n]))
+	fmt.Println(resp.Status)
 
-	t.Fail()
+	body, err := ioutil.ReadAll(resp.Body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(body) != 10*1<<10 {
+		t.Errorf("expect len(body)=%d; got %d", 10*1<<10, len(body))
+	}
 }
