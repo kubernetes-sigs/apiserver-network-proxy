@@ -49,7 +49,7 @@ func (t *Tunnel) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	w.WriteHeader(http.StatusOK)
 
-	conn, _, err := hijacker.Hijack()
+	conn, bufrw, err := hijacker.Hijack()
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
@@ -103,7 +103,7 @@ func (t *Tunnel) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	pkt := make([]byte, 1<<12)
 
 	for {
-		n, err := conn.Read(pkt[:])
+		n, err := bufrw.Read(pkt[:])
 		if err == io.EOF {
 			klog.Warningf("EOF from %v", r.Host)
 			break
