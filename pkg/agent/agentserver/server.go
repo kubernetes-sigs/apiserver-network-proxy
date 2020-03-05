@@ -41,6 +41,7 @@ type ProxyClientConnection struct {
 	HTTP      net.Conn
 	connected chan struct{}
 	connectID int64
+	agentID   string
 }
 
 func (c *ProxyClientConnection) send(pkt *client.Packet) error {
@@ -63,6 +64,36 @@ func (c *ProxyClientConnection) send(pkt *client.Packet) error {
 	}
 }
 
+func NewPendingDialManager() *PendingDialManager {
+	return &PendingDialManager{
+		pendingDial: make(map[int64]*ProxyClientConnection),
+	}
+}
+
+type PendingDialManager struct {
+	mu          sync.RWMutex
+	pendingDial map[int64]*ProxyClientConnection
+}
+
+func (pm *PendingDialManager) Add(random int64, clientConn *ProxyClientConnection) {
+	pm.mu.Lock()
+	defer pm.mu.Unlock()
+	pm.pendingDial[random] = clientConn
+}
+
+func (pm *PendingDialManager) Get(random int64) (*ProxyClientConnection, bool) {
+	pm.mu.RLock()
+	defer pm.mu.RUnlock()
+	clientConn, ok := pm.pendingDial[random]
+	return clientConn, ok
+}
+
+func (pm *PendingDialManager) Remove(random int64) {
+	pm.mu.Lock()
+	defer pm.mu.Unlock()
+	delete(pm.pendingDial, random)
+}
+
 // ProxyServer
 type ProxyServer struct {
 	// BackendManager manages the backends.
@@ -73,7 +104,7 @@ type ProxyServer struct {
 	// conn = Frontend[agentID][connID]
 	frontends map[string]map[int64]*ProxyClientConnection
 
-	PendingDial map[int64]*ProxyClientConnection
+	PendingDial *PendingDialManager
 
 	serverID    string // unique ID of this server
 	serverCount int    // Number of proxy server instances, should be 1 unless it is a HA server.
@@ -143,7 +174,7 @@ func (s *ProxyServer) getFrontend(agentID string, connID int64) (*ProxyClientCon
 func NewProxyServer(serverID string, serverCount int, agentAuthenticationOptions *AgentTokenAuthenticationOptions) *ProxyServer {
 	p := &ProxyServer{
 		frontends:                  make(map[string](map[int64]*ProxyClientConnection)),
-		PendingDial:                make(map[int64]*ProxyClientConnection),
+		PendingDial:                NewPendingDialManager(),
 		serverID:                   serverID,
 		serverCount:                serverCount,
 		BackendManager:             NewDefaultBackendManager(),
@@ -192,7 +223,7 @@ func (s *ProxyServer) serveRecvFrontend(stream client.ProxyService_ProxyServer, 
 	var firstConnID int64
 	// The first packet should be a DIAL_REQ, we will randomly get a
 	// backend from the BackendManger then.
-	var backend agent.AgentService_ConnectServer
+	var backend Backend
 	var err error
 
 	for pkt := range recvCh {
@@ -211,11 +242,13 @@ func (s *ProxyServer) serveRecvFrontend(stream client.ProxyService_ProxyServer, 
 			if err := backend.Send(pkt); err != nil {
 				klog.Warningf(">>> DIAL_REQ to Backend failed: %v", err)
 			}
-			s.PendingDial[pkt.GetDialRequest().Random] = &ProxyClientConnection{
-				Mode:      "grpc",
-				Grpc:      stream,
-				connected: make(chan struct{}),
-			}
+			s.PendingDial.Add(
+				pkt.GetDialRequest().Random,
+				&ProxyClientConnection{
+					Mode:      "grpc",
+					Grpc:      stream,
+					connected: make(chan struct{}),
+				})
 			klog.Info(">>> DIAL_REQ sent to backend") // got this. but backend didn't receive anything.
 
 		case client.PacketType_CLOSE_REQ:
@@ -233,7 +266,8 @@ func (s *ProxyServer) serveRecvFrontend(stream client.ProxyService_ProxyServer, 
 
 		case client.PacketType_DATA:
 			connID := pkt.GetData().ConnectID
-			klog.Infof(">>> Received DATA(id=%d)", connID)
+			data := pkt.GetData().Data
+			klog.Infof(">>> Received %d bytes of DATA(id=%d)", len(data), connID)
 			if firstConnID == 0 {
 				firstConnID = connID
 			} else if firstConnID != connID {
@@ -424,17 +458,18 @@ func (s *ProxyServer) serveRecvBackend(stream agent.AgentService_ConnectServer, 
 		switch pkt.Type {
 		case client.PacketType_DIAL_RSP:
 			resp := pkt.GetDialResponse()
-			klog.Infof("<<< Received DIAL_RSP(rand=%d, id=%d)", resp.Random, resp.ConnectID)
+			klog.Infof("<<< Received DIAL_RSP(rand=%d), agentID %s, connID %d)", resp.Random, agentID, resp.ConnectID)
 
-			if client, ok := s.PendingDial[resp.Random]; !ok {
+			if client, ok := s.PendingDial.Get(resp.Random); !ok {
 				klog.Warning("<<< DialResp not recognized; dropped")
 			} else {
 				err := client.send(pkt)
-				delete(s.PendingDial, resp.Random)
+				s.PendingDial.Remove(resp.Random)
 				if err != nil {
 					klog.Warningf("<<< DIAL_RSP send to client stream error: %v", err)
 				} else {
 					client.connectID = resp.ConnectID
+					client.agentID = agentID
 					s.addFrontend(agentID, resp.ConnectID, client)
 					close(client.connected)
 				}
@@ -442,7 +477,7 @@ func (s *ProxyServer) serveRecvBackend(stream agent.AgentService_ConnectServer, 
 
 		case client.PacketType_DATA:
 			resp := pkt.GetData()
-			klog.Infof("<<< Received DATA(id=%d)", resp.ConnectID)
+			klog.Infof("<<< Received %d bytes of DATA from agentID %s, connID %d", len(resp.Data), agentID, resp.ConnectID)
 			client, err := s.getFrontend(agentID, resp.ConnectID)
 			if err != nil {
 				klog.Warning(err)
@@ -469,7 +504,7 @@ func (s *ProxyServer) serveRecvBackend(stream agent.AgentService_ConnectServer, 
 				klog.Infof("<<< CLOSE_RSP sent to frontend")
 			}
 			s.removeFrontend(agentID, resp.ConnectID)
-			klog.Infof("<<< Close streaming (id=%d)", resp.ConnectID)
+			klog.Infof("<<< Close streaming (agentID=%s, connId=%d)", agentID, resp.ConnectID)
 
 		default:
 			klog.Warningf("<<< Unrecognized packet %+v", pkt)
