@@ -130,7 +130,7 @@ func (t *Tunnel) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		err = backend.Send(packet)
 		if err != nil {
 			klog.Errorf("error sending packet %v", err)
-			continue
+			break
 		}
 		klog.Infof("Forwarding %d (total %d) bytes of DATA on tunnel for agentID %s, connID %d", n, acc, connection.agentID, connection.connectID)
 	}
