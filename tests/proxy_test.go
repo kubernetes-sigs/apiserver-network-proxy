@@ -14,11 +14,11 @@ import (
 
 	"github.com/google/uuid"
 	"google.golang.org/grpc"
-	"sigs.k8s.io/apiserver-network-proxy/pkg/agent/agentclient"
-	"sigs.k8s.io/apiserver-network-proxy/pkg/agent/agentserver"
 	"sigs.k8s.io/apiserver-network-proxy/konnectivity-client/pkg/client"
 	clientproto "sigs.k8s.io/apiserver-network-proxy/konnectivity-client/proto/client"
-	"sigs.k8s.io/apiserver-network-proxy/proto/agent"
+	"sigs.k8s.io/apiserver-network-proxy/pkg/agent"
+	"sigs.k8s.io/apiserver-network-proxy/pkg/server"
+	agentproto "sigs.k8s.io/apiserver-network-proxy/proto/agent"
 )
 
 // test remote server
@@ -223,12 +223,12 @@ func runGRPCProxyServer() (proxy, func(), error) {
 	return p, cleanup, err
 }
 
-func runGRPCProxyServerWithServerCount(serverCount int) (proxy, *agentserver.ProxyServer, func(), error) {
+func runGRPCProxyServerWithServerCount(serverCount int) (proxy, *server.ProxyServer, func(), error) {
 	var proxy proxy
 	var err error
 	var lis, lis2 net.Listener
 
-	server := agentserver.NewProxyServer(uuid.New().String(), serverCount, &agentserver.AgentTokenAuthenticationOptions{})
+	server := server.NewProxyServer(uuid.New().String(), serverCount, &server.AgentTokenAuthenticationOptions{})
 	grpcServer := grpc.NewServer()
 	agentServer := grpc.NewServer()
 	cleanup := func() {
@@ -250,7 +250,7 @@ func runGRPCProxyServerWithServerCount(serverCount int) (proxy, *agentserver.Pro
 	go grpcServer.Serve(lis)
 	proxy.front = localAddr(lis.Addr())
 
-	agent.RegisterAgentServiceServer(agentServer, server)
+	agentproto.RegisterAgentServiceServer(agentServer, server)
 	lis2, err = net.Listen("tcp", "")
 	if err != nil {
 		return proxy, server, cleanup, err
@@ -265,10 +265,10 @@ func runGRPCProxyServerWithServerCount(serverCount int) (proxy, *agentserver.Pro
 
 func runHTTPConnProxyServer() (proxy, func(), error) {
 	var proxy proxy
-	server := agentserver.NewProxyServer(uuid.New().String(), 0, &agentserver.AgentTokenAuthenticationOptions{})
+	s := server.NewProxyServer(uuid.New().String(), 0, &server.AgentTokenAuthenticationOptions{})
 	agentServer := grpc.NewServer()
 
-	agent.RegisterAgentServiceServer(agentServer, server)
+	agentproto.RegisterAgentServiceServer(agentServer, s)
 	lis, err := net.Listen("tcp", "")
 	if err != nil {
 		return proxy, func() {}, err
@@ -280,8 +280,8 @@ func runHTTPConnProxyServer() (proxy, func(), error) {
 
 	// http-connect
 	httpServer := &http.Server{
-		Handler: &agentserver.Tunnel{
-			Server: server,
+		Handler: &server.Tunnel{
+			Server: s,
 		},
 	}
 	lis2, err := net.Listen("tcp", "")
@@ -306,8 +306,8 @@ func runHTTPConnProxyServer() (proxy, func(), error) {
 	return proxy, cleanup, nil
 }
 
-func runAgent(addr string, stopCh <-chan struct{}) *agentclient.ClientSet {
-	cc := agentclient.ClientSetConfig{
+func runAgent(addr string, stopCh <-chan struct{}) *agent.ClientSet {
+	cc := agent.ClientSetConfig{
 		Address:           addr,
 		AgentID:           uuid.New().String(),
 		SyncInterval:      1 * time.Millisecond,

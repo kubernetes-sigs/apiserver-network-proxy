@@ -62,8 +62,8 @@ bin/proxy-agent: proto/agent/agent.pb.go konnectivity-client/proto/client/client
 bin/proxy-test-client: konnectivity-client/proto/client/client.pb.go bin cmd/client/main.go
 	GO111MODULE=on go build -o bin/proxy-test-client cmd/client/main.go
 
-bin/proxy-server: proto/agent/agent.pb.go konnectivity-client/proto/client/client.pb.go bin cmd/proxy/main.go
-	GO111MODULE=on go build -o bin/proxy-server cmd/proxy/main.go
+bin/proxy-server: proto/agent/agent.pb.go konnectivity-client/proto/client/client.pb.go bin cmd/server/main.go
+	GO111MODULE=on go build -o bin/proxy-server cmd/server/main.go
 
 ## --------------------------------------
 ## Linting
@@ -157,7 +157,7 @@ docker-push/proxy-agent: docker-build/proxy-agent
 	${DOCKER_CMD} push ${AGENT_FULL_IMAGE}-$(ARCH):${TAG}
 
 .PHONY: docker-build/proxy-server
-docker-build/proxy-server: cmd/proxy/main.go proto/agent/agent.pb.go
+docker-build/proxy-server: cmd/server/main.go proto/agent/agent.pb.go
 	@[ "${TAG}" ] || ( echo "TAG is not set"; exit 1 )
 	echo "Building proxy-server for ${ARCH}"
 	${DOCKER_CMD} build . --build-arg ARCH=$(ARCH) -f artifacts/images/server-build.Dockerfile -t ${SERVER_FULL_IMAGE}-$(ARCH):${TAG}
