@@ -31,7 +31,7 @@ import (
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials"
 	"k8s.io/klog"
-	"sigs.k8s.io/apiserver-network-proxy/pkg/agent/agentclient"
+	"sigs.k8s.io/apiserver-network-proxy/pkg/agent"
 	"sigs.k8s.io/apiserver-network-proxy/pkg/util"
 )
 
@@ -77,8 +77,8 @@ type GrpcProxyAgentOptions struct {
 	serviceAccountTokenPath string
 }
 
-func (o *GrpcProxyAgentOptions) ClientSetConfig(dialOption grpc.DialOption) *agentclient.ClientSetConfig {
-	return &agentclient.ClientSetConfig{
+func (o *GrpcProxyAgentOptions) ClientSetConfig(dialOption grpc.DialOption) *agent.ClientSetConfig {
+	return &agent.ClientSetConfig{
 		Address:                 fmt.Sprintf("%s:%d", o.proxyServerHost, o.proxyServerPort),
 		AgentID:                 o.agentID,
 		SyncInterval:            o.syncInterval,

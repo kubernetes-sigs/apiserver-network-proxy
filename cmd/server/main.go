@@ -35,12 +35,12 @@ import (
 	"github.com/spf13/pflag"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials"
-	"k8s.io/klog"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/tools/clientcmd"
-	"sigs.k8s.io/apiserver-network-proxy/pkg/agent/agentserver"
-	"sigs.k8s.io/apiserver-network-proxy/pkg/util"
+	"k8s.io/klog"
 	"sigs.k8s.io/apiserver-network-proxy/konnectivity-client/proto/client"
+	"sigs.k8s.io/apiserver-network-proxy/pkg/server"
+	"sigs.k8s.io/apiserver-network-proxy/pkg/util"
 	"sigs.k8s.io/apiserver-network-proxy/proto/agent"
 )
 
@@ -304,14 +304,14 @@ func (p *Proxy) run(o *ProxyRunOptions) error {
 		}
 	}
 
-	authOpt := &agentserver.AgentTokenAuthenticationOptions{
+	authOpt := &server.AgentTokenAuthenticationOptions{
 		Enabled:                o.agentNamespace != "",
 		AgentNamespace:         o.agentNamespace,
 		AgentServiceAccount:    o.agentServiceAccount,
 		KubernetesClient:       k8sClient,
 		AuthenticationAudience: o.authenticationAudience,
 	}
-	server := agentserver.NewProxyServer(o.serverID, int(o.serverCount), authOpt)
+	server := server.NewProxyServer(o.serverID, int(o.serverCount), authOpt)
 
 	klog.Info("Starting master server for client connections.")
 	masterStop, err := p.runMasterServer(ctx, o, server)
@@ -358,18 +358,18 @@ func SetupSignalHandler() (stopCh <-chan struct{}) {
 	return stop
 }
 
-func (p *Proxy) runMasterServer(ctx context.Context, o *ProxyRunOptions, server *agentserver.ProxyServer) (StopFunc, error) {
+func (p *Proxy) runMasterServer(ctx context.Context, o *ProxyRunOptions, server *server.ProxyServer) (StopFunc, error) {
 	if o.udsName != "" {
 		return p.runUDSMasterServer(ctx, o, server)
 	}
 	return p.runMTLSMasterServer(ctx, o, server)
 }
 
-func (p *Proxy) runUDSMasterServer(ctx context.Context, o *ProxyRunOptions, server *agentserver.ProxyServer) (StopFunc, error) {
+func (p *Proxy) runUDSMasterServer(ctx context.Context, o *ProxyRunOptions, s *server.ProxyServer) (StopFunc, error) {
 	var stop StopFunc
 	if o.mode == "grpc" {
 		grpcServer := grpc.NewServer()
-		client.RegisterProxyServiceServer(grpcServer, server)
+		client.RegisterProxyServiceServer(grpcServer, s)
 		var lc net.ListenConfig
 		lis, err := lc.Listen(ctx, "unix", o.udsName)
 		if err != nil {
@@ -380,8 +380,8 @@ func (p *Proxy) runUDSMasterServer(ctx context.Context, o *ProxyRunOptions, serv
 	} else {
 		// http-connect
 		server := &http.Server{
-			Handler: &agentserver.Tunnel{
-				Server: server,
+			Handler: &server.Tunnel{
+				Server: s,
 			},
 		}
 		stop = func() { server.Shutdown(ctx) }
@@ -432,7 +432,7 @@ func (p *Proxy) getTLSConfig(caFile, certFile, keyFile string) (*tls.Config, err
 	return tlsConfig, nil
 }
 
-func (p *Proxy) runMTLSMasterServer(ctx context.Context, o *ProxyRunOptions, server *agentserver.ProxyServer) (StopFunc, error) {
+func (p *Proxy) runMTLSMasterServer(ctx context.Context, o *ProxyRunOptions, s *server.ProxyServer) (StopFunc, error) {
 	var stop StopFunc
 
 	var tlsConfig *tls.Config
@@ -446,7 +446,7 @@ func (p *Proxy) runMTLSMasterServer(ctx context.Context, o *ProxyRunOptions, ser
 	if o.mode == "grpc" {
 		serverOption := grpc.Creds(credentials.NewTLS(tlsConfig))
 		grpcServer := grpc.NewServer(serverOption)
-		client.RegisterProxyServiceServer(grpcServer, server)
+		client.RegisterProxyServiceServer(grpcServer, s)
 		lis, err := net.Listen("tcp", addr)
 		if err != nil {
 			return nil, fmt.Errorf("failed to listen on %s: %v", addr, err)
@@ -458,8 +458,8 @@ func (p *Proxy) runMTLSMasterServer(ctx context.Context, o *ProxyRunOptions, ser
 		server := &http.Server{
 			Addr:      addr,
 			TLSConfig: tlsConfig,
-			Handler: &agentserver.Tunnel{
-				Server: server,
+			Handler: &server.Tunnel{
+				Server: s,
 			},
 			TLSNextProto: make(map[string]func(*http.Server, *tls.Conn, http.Handler)),
 		}
@@ -475,7 +475,7 @@ func (p *Proxy) runMTLSMasterServer(ctx context.Context, o *ProxyRunOptions, ser
 	return stop, nil
 }
 
-func (p *Proxy) runAgentServer(o *ProxyRunOptions, server *agentserver.ProxyServer) error {
+func (p *Proxy) runAgentServer(o *ProxyRunOptions, server *server.ProxyServer) error {
 	var tlsConfig *tls.Config
 	var err error
 	if tlsConfig, err = p.getTLSConfig(o.clusterCaCert, o.clusterCert, o.clusterKey); err != nil {
@@ -495,7 +495,7 @@ func (p *Proxy) runAgentServer(o *ProxyRunOptions, server *agentserver.ProxyServ
 	return nil
 }
 
-func (p *Proxy) runAdminServer(o *ProxyRunOptions, server *agentserver.ProxyServer) error {
+func (p *Proxy) runAdminServer(o *ProxyRunOptions, server *server.ProxyServer) error {
 	livenessHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		fmt.Fprintf(w, "ok")
 	})

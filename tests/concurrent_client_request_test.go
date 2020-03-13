@@ -12,7 +12,7 @@ import (
 
 	"google.golang.org/grpc"
 	"sigs.k8s.io/apiserver-network-proxy/konnectivity-client/pkg/client"
-	"sigs.k8s.io/apiserver-network-proxy/pkg/agent/agentserver"
+	"sigs.k8s.io/apiserver-network-proxy/pkg/server"
 	"sigs.k8s.io/apiserver-network-proxy/proto/agent"
 )
 
@@ -78,7 +78,7 @@ func (s *singleTimeManager) RemoveBackend(agentID string, conn agent.AgentServic
 	delete(s.backends, agentID)
 }
 
-func (s *singleTimeManager) Backend() (agentserver.Backend, error) {
+func (s *singleTimeManager) Backend() (server.Backend, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	for k, v := range s.backends {
@@ -90,21 +90,21 @@ func (s *singleTimeManager) Backend() (agentserver.Backend, error) {
 	return nil, fmt.Errorf("cannot find backend to a new agent")
 }
 
-func newSingleTimeGetter(m *agentserver.DefaultBackendManager) *singleTimeManager {
+func newSingleTimeGetter(m *server.DefaultBackendManager) *singleTimeManager {
 	return &singleTimeManager{
 		used:     make(map[string]struct{}),
 		backends: make(map[string]agent.AgentService_ConnectServer),
 	}
 }
 
-var _ agentserver.BackendManager = &singleTimeManager{}
+var _ server.BackendManager = &singleTimeManager{}
 
 func TestConcurrentClientRequest(t *testing.T) {
-	server := httptest.NewServer(&simpleServer{receivedSecondReq: make(chan struct{})})
-	defer server.Close()
+	s := httptest.NewServer(&simpleServer{receivedSecondReq: make(chan struct{})})
+	defer s.Close()
 
 	proxy, ps, cleanup, err := runGRPCProxyServerWithServerCount(1)
-	ps.BackendManager = newSingleTimeGetter(agentserver.NewDefaultBackendManager())
+	ps.BackendManager = newSingleTimeGetter(server.NewDefaultBackendManager())
 
 	if err != nil {
 		t.Fatal(err)
@@ -123,7 +123,7 @@ func TestConcurrentClientRequest(t *testing.T) {
 	wg.Add(2)
 	go func() {
 		defer wg.Done()
-		r, err := client1.Post(server.URL, "text/plain", bytes.NewBufferString("1"))
+		r, err := client1.Post(s.URL, "text/plain", bytes.NewBufferString("1"))
 		if err != nil {
 			t.Error(err)
 			return
@@ -141,7 +141,7 @@ func TestConcurrentClientRequest(t *testing.T) {
 	time.Sleep(1 * time.Second)
 	go func() {
 		defer wg.Done()
-		r, err := client2.Post(server.URL, "text/plain", bytes.NewBufferString("2"))
+		r, err := client2.Post(s.URL, "text/plain", bytes.NewBufferString("2"))
 		if err != nil {
 			t.Error(err)
 			return
