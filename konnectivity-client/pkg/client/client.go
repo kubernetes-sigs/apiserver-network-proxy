@@ -72,12 +72,14 @@ func CreateGrpcTunnel(address string, opts ...grpc.DialOption) (Tunnel, error) {
 		conns:       make(map[int64]*conn),
 	}
 
-	go tunnel.serve()
+	go tunnel.serve(c)
 
 	return tunnel, nil
 }
 
-func (t *grpcTunnel) serve() {
+func (t *grpcTunnel) serve(c *grpc.ClientConn) {
+	defer c.Close()
+
 	for {
 		pkt, err := t.stream.Recv()
 		if err == io.EOF {
@@ -130,9 +132,9 @@ func (t *grpcTunnel) serve() {
 				t.connsLock.Lock()
 				delete(t.conns, resp.ConnectID)
 				t.connsLock.Unlock()
-			} else {
-				klog.Warningf("connection id %d not recognized", resp.ConnectID)
+				return
 			}
+			klog.Warningf("connection id %d not recognized", resp.ConnectID)
 		}
 	}
 }
