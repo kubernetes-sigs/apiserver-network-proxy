@@ -92,6 +92,41 @@ func TestBasicProxy_GRPC(t *testing.T) {
 	}
 }
 
+func TestProxyHandleError_GRPC(t *testing.T) {
+	invalidServer := httptest.NewUnstartedServer(newEchoServer("hello"))
+
+	stopCh := make(chan struct{})
+	defer close(stopCh)
+
+	proxy, cleanup, err := runGRPCProxyServer()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer cleanup()
+
+	runAgent(proxy.agent, stopCh)
+
+	// Wait for agent to register on proxy server
+	time.Sleep(time.Second)
+
+	// run test client
+	tunnel, err := client.CreateGrpcTunnel(proxy.front, grpc.WithInsecure())
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	c := &http.Client{
+		Transport: &http.Transport{
+			Dial: tunnel.Dial,
+		},
+	}
+
+	_, err = c.Get(invalidServer.URL)
+	if err == nil {
+		t.Error("Expected error when destination is unreachable, did not receive error")
+	}
+}
+
 func TestProxy_LargeResponse(t *testing.T) {
 	length := 1 << 20 // 1M
 	chunks := 10

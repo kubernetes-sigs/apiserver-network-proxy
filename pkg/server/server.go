@@ -465,14 +465,17 @@ func (s *ProxyServer) serveRecvBackend(stream agent.AgentService_ConnectServer, 
 			} else {
 				err := client.send(pkt)
 				s.PendingDial.Remove(resp.Random)
-				if err != nil {
+				if resp.Error != "" {
+					klog.Warningf("<<< DIAL_RSP received error: %v", resp.Error)
+					break
+				} else if err != nil {
 					klog.Warningf("<<< DIAL_RSP send to client stream error: %v", err)
-				} else {
-					client.connectID = resp.ConnectID
-					client.agentID = agentID
-					s.addFrontend(agentID, resp.ConnectID, client)
-					close(client.connected)
+					break
 				}
+				client.connectID = resp.ConnectID
+				client.agentID = agentID
+				s.addFrontend(agentID, resp.ConnectID, client)
+				close(client.connected)
 			}
 
 		case client.PacketType_DATA:
