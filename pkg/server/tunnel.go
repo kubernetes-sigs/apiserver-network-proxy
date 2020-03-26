@@ -77,6 +77,7 @@ func (t *Tunnel) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	backend, err := t.Server.BackendManager.Backend()
 	if err != nil {
 		http.Error(w, fmt.Sprintf("currently no tunnels available: %v", err), http.StatusInternalServerError)
+		return
 	}
 	if err := backend.Send(dialRequest); err != nil {
 		klog.Errorf("failed to tunnel dial request %v", err)
