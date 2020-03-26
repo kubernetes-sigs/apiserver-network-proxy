@@ -25,6 +25,7 @@ spec:
       "--server-port=0",
       "--agent-port=8091",
       "--admin-port=8092",
+      "--health-port=8093",
       "--mode=http-connect",
       "--agent-namespace=kube-system",
       "--agent-service-account=konnectivity-agent",
@@ -35,7 +36,7 @@ spec:
       httpGet:
         scheme: HTTP
         host: 127.0.0.1
-        port: 8092
+        port: 8093
         path: /healthz
       initialDelaySeconds: 10
       timeoutSeconds: 60
