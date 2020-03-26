@@ -50,6 +50,9 @@ spec:
     - name: adminport
       containerPort: 8092
       hostPort: 8092
+    - name: healthport
+      containerPort: 8093
+      hostPort: 8093
     volumeMounts:
     - name: varlogkonnectivityserver
       mountPath: /var/log/konnectivity-server.log
