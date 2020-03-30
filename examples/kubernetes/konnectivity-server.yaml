@@ -24,8 +24,8 @@ spec:
       "--cluster-key=/etc/srv/kubernetes/pki/apiserver.key",
       "--server-port=0",
       "--agent-port=8091",
-      "--admin-port=8092",
-      "--health-port=8093",
+      "--health-port=8092",
+      "--admin-port=8093",
       "--mode=http-connect",
       "--agent-namespace=kube-system",
       "--agent-service-account=konnectivity-agent",
@@ -36,7 +36,7 @@ spec:
       httpGet:
         scheme: HTTP
         host: 127.0.0.1
-        port: 8093
+        port: 8092
         path: /healthz
       initialDelaySeconds: 10
       timeoutSeconds: 60
@@ -47,10 +47,10 @@ spec:
     - name: agentport
       containerPort: 8091
       hostPort: 8091
-    - name: adminport
+    - name: healthport
       containerPort: 8092
       hostPort: 8092
-    - name: healthport
+    - name: adminport
       containerPort: 8093
       hostPort: 8093
     volumeMounts:
