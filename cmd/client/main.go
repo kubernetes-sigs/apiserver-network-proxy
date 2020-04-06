@@ -70,6 +70,7 @@ type GrpcProxyClientOptions struct {
 	proxyPort    int
 	proxyUdsName string
 	mode         string
+	userAgent    string
 }
 
 func (o *GrpcProxyClientOptions) Flags() *pflag.FlagSet {
@@ -85,6 +86,7 @@ func (o *GrpcProxyClientOptions) Flags() *pflag.FlagSet {
 	flags.IntVar(&o.proxyPort, "proxy-port", o.proxyPort, "The port the proxy server is listening on.")
 	flags.StringVar(&o.proxyUdsName, "proxy-uds", o.proxyUdsName, "The UDS name to connect to.")
 	flags.StringVar(&o.mode, "mode", o.mode, "Mode can be either 'grpc' or 'http-connect'.")
+	flags.StringVar(&o.userAgent, "user-agent", o.userAgent, "User agent to pass to the proxy server")
 
 	return flags
 }
@@ -168,6 +170,7 @@ func newGrpcProxyClientOptions() *GrpcProxyClientOptions {
 		proxyPort:    8090,
 		proxyUdsName: "",
 		mode:         "grpc",
+		userAgent:    "test-client",
 	}
 	return &o
 }
@@ -261,7 +264,7 @@ func (c *Client) getUDSDialer(o *GrpcProxyClientOptions) (func(ctx context.Conte
 			}
 			return c, err
 		})
-		tunnel, err := client.CreateGrpcTunnel(o.proxyUdsName, dialOption, grpc.WithInsecure())
+		tunnel, err := client.CreateGrpcTunnel(o.proxyUdsName, dialOption, grpc.WithInsecure(), grpc.WithUserAgent(o.userAgent))
 		if err != nil {
 			return nil, fmt.Errorf("failed to create tunnel %s, got %v", o.proxyUdsName, err)
 		}
@@ -278,7 +281,7 @@ func (c *Client) getUDSDialer(o *GrpcProxyClientOptions) (func(ctx context.Conte
 		if err != nil {
 			return nil, fmt.Errorf("dialing proxy %q failed: %v", o.proxyUdsName, err)
 		}
-		fmt.Fprintf(proxyConn, "CONNECT %s HTTP/1.1\r\nHost: %s\r\n\r\n", requestAddress, "127.0.0.1")
+		fmt.Fprintf(proxyConn, "CONNECT %s HTTP/1.1\r\nHost: %s\r\nUser-Agent: %s\r\n\r\n", requestAddress, "127.0.0.1", o.userAgent)
 		br := bufio.NewReader(proxyConn)
 		res, err := http.ReadResponse(br, nil)
 		if err != nil {

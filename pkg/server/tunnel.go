@@ -33,7 +33,7 @@ type Tunnel struct {
 }
 
 func (t *Tunnel) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	klog.Infof("Received %s request to %q", r.Method, r.Host)
+	klog.Infof("Received %s request to %q from userAgent %s", r.Method, r.Host, r.UserAgent())
 	if r.TLS != nil {
 		klog.Infof("TLS CommonName: %v", r.TLS.PeerCertificates[0].Subject.CommonName)
 	}
