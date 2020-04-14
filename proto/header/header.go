@@ -27,4 +27,7 @@ const (
 	// AuthenticationTokenContextSchemePrefix has a prefix for auth token's content.
 	// (https://tools.ietf.org/html/rfc6750#section-2.1)
 	AuthenticationTokenContextSchemePrefix = "Bearer "
+
+	// UserAgent is used to provide the client information in a proxy request
+	UserAgent   = "user-agent"
 )

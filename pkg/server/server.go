@@ -185,7 +185,12 @@ func NewProxyServer(serverID string, serverCount int, agentAuthenticationOptions
 
 // Proxy handles incoming streams from gRPC frontend.
 func (s *ProxyServer) Proxy(stream client.ProxyService_ProxyServer) error {
-	klog.Info("proxy request from client")
+	md, ok := metadata.FromIncomingContext(stream.Context())
+	if !ok {
+		return fmt.Errorf("failed to get context")
+	}
+	userAgent := md.Get(header.UserAgent)
+	klog.Infof("proxy request from client, userAgent %s", userAgent)
 
 	recvCh := make(chan *client.Packet, 10)
 	stopCh := make(chan error)
