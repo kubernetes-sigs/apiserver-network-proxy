@@ -83,6 +83,8 @@ type ProxyRunOptions struct {
 	agentPort uint
 	// Port we listen for admin connections on.
 	adminPort uint
+	// Port we listen for health connections on.
+	healthPort uint
 
 	// ID of this proxy server.
 	serverID string
@@ -111,6 +113,7 @@ func (o *ProxyRunOptions) Flags() *pflag.FlagSet {
 	flags.UintVar(&o.serverPort, "server-port", o.serverPort, "Port we listen for server connections on. Set to 0 for UDS.")
 	flags.UintVar(&o.agentPort, "agent-port", o.agentPort, "Port we listen for agent connections on.")
 	flags.UintVar(&o.adminPort, "admin-port", o.adminPort, "Port we listen for admin connections on.")
+	flags.UintVar(&o.healthPort, "health-port", o.healthPort, "Port we listen for health connections on.")
 	flags.StringVar(&o.serverID, "server-id", o.serverID, "The unique ID of this server.")
 	flags.UintVar(&o.serverCount, "server-count", o.serverCount, "The number of proxy server instances, should be 1 unless it is an HA server.")
 	flags.StringVar(&o.agentNamespace, "agent-namespace", o.agentNamespace, "Expected agent's namespace during agent authentication (used with agent-service-account, authentication-audience, kubeconfig).")
@@ -132,6 +135,7 @@ func (o *ProxyRunOptions) Print() {
 	klog.Warningf("Server port set to %d.\n", o.serverPort)
 	klog.Warningf("Agent port set to %d.\n", o.agentPort)
 	klog.Warningf("Admin port set to %d.\n", o.adminPort)
+	klog.Warningf("Health port set to %d.\n", o.healthPort)
 	klog.Warningf("ServerID set to %s.\n", o.serverID)
 	klog.Warningf("ServerCount set to %d.\n", o.serverCount)
 	klog.Warningf("AgentNamespace set to %q.\n", o.agentNamespace)
@@ -209,6 +213,10 @@ func (o *ProxyRunOptions) Validate() error {
 	if o.adminPort > 49151 {
 		return fmt.Errorf("please do not try to use ephemeral port %d for the admin port", o.adminPort)
 	}
+	if o.healthPort > 49151 {
+		return fmt.Errorf("please do not try to use ephemeral port %d for the health port", o.healthPort)
+	}
+
 	if o.serverPort < 1024 {
 		if o.udsName == "" {
 			return fmt.Errorf("please do not try to use reserved port %d for the server port", o.serverPort)
@@ -219,6 +227,9 @@ func (o *ProxyRunOptions) Validate() error {
 	}
 	if o.adminPort < 1024 {
 		return fmt.Errorf("please do not try to use reserved port %d for the admin port", o.adminPort)
+	}
+	if o.healthPort < 1024 {
+		return fmt.Errorf("please do not try to use reserved port %d for the health port", o.healthPort)
 	}
 
 	// validate agent authentication params
@@ -255,7 +266,8 @@ func newProxyRunOptions() *ProxyRunOptions {
 		udsName:                "",
 		serverPort:             8090,
 		agentPort:              8091,
-		adminPort:              8092,
+		healthPort:             8092,
+		adminPort:              8093,
 		serverID:               uuid.New().String(),
 		serverCount:            1,
 		agentNamespace:         "",
@@ -329,6 +341,12 @@ func (p *Proxy) run(o *ProxyRunOptions) error {
 	err = p.runAdminServer(o, server)
 	if err != nil {
 		return fmt.Errorf("failed to run the admin server: %v", err)
+	}
+
+	klog.Info("Starting health server for healthchecks.")
+	err = p.runHealthServer(o, server)
+	if err != nil {
+		return fmt.Errorf("failed to run the health server: %v", err)
 	}
 
 	stopCh := SetupSignalHandler()
@@ -496,19 +514,11 @@ func (p *Proxy) runAgentServer(o *ProxyRunOptions, server *server.ProxyServer) e
 }
 
 func (p *Proxy) runAdminServer(o *ProxyRunOptions, server *server.ProxyServer) error {
-	livenessHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		fmt.Fprintf(w, "ok")
-	})
-	readinessHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		fmt.Fprintf(w, "ok")
-	})
 	metricsHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		prometheus.Handler().ServeHTTP(w, r)
 	})
 
 	muxHandler := http.NewServeMux()
-	muxHandler.HandleFunc("/healthz", livenessHandler)
-	muxHandler.HandleFunc("/ready", readinessHandler)
 	muxHandler.HandleFunc("/metrics", metricsHandler)
 	adminServer := &http.Server{
 		Addr:           fmt.Sprintf("127.0.0.1:%d", o.adminPort),
@@ -518,6 +528,34 @@ func (p *Proxy) runAdminServer(o *ProxyRunOptions, server *server.ProxyServer) e
 
 	go func() {
 		err := adminServer.ListenAndServe()
+		if err != nil {
+			klog.Warningf("admin server received %v.\n", err)
+		}
+		klog.Warningf("Admin server stopped listening\n")
+	}()
+
+	return nil
+}
+
+func (p *Proxy) runHealthServer(o *ProxyRunOptions, server *server.ProxyServer) error {
+	livenessHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		fmt.Fprintf(w, "ok")
+	})
+	readinessHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		fmt.Fprintf(w, "ok")
+	})
+
+	muxHandler := http.NewServeMux()
+	muxHandler.HandleFunc("/healthz", livenessHandler)
+	muxHandler.HandleFunc("/ready", readinessHandler)
+	healthServer := &http.Server{
+		Addr:           fmt.Sprintf(":%d", o.healthPort),
+		Handler:        muxHandler,
+		MaxHeaderBytes: 1 << 20,
+	}
+
+	go func() {
+		err := healthServer.ListenAndServe()
 		if err != nil {
 			klog.Warningf("health server received %v.\n", err)
 		}
