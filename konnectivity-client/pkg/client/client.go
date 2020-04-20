@@ -51,9 +51,11 @@ type grpcTunnel struct {
 	connsLock       sync.RWMutex
 }
 
-// CreateGrpcTunnel creates a Tunnel to dial to a remote server through a
+// CreateSingleUseGrpcTunnel creates a Tunnel to dial to a remote server through a
 // gRPC based proxy service.
-func CreateGrpcTunnel(address string, opts ...grpc.DialOption) (Tunnel, error) {
+// Currently, a single tunnel supports a single connection, and the tunnel is closed when the connection is terminated
+// The Dial() method of the returned tunnel should only be called once
+func CreateSingleUseGrpcTunnel(address string, opts ...grpc.DialOption) (Tunnel, error) {
 	c, err := grpc.Dial(address, opts...)
 	if err != nil {
 		return nil, err

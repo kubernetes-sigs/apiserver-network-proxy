@@ -183,7 +183,7 @@ func TestBasicHAProxyServer_GRPC(t *testing.T) {
 }
 
 func testProxyServer(t *testing.T, front string, target string) {
-	tunnel, err := client.CreateGrpcTunnel(front, grpc.WithInsecure())
+	tunnel, err := client.CreateSingleUseGrpcTunnel(front, grpc.WithInsecure())
 	if err != nil {
 		t.Fatal(err)
 	}

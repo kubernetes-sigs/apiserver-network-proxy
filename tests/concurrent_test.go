@@ -33,7 +33,7 @@ func TestProxy_Concurrency(t *testing.T) {
 	time.Sleep(time.Second)
 
 	// run test client
-	tunnel, err := client.CreateGrpcTunnel(proxy.front, grpc.WithInsecure())
+	tunnel, err := client.CreateSingleUseGrpcTunnel(proxy.front, grpc.WithInsecure())
 	if err != nil {
 		t.Fatal(err)
 	}
