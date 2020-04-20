@@ -545,7 +545,14 @@ func (p *Proxy) runHealthServer(o *ProxyRunOptions, server *server.ProxyServer) 
 		fmt.Fprintf(w, "ok")
 	})
 	readinessHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		fmt.Fprintf(w, "ok")
+		ready, msg := server.Readiness.Ready()
+		if ready {
+			w.WriteHeader(200)
+			fmt.Fprintf(w, "ok")
+			return
+		}
+		w.WriteHeader(500)
+		fmt.Fprintf(w, msg)
 	})
 
 	muxHandler := http.NewServeMux()

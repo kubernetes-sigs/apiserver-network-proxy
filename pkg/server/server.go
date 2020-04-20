@@ -102,6 +102,13 @@ type ProxyServer struct {
 	// BackendManager manages the backends.
 	BackendManager BackendManager
 
+	// Readiness reports if the proxy server is ready, i.e., if the proxy
+	// server has connections to proxy agents (backends). Note that the
+	// proxy server does not check the healthiness of the connections,
+	// though the proxy agents do, so this readiness check might report
+	// ready but there is no healthy connection.
+	Readiness ReadinessManager
+
 	// fmu protects frontends.
 	fmu sync.RWMutex
 	// conn = Frontend[agentID][connID]
@@ -175,15 +182,16 @@ func (s *ProxyServer) getFrontend(agentID string, connID int64) (*ProxyClientCon
 
 // NewProxyServer creates a new ProxyServer instance
 func NewProxyServer(serverID string, serverCount int, agentAuthenticationOptions *AgentTokenAuthenticationOptions) *ProxyServer {
-	p := &ProxyServer{
+	bm := NewDefaultBackendManager()
+	return &ProxyServer{
 		frontends:                  make(map[string](map[int64]*ProxyClientConnection)),
 		PendingDial:                NewPendingDialManager(),
 		serverID:                   serverID,
 		serverCount:                serverCount,
-		BackendManager:             NewDefaultBackendManager(),
+		BackendManager:             bm,
 		AgentAuthenticationOptions: agentAuthenticationOptions,
+		Readiness:                  bm,
 	}
-	return p
 }
 
 // Proxy handles incoming streams from gRPC frontend.
