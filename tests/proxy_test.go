@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"strings"
 	"testing"
 	"time"
 
@@ -89,6 +90,44 @@ func TestBasicProxy_GRPC(t *testing.T) {
 
 	if string(data) != "hello" {
 		t.Errorf("expect %v; got %v", "hello", string(data))
+	}
+}
+
+func TestProxyHandleDialError_GRPC(t *testing.T) {
+	invalidServer := httptest.NewServer(newEchoServer("hello"))
+
+	stopCh := make(chan struct{})
+	defer close(stopCh)
+
+	proxy, cleanup, err := runGRPCProxyServer()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer cleanup()
+
+	runAgent(proxy.agent, stopCh)
+
+	// Wait for agent to register on proxy server
+	time.Sleep(time.Second)
+
+	// run test client
+	tunnel, err := client.CreateGrpcTunnel(proxy.front, grpc.WithInsecure())
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	c := &http.Client{
+		Transport: &http.Transport{
+			Dial: tunnel.Dial,
+		},
+	}
+
+	url := invalidServer.URL
+	invalidServer.Close()
+
+	_, err = c.Get(url)
+	if err == nil || !strings.Contains(err.Error(), "connection refused") {
+		t.Error("Expected error when destination is unreachable, did not receive error")
 	}
 }
 

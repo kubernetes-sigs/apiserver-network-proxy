@@ -55,6 +55,9 @@ func (c *ProxyClientConnection) send(pkt *client.Packet) error {
 			_, err := c.HTTP.Write(pkt.GetData().Data)
 			return err
 		} else if pkt.Type == client.PacketType_DIAL_RSP {
+			if pkt.GetDialResponse().Error != "" {
+				return c.HTTP.Close()
+			}
 			return nil
 		} else {
 			return fmt.Errorf("attempt to send via unrecognized connection type %v", pkt.Type)
@@ -468,16 +471,26 @@ func (s *ProxyServer) serveRecvBackend(stream agent.AgentService_ConnectServer, 
 			if client, ok := s.PendingDial.Get(resp.Random); !ok {
 				klog.Warning("<<< DialResp not recognized; dropped")
 			} else {
+				dialErr := false
+				if resp.Error != "" {
+					klog.Warningf("<<< DIAL_RSP contains error: %v", resp.Error)
+					dialErr = true
+				}
 				err := client.send(pkt)
 				s.PendingDial.Remove(resp.Random)
 				if err != nil {
 					klog.Warningf("<<< DIAL_RSP send to client stream error: %v", err)
-				} else {
-					client.connectID = resp.ConnectID
-					client.agentID = agentID
-					s.addFrontend(agentID, resp.ConnectID, client)
-					close(client.connected)
+					dialErr = true
 				}
+				// Avoid adding the frontend if there was an error dialing the destination
+				if dialErr == true {
+					break
+				}
+
+				client.connectID = resp.ConnectID
+				client.agentID = agentID
+				s.addFrontend(agentID, resp.ConnectID, client)
+				close(client.connected)
 			}
 
 		case client.PacketType_DATA:
