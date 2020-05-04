@@ -235,6 +235,9 @@ func (o *ProxyRunOptions) Validate() error {
 	// validate agent authentication params
 	// all 4 parametes must be empty or must have value (except kubeconfigPath that might be empty)
 	if o.agentNamespace != "" || o.agentServiceAccount != "" || o.authenticationAudience != "" || o.kubeconfigPath != "" {
+		if o.clusterCaCert != "" {
+			return fmt.Errorf("clusterCaCert can not be used when service account authentication is enabled")
+		}
 		if o.agentNamespace == "" {
 			return fmt.Errorf("agentNamespace cannot be empty when agent authentication is enabled")
 		}
