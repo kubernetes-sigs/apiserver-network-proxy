@@ -104,12 +104,11 @@ func TestConcurrentClientRequest(t *testing.T) {
 	defer s.Close()
 
 	proxy, ps, cleanup, err := runGRPCProxyServerWithServerCount(1)
-	ps.BackendManager = newSingleTimeGetter(server.NewDefaultBackendManager())
-
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer cleanup()
+	ps.BackendManager = newSingleTimeGetter(server.NewDefaultBackendManager())
 
 	stopCh := make(chan struct{})
 	defer close(stopCh)
@@ -132,6 +131,7 @@ func TestConcurrentClientRequest(t *testing.T) {
 		if err != nil {
 			t.Error(err)
 		}
+		r.Body.Close()
 
 		if string(data) != "1" {
 			t.Errorf("expect %v; got %v", "1", string(data))
@@ -150,6 +150,7 @@ func TestConcurrentClientRequest(t *testing.T) {
 		if err != nil {
 			t.Error(err)
 		}
+		r.Body.Close()
 
 		if string(data) != "2" {
 			t.Errorf("expect %v; got %v", "2", string(data))

@@ -200,7 +200,8 @@ func (a *Agent) run(o *GrpcProxyAgentOptions) error {
 		return fmt.Errorf("failed to validate agent options with %v", err)
 	}
 
-	if err := a.runProxyConnection(o); err != nil {
+	stopCh := make(chan struct{})
+	if err := a.runProxyConnection(o, stopCh); err != nil {
 		return fmt.Errorf("failed to run proxy connection with %v", err)
 	}
 
@@ -212,13 +213,12 @@ func (a *Agent) run(o *GrpcProxyAgentOptions) error {
 		return fmt.Errorf("failed to run admin server with %v", err)
 	}
 
-	stopCh := make(chan struct{})
 	<-stopCh
 
 	return nil
 }
 
-func (a *Agent) runProxyConnection(o *GrpcProxyAgentOptions) error {
+func (a *Agent) runProxyConnection(o *GrpcProxyAgentOptions, stopCh <-chan struct{}) error {
 	var tlsConfig *tls.Config
 	var err error
 	if tlsConfig, err = util.GetClientTLSConfig(o.caCert, o.agentCert, o.agentKey, o.proxyServerHost); err != nil {
@@ -226,7 +226,7 @@ func (a *Agent) runProxyConnection(o *GrpcProxyAgentOptions) error {
 	}
 	dialOption := grpc.WithTransportCredentials(credentials.NewTLS(tlsConfig))
 	cc := o.ClientSetConfig(dialOption)
-	cs := cc.NewAgentClientSet()
+	cs := cc.NewAgentClientSet(stopCh)
 	cs.Serve()
 
 	return nil

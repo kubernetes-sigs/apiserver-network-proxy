@@ -54,7 +54,8 @@ func (e *ReconnectError) Wait() error {
 type RedialableAgentClient struct {
 	cs *ClientSet // the clientset that includes this RedialableAgentClient.
 
-	stream agent.AgentService_ConnectClient
+	stream      agent.AgentService_ConnectClient
+	streamLock  sync.Mutex
 
 	agentID     string
 	serverID    string // the id of the proxy server this client connects to.
@@ -81,17 +82,6 @@ type RedialableAgentClient struct {
 	serviceAccountTokenPath string
 }
 
-func copyRedialableAgentClient(in RedialableAgentClient) RedialableAgentClient {
-	out := in
-	out.stopCh = make(chan struct{})
-	out.reconnOngoing = false
-	out.reconnWaiters = nil
-	out.sendLock = sync.Mutex{}
-	out.recvLock = sync.Mutex{}
-	out.reconnLock = sync.Mutex{}
-	return out
-}
-
 func NewRedialableAgentClient(address, agentID string, cs *ClientSet, opts ...grpc.DialOption) (*RedialableAgentClient, error) {
 	c := &RedialableAgentClient{
 		cs:                      cs,
@@ -109,6 +99,42 @@ func NewRedialableAgentClient(address, agentID string, cs *ClientSet, opts ...gr
 	}
 	c.serverID = serverID
 	return c, nil
+}
+
+func (c *RedialableAgentClient) copyRedialableAgentClient() *RedialableAgentClient {
+	out := &RedialableAgentClient{
+		cs:                      c.cs,
+		// Not setting stream as a new one needs to be created with the new connection.
+		agentID:                 c.agentID,
+		// Not setting serverID as that will be set with the new connection
+		serverCount:             c.serverCount,
+		address:                 c.address,
+		opts:                    c.opts,
+		//Not setting conn as we should be creating a new connection for this client.
+		stopCh:                  make(chan struct{}),
+		reconnOngoing:           false,
+		reconnWaiters:           nil,
+		sendLock:                sync.Mutex{},
+		recvLock:                sync.Mutex{},
+		reconnLock:              sync.Mutex{},
+		streamLock:              sync.Mutex{},
+		reconnectInterval:       c.reconnectInterval,
+		probeInterval:           c.probeInterval,
+		serviceAccountTokenPath: c.serviceAccountTokenPath,
+	}
+	return out
+}
+
+func (c *RedialableAgentClient) setStream(client agent.AgentService_ConnectClient) {
+	c.streamLock.Lock()
+	defer c.streamLock.Unlock()
+	c.stream = client
+}
+
+func (c *RedialableAgentClient) getStream() agent.AgentService_ConnectClient {
+	c.streamLock.Lock()
+	defer c.streamLock.Unlock()
+	return c.stream
 }
 
 func (c *RedialableAgentClient) probe() {
@@ -139,7 +165,8 @@ func (c *RedialableAgentClient) Send(pkt *client.Packet) error {
 	c.sendLock.Lock()
 	defer c.sendLock.Unlock()
 
-	if err := c.stream.Send(pkt); err != nil {
+	stream := c.getStream()
+	if err := stream.Send(pkt); err != nil {
 		if err == io.EOF {
 			return err
 		}
@@ -177,8 +204,8 @@ func (c *RedialableAgentClient) triggerReconnect() <-chan error {
 	c.reconnWaiters = append(c.reconnWaiters, errch)
 
 	if !c.reconnOngoing {
-		go c.reconnect()
 		c.reconnOngoing = true
+		go c.reconnect()
 	}
 
 	return errch
@@ -202,7 +229,8 @@ func (c *RedialableAgentClient) Recv() (*client.Packet, error) {
 	var pkt *client.Packet
 	var err error
 
-	if pkt, err = c.stream.Recv(); err != nil {
+	stream := c.getStream()
+	if pkt, err = stream.Recv(); err != nil {
 		if err == io.EOF {
 			return pkt, err
 		}
@@ -227,7 +255,7 @@ func (c *RedialableAgentClient) Connect() (string, error) {
 	klog.Infof("Connect to server %s", r.serverID)
 	c.serverCount = r.serverCount
 	c.conn = r.grpcConn
-	c.stream = r.agentServiceClient
+	c.setStream(r.agentServiceClient)
 	return c.serverID, nil
 }
 
@@ -270,7 +298,7 @@ func (c *RedialableAgentClient) reconnect() {
 		case r.serverID == c.serverID:
 			klog.Infof("reconnected to %s", r.serverID)
 			c.conn = r.grpcConn
-			c.stream = r.agentServiceClient
+			c.setStream(r.agentServiceClient)
 			c.doneReconnect(nil)
 			return
 
@@ -285,11 +313,11 @@ func (c *RedialableAgentClient) reconnect() {
 			time.Sleep(c.reconnectInterval)
 		case r.serverID != c.serverID && !c.cs.HasID(r.serverID):
 			// create a new client
-			cc := copyRedialableAgentClient(*c)
-			cc.stream = r.agentServiceClient
+			cc := c.copyRedialableAgentClient()
+			cc.setStream(r.agentServiceClient)
 			cc.conn = r.grpcConn
 			cc.serverID = r.serverID
-			ac := newAgentClientWithRedialableAgentClient(&cc)
+			ac := newAgentClientWithRedialableAgentClient(cc)
 			err := c.cs.AddClient(r.serverID, ac)
 			if err != nil {
 				klog.Infof("failed to add client for %s: %v", r.serverID, err)
@@ -302,7 +330,6 @@ func (c *RedialableAgentClient) reconnect() {
 	}
 
 	c.cs.RemoveClient(c.serverID)
-	close(c.stopCh)
 	c.doneReconnect(fmt.Errorf("Failed to connect to proxy server"))
 }
 
@@ -367,19 +394,23 @@ func (c *RedialableAgentClient) tryConnect() (connectResult, error) {
 	ctx := metadata.AppendToOutgoingContext(context.Background(), header.AgentID, c.agentID)
 	if c.serviceAccountTokenPath != "" {
 		if ctx, err = c.initializeAuthContext(ctx); err != nil {
+			conn.Close()
 			return connectResult{}, err
 		}
 	}
 	stream, err := agent.NewAgentServiceClient(conn).Connect(ctx)
 	if err != nil {
+		conn.Close()
 		return connectResult{}, err
 	}
 	sid, err := serverID(stream)
 	if err != nil {
+		conn.Close()
 		return connectResult{}, err
 	}
 	count, err := serverCount(stream)
 	if err != nil {
+		conn.Close()
 		return connectResult{}, err
 	}
 	r := connectResult{
@@ -388,7 +419,7 @@ func (c *RedialableAgentClient) tryConnect() (connectResult, error) {
 		grpcConn:           conn,
 		agentServiceClient: stream,
 	}
-	return r, err
+	return r, nil
 }
 
 func (c *RedialableAgentClient) Close() {
@@ -396,4 +427,5 @@ func (c *RedialableAgentClient) Close() {
 		klog.Warning("Unexpected empty RedialableAgentClient.stream")
 	}
 	c.conn.Close()
+	close(c.stopCh)
 }

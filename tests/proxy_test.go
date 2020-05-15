@@ -354,7 +354,7 @@ func runAgent(addr string, stopCh <-chan struct{}) *agent.ClientSet {
 		ReconnectInterval: 10 * time.Millisecond,
 		DialOption:        grpc.WithInsecure(),
 	}
-	client := cc.NewAgentClientSet()
-	go client.Serve()
+	client := cc.NewAgentClientSet(stopCh)
+	client.Serve()
 	return client
 }
