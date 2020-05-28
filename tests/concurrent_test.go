@@ -57,6 +57,7 @@ func TestProxy_Concurrency(t *testing.T) {
 		if err != nil {
 			t.Error(err)
 		}
+		defer r.Body.Close()
 
 		if len(data) != length*chunks {
 			t.Errorf("expect data length %d; got %d", length*chunks, len(data))

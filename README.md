@@ -28,6 +28,7 @@ want to use the images in.
 ```console
 make clean
 make certs
+make gen
 make build
 ```
 

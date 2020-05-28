@@ -97,12 +97,12 @@ func newAgentClientWithRedialableAgentClient(rac *RedialableAgentClient) *AgentC
 }
 
 // Close closes the underlying stream.
-func (c *AgentClient) Close() {
-	if c.stream == nil {
+func (a *AgentClient) Close() {
+	if a.stream == nil {
 		klog.Warning("Unexpected empty AgentClient.stream")
 		return
 	}
-	c.stream.Close()
+	a.stream.Close()
 }
 
 // Connect connects to proxy server to establish a gRPC stream,

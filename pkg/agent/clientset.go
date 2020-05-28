@@ -48,6 +48,8 @@ type ClientSet struct {
 	dialOption grpc.DialOption
 	// file path contains service account token
 	serviceAccountTokenPath string
+	// channel to signal shutting down the client set. Primarily for test.
+	stopCh <-chan struct{}
 }
 
 func (cs *ClientSet) ClientsCount() int {
@@ -97,6 +99,10 @@ func (cs *ClientSet) AddClient(serverID string, c *AgentClient) error {
 func (cs *ClientSet) RemoveClient(serverID string) {
 	cs.mu.Lock()
 	defer cs.mu.Unlock()
+	if cs.clients[serverID] == nil {
+		return
+	}
+	cs.clients[serverID].Close()
 	delete(cs.clients, serverID)
 }
 
@@ -110,7 +116,7 @@ type ClientSetConfig struct {
 	ServiceAccountTokenPath string
 }
 
-func (cc *ClientSetConfig) NewAgentClientSet() *ClientSet {
+func (cc *ClientSetConfig) NewAgentClientSet(stopCh <-chan struct{}) *ClientSet {
 	return &ClientSet{
 		clients:                 make(map[string]*AgentClient),
 		agentID:                 cc.AgentID,
@@ -120,6 +126,7 @@ func (cc *ClientSetConfig) NewAgentClientSet() *ClientSet {
 		reconnectInterval:       cc.ReconnectInterval,
 		dialOption:              cc.DialOption,
 		serviceAccountTokenPath: cc.ServiceAccountTokenPath,
+		stopCh:                  stopCh,
 	}
 
 }
@@ -140,6 +147,7 @@ func (cs *ClientSet) resetBackoff() *wait.Backoff {
 
 // sync makes sure that #clients >= #proxy servers
 func (cs *ClientSet) sync() {
+	defer cs.shutdown()
 	backoff := cs.resetBackoff()
 	var duration time.Duration
 	for {
@@ -151,6 +159,11 @@ func (cs *ClientSet) sync() {
 			duration = wait.Jitter(backoff.Duration, backoff.Jitter)
 		}
 		time.Sleep(duration)
+		select {
+			case <-cs.stopCh:
+				return
+			default:
+		}
 	}
 }
 
@@ -175,4 +188,13 @@ func (cs *ClientSet) syncOnce() error {
 
 func (cs *ClientSet) Serve() {
 	go cs.sync()
+}
+
+func (cs *ClientSet) shutdown() {
+	cs.mu.Lock()
+	defer cs.mu.Unlock()
+	for serverID, client := range cs.clients {
+		client.Close()
+		delete(cs.clients, serverID)
+	}
 }
