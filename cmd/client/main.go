@@ -191,6 +191,9 @@ type Client struct {
 }
 
 func (c *Client) run(o *GrpcProxyClientOptions) error {
+	stopCh := make(chan struct{})
+	defer close(stopCh)
+
 	o.Print()
 	if err := o.Validate(); err != nil {
 		return fmt.Errorf("failed to validate proxy client options, got %v", err)
@@ -199,7 +202,7 @@ func (c *Client) run(o *GrpcProxyClientOptions) error {
 	// Run remote simple http service on server side as
 	// "python -m SimpleHTTPServer"
 
-	dialer, err := c.getDialer(o)
+	dialer, err := c.getDialer(o, stopCh)
 	if err != nil {
 		return fmt.Errorf("failed to get dialer for client, got %v", err)
 	}
@@ -229,14 +232,14 @@ func (c *Client) run(o *GrpcProxyClientOptions) error {
 	return nil
 }
 
-func (c *Client) getDialer(o *GrpcProxyClientOptions) (func(ctx context.Context, network, addr string) (net.Conn, error), error) {
+func (c *Client) getDialer(o *GrpcProxyClientOptions, stopCh <-chan struct{}) (func(ctx context.Context, network, addr string) (net.Conn, error), error) {
 	if o.proxyUdsName != "" {
-		return c.getUDSDialer(o)
+		return c.getUDSDialer(o, stopCh)
 	}
 	return c.getMTLSDialer(o)
 }
 
-func (c *Client) getUDSDialer(o *GrpcProxyClientOptions) (func(ctx context.Context, network, addr string) (net.Conn, error), error) {
+func (c *Client) getUDSDialer(o *GrpcProxyClientOptions, stopCh <-chan struct{}) (func(ctx context.Context, network, addr string) (net.Conn, error), error) {
 	var proxyConn net.Conn
 	var err error
 
@@ -264,7 +267,13 @@ func (c *Client) getUDSDialer(o *GrpcProxyClientOptions) (func(ctx context.Conte
 			}
 			return c, err
 		})
-		tunnel, err := client.CreateSingleUseGrpcTunnel(o.proxyUdsName, dialOption, grpc.WithInsecure(), grpc.WithUserAgent(o.userAgent))
+		tunnel, err := client.CreateReusableGrpcTunnel(o.proxyUdsName, dialOption, grpc.WithInsecure(), grpc.WithUserAgent(o.userAgent))
+
+		go func() {
+			<-stopCh
+			tunnel.Close()
+		}()
+
 		if err != nil {
 			return nil, fmt.Errorf("failed to create tunnel %s, got %v", o.proxyUdsName, err)
 		}

@@ -160,9 +160,9 @@ func (cs *ClientSet) sync() {
 		}
 		time.Sleep(duration)
 		select {
-			case <-cs.stopCh:
-				return
-			default:
+		case <-cs.stopCh:
+			return
+		default:
 		}
 	}
 }
