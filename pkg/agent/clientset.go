@@ -43,8 +43,6 @@ type ClientSet struct {
 	// proxy server.
 	probeInterval time.Duration // The interval by which the agent
 	// periodically checks if its connections to the proxy server is ready.
-	reconnectInterval time.Duration // The interval by which the agent
-	// tries to reconnect.
 	dialOption grpc.DialOption
 	// file path contains service account token
 	serviceAccountTokenPath string
@@ -57,12 +55,13 @@ func (cs *ClientSet) ClientsCount() int {
 	defer cs.mu.Unlock()
 	return len(cs.clients)
 }
+
 func (cs *ClientSet) HealthyClientsCount() int {
 	cs.mu.Lock()
 	defer cs.mu.Unlock()
 	var count int
 	for _, c := range cs.clients {
-		if c.stream.conn.GetState() == connectivity.Ready {
+		if c.conn.GetState() == connectivity.Ready {
 			count++
 		}
 	}
@@ -111,7 +110,6 @@ type ClientSetConfig struct {
 	AgentID                 string
 	SyncInterval            time.Duration
 	ProbeInterval           time.Duration
-	ReconnectInterval       time.Duration
 	DialOption              grpc.DialOption
 	ServiceAccountTokenPath string
 }
@@ -123,15 +121,13 @@ func (cc *ClientSetConfig) NewAgentClientSet(stopCh <-chan struct{}) *ClientSet 
 		address:                 cc.Address,
 		syncInterval:            cc.SyncInterval,
 		probeInterval:           cc.ProbeInterval,
-		reconnectInterval:       cc.ReconnectInterval,
 		dialOption:              cc.DialOption,
 		serviceAccountTokenPath: cc.ServiceAccountTokenPath,
 		stopCh:                  stopCh,
 	}
-
 }
 
-func (cs *ClientSet) newAgentClient() (*AgentClient, error) {
+func (cs *ClientSet) newAgentClient() (*AgentClient, int, error) {
 	return newAgentClient(cs.address, cs.agentID, cs, cs.dialOption)
 }
 
@@ -160,9 +156,9 @@ func (cs *ClientSet) sync() {
 		}
 		time.Sleep(duration)
 		select {
-			case <-cs.stopCh:
-				return
-			default:
+		case <-cs.stopCh:
+			return
+		default:
 		}
 	}
 }
@@ -171,17 +167,22 @@ func (cs *ClientSet) syncOnce() error {
 	if cs.serverCount != 0 && cs.ClientsCount() >= cs.serverCount {
 		return nil
 	}
-	c, err := cs.newAgentClient()
+	c, serverCount, err := cs.newAgentClient()
 	if err != nil {
 		return err
 	}
-	cs.serverCount = c.stream.serverCount
-	if err := cs.AddClient(c.stream.serverID, c); err != nil {
+	if cs.serverCount != 0 && cs.serverCount != serverCount {
+		klog.Warningf("current server count is %d, server %s suggests there are %d servers",
+			cs.serverCount, c.serverID, serverCount)
+
+	}
+	cs.serverCount = serverCount
+	if err := cs.AddClient(c.serverID, c); err != nil {
 		klog.Infof("closing connection: %v", err)
 		c.Close()
 		return nil
 	}
-	klog.Infof("sync added client connecting to proxy server %s", c.stream.serverID)
+	klog.Infof("sync added client connecting to proxy server %s", c.serverID)
 	go c.Serve()
 	return nil
 }
