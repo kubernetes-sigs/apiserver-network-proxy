@@ -23,6 +23,14 @@ For image builds these determine the location of your image.
 For GCE the registry should be gcr.io and PROJECT_ID should be the project you
 want to use the images in.
 
+### Protoc
+
+Proto definitions are compiled with `protoc`. Please ensure you have protoc installed ([Instructions](https://grpc.io/docs/protoc-installation/)) and the `proto-gen-go` library at the appropriate version.
+
+Currently we are using proto-gen-go@v1.3.2
+
+`go get github.com/golang/protobuf/protoc-gen-go@v1.3.2`
+
 ### Local builds
 
 ```console
