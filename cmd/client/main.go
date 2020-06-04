@@ -264,13 +264,19 @@ func (c *Client) getUDSDialer(o *GrpcProxyClientOptions) (func(ctx context.Conte
 			}
 			return c, err
 		})
-		tunnel, err := client.CreateSingleUseGrpcTunnel(o.proxyUdsName, dialOption, grpc.WithInsecure(), grpc.WithUserAgent(o.userAgent))
+		grpcConn, err := grpc.Dial(o.proxyUdsName, dialOption, grpc.WithInsecure())
+
+		if err != nil {
+			return nil, fmt.Errorf("Failed to dial to uds socket  %s, got %v", o.proxyUdsName, err)
+		}
+
+		tunnel, err := client.CreateSingleUseGrpcTunnel(grpcConn)
 		if err != nil {
 			return nil, fmt.Errorf("failed to create tunnel %s, got %v", o.proxyUdsName, err)
 		}
 
 		requestAddress := fmt.Sprintf("%s:%d", o.requestHost, o.requestPort)
-		proxyConn, err = tunnel.Dial("tcp", requestAddress)
+		proxyConn, err = tunnel.Dial("tcp", requestAddress, o.userAgent)
 		if err != nil {
 			return nil, fmt.Errorf("failed to dial request %s, got %v", requestAddress, err)
 		}
@@ -334,13 +340,19 @@ func (c *Client) getMTLSDialer(o *GrpcProxyClientOptions) (func(ctx context.Cont
 		transportCreds := credentials.NewTLS(tlsConfig)
 		dialOption := grpc.WithTransportCredentials(transportCreds)
 		serverAddress := fmt.Sprintf("%s:%d", o.proxyHost, o.proxyPort)
-		tunnel, err := client.CreateSingleUseGrpcTunnel(serverAddress, dialOption)
+
+		grpcConn, err := grpc.Dial(serverAddress, dialOption, grpc.WithInsecure())
+		if err != nil {
+			return nil, fmt.Errorf("Failed to dial to server %s, got %v", serverAddress, err)
+		}
+
+		tunnel, err := client.CreateSingleUseGrpcTunnel(grpcConn)
 		if err != nil {
 			return nil, fmt.Errorf("failed to create tunnel %s, got %v", serverAddress, err)
 		}
 
 		requestAddress := fmt.Sprintf("%s:%d", o.requestHost, o.requestPort)
-		proxyConn, err = tunnel.Dial("tcp", requestAddress)
+		proxyConn, err = tunnel.Dial("tcp", requestAddress, o.userAgent)
 		if err != nil {
 			return nil, fmt.Errorf("failed to dial request %s, got %v", requestAddress, err)
 		}

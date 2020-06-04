@@ -192,8 +192,8 @@ func (s *ProxyServer) Proxy(stream client.ProxyService_ProxyServer) error {
 	if !ok {
 		return fmt.Errorf("failed to get context")
 	}
-	userAgent := md.Get(header.UserAgent)
-	klog.Infof("proxy request from client, userAgent %s", userAgent)
+	caller := md.Get("caller")
+	klog.Infof("proxy request from client, caller %s", caller)
 
 	recvCh := make(chan *client.Packet, 10)
 	stopCh := make(chan error)

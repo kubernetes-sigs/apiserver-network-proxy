@@ -26,6 +26,7 @@ import (
 	"time"
 
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/metadata"
 	"k8s.io/klog/v2"
 	"sigs.k8s.io/apiserver-network-proxy/konnectivity-client/proto/client"
 )
@@ -34,7 +35,10 @@ import (
 type Tunnel interface {
 	// Dial connects to the address on the named network, similar to
 	// what net.Dial does. The only supported protocol is tcp.
-	Dial(protocol, address string) (net.Conn, error)
+	// This Dial supports an extra parameter "caller" to denote
+	// the client that calls the proxy.
+
+	Dial(protocol, address, caller string) (net.Conn, error)
 }
 
 type dialResult struct {
@@ -47,6 +51,7 @@ type grpcTunnel struct {
 	stream          client.ProxyService_ProxyClient
 	pendingDial     map[int64]chan<- dialResult
 	conns           map[int64]*conn
+	grpcConn        *grpc.ClientConn
 	pendingDialLock sync.RWMutex
 	connsLock       sync.RWMutex
 }
@@ -55,32 +60,17 @@ type grpcTunnel struct {
 // gRPC based proxy service.
 // Currently, a single tunnel supports a single connection, and the tunnel is closed when the connection is terminated
 // The Dial() method of the returned tunnel should only be called once
-func CreateSingleUseGrpcTunnel(address string, opts ...grpc.DialOption) (Tunnel, error) {
-	c, err := grpc.Dial(address, opts...)
-	if err != nil {
-		return nil, err
-	}
-
-	grpcClient := client.NewProxyServiceClient(c)
-
-	stream, err := grpcClient.Proxy(context.Background())
-	if err != nil {
-		return nil, err
-	}
-
+func CreateSingleUseGrpcTunnel(connection *grpc.ClientConn) (Tunnel, error) {
 	tunnel := &grpcTunnel{
-		stream:      stream,
+		grpcConn:    connection,
 		pendingDial: make(map[int64]chan<- dialResult),
 		conns:       make(map[int64]*conn),
 	}
 
-	go tunnel.serve(c)
-
 	return tunnel, nil
 }
 
-func (t *grpcTunnel) serve(c *grpc.ClientConn) {
-	defer c.Close()
+func (t *grpcTunnel) serve() {
 
 	for {
 		pkt, err := t.stream.Recv()
@@ -134,7 +124,6 @@ func (t *grpcTunnel) serve(c *grpc.ClientConn) {
 				t.connsLock.Lock()
 				delete(t.conns, resp.ConnectID)
 				t.connsLock.Unlock()
-				return
 			}
 			klog.Warningf("connection id %d not recognized", resp.ConnectID)
 		}
@@ -143,7 +132,21 @@ func (t *grpcTunnel) serve(c *grpc.ClientConn) {
 
 // Dial connects to the address on the named network, similar to
 // what net.Dial does. The only supported protocol is tcp.
-func (t *grpcTunnel) Dial(protocol, address string) (net.Conn, error) {
+func (t *grpcTunnel) Dial(protocol, address, caller string) (net.Conn, error) {
+	grpcClient := client.NewProxyServiceClient(t.grpcConn)
+
+	md := metadata.Pairs("caller", caller)
+	ctx := metadata.NewOutgoingContext(context.Background(), md)
+
+	stream, err := grpcClient.Proxy(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	t.stream = stream
+
+	go t.serve()
+
 	if protocol != "tcp" {
 		return nil, errors.New("protocol not supported")
 	}
@@ -171,7 +174,7 @@ func (t *grpcTunnel) Dial(protocol, address string) (net.Conn, error) {
 	}
 	klog.V(6).Infof("[tracing] send packet, type: %s", req.Type)
 
-	err := t.stream.Send(req)
+	err = t.stream.Send(req)
 	if err != nil {
 		return nil, err
 	}

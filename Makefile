@@ -252,4 +252,4 @@ release-alias-tag: # Adds the tag to the last build tag. BASE_REF comes from the
 .PHONY: clean
 clean:
 	go clean -testcache
-	rm -rf proto/agent/agent.pb.go konnectivity-client/proto/client/client.pb.go easy-rsa.tar.gz easy-rsa-master cfssl cfssljson certs bin proto/agent/mocks
+	rm -rf bin
