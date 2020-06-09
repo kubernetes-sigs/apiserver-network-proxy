@@ -97,18 +97,18 @@ func (o *GrpcProxyClientOptions) Flags() *pflag.FlagSet {
 }
 
 func (o *GrpcProxyClientOptions) Print() {
-	klog.Warningf("ClientCert set to %q.\n", o.clientCert)
-	klog.Warningf("ClientKey set to %q.\n", o.clientKey)
-	klog.Warningf("CACert set to %q.\n", o.caCert)
-	klog.Warningf("RequestProto set to %q.\n", o.requestProto)
-	klog.Warningf("RequestPath set to %q.\n", o.requestPath)
-	klog.Warningf("RequestHost set to %q.\n", o.requestHost)
-	klog.Warningf("RequestPort set to %d.\n", o.requestPort)
-	klog.Warningf("ProxyHost set to %q.\n", o.proxyHost)
-	klog.Warningf("ProxyPort set to %d.\n", o.proxyPort)
-	klog.Warningf("ProxyUdsName set to %q.\n", o.proxyUdsName)
-	klog.Warningf("TestRequests set to %q.\n", o.testRequests)
-	klog.Warningf("TestDelaySec set to %d.\n", o.testDelaySec)
+	klog.V(1).Infof("ClientCert set to %q.\n", o.clientCert)
+	klog.V(1).Infof("ClientKey set to %q.\n", o.clientKey)
+	klog.V(1).Infof("CACert set to %q.\n", o.caCert)
+	klog.V(1).Infof("RequestProto set to %q.\n", o.requestProto)
+	klog.V(1).Infof("RequestPath set to %q.\n", o.requestPath)
+	klog.V(1).Infof("RequestHost set to %q.\n", o.requestHost)
+	klog.V(1).Infof("RequestPort set to %d.\n", o.requestPort)
+	klog.V(1).Infof("ProxyHost set to %q.\n", o.proxyHost)
+	klog.V(1).Infof("ProxyPort set to %d.\n", o.proxyPort)
+	klog.V(1).Infof("ProxyUdsName set to %q.\n", o.proxyUdsName)
+	klog.V(1).Infof("TestRequests set to %q.\n", o.testRequests)
+	klog.V(1).Infof("TestDelaySec set to %d.\n", o.testDelaySec)
 }
 
 func (o *GrpcProxyClientOptions) Validate() error {
@@ -244,7 +244,7 @@ func (c *Client) run(o *GrpcProxyClientOptions) error {
 		}
 
 		if i != o.testRequests {
-			klog.Warningf("Waiting for %d seconds.", o.testDelaySec)
+			klog.V(1).InfoS("Wating for next connection test.", "seconds", o.testDelaySec)
 			wait := time.Duration(o.testDelaySec) * time.Second
 			time.Sleep(wait)
 		}
@@ -269,7 +269,7 @@ func (c *Client) makeRequest(o *GrpcProxyClientOptions, client *http.Client) err
 	if err != nil {
 		return fmt.Errorf("failed to read response from client, got %v", err)
 	}
-	klog.Info(string(data))
+	klog.V(4).Infoln(string(data))
 	return nil
 }
 
@@ -292,7 +292,7 @@ func (c *Client) getUDSDialer(o *GrpcProxyClientOptions) (func(ctx context.Conte
 		<-ch
 		if proxyConn != nil {
 			err := proxyConn.Close()
-			klog.Infof("connection closed: %v", err)
+			klog.ErrorS(err, "connection closed")
 		}
 	}()
 
@@ -304,7 +304,7 @@ func (c *Client) getUDSDialer(o *GrpcProxyClientOptions) (func(ctx context.Conte
 			// timeout - is turned off as this is test code and eases debugging.
 			c, err := net.DialTimeout("unix", o.proxyUdsName, 0)
 			if err != nil {
-				klog.Errorf("failed to create connection to uds name %s, error: %v", o.proxyUdsName, err)
+				klog.ErrorS(err, "failed to create connection to uds", "name", o.proxyUdsName)
 			}
 			return c, err
 		})
@@ -370,7 +370,7 @@ func (c *Client) getMTLSDialer(o *GrpcProxyClientOptions) (func(ctx context.Cont
 	go func() {
 		<-ch
 		err := proxyConn.Close()
-		klog.Infof("connection closed: %v", err)
+		klog.ErrorS(err, "connection closed")
 	}()
 
 	switch o.mode {
