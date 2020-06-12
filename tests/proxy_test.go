@@ -347,12 +347,11 @@ func runHTTPConnProxyServer() (proxy, func(), error) {
 
 func runAgent(addr string, stopCh <-chan struct{}) *agent.ClientSet {
 	cc := agent.ClientSetConfig{
-		Address:           addr,
-		AgentID:           uuid.New().String(),
-		SyncInterval:      1 * time.Millisecond,
-		ProbeInterval:     10 * time.Millisecond,
-		ReconnectInterval: 10 * time.Millisecond,
-		DialOption:        grpc.WithInsecure(),
+		Address:       addr,
+		AgentID:       uuid.New().String(),
+		SyncInterval:  100 * time.Millisecond,
+		ProbeInterval: 100 * time.Millisecond,
+		DialOption:    grpc.WithInsecure(),
 	}
 	client := cc.NewAgentClientSet(stopCh)
 	client.Serve()

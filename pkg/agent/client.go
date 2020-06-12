@@ -17,14 +17,23 @@ limitations under the License.
 package agent
 
 import (
+	"context"
+	"fmt"
 	"io"
+	"io/ioutil"
 	"net"
+	"strconv"
 	"sync"
 	"sync/atomic"
+	"time"
 
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/connectivity"
+	"google.golang.org/grpc/metadata"
 	"k8s.io/klog/v2"
 	"sigs.k8s.io/apiserver-network-proxy/konnectivity-client/proto/client"
+	"sigs.k8s.io/apiserver-network-proxy/proto/agent"
+	"sigs.k8s.io/apiserver-network-proxy/proto/header"
 )
 
 // connContext tracks a connection from agent to node network.
@@ -76,33 +85,152 @@ type AgentClient struct {
 
 	connManager *connectionManager
 
-	stream *RedialableAgentClient
-	stopCh <-chan struct{}
+	cs *ClientSet // the clientset that includes this AgentClient.
+
+	stream   agent.AgentService_ConnectClient
+	agentID  string
+	serverID string // the id of the proxy server this client connects to.
+
+	// connect opts
+	address string
+	opts    []grpc.DialOption
+	conn    *grpc.ClientConn
+	stopCh  chan struct{}
+	// locks
+	sendLock      sync.Mutex
+	recvLock      sync.Mutex
+	probeInterval time.Duration // interval between probe pings
+
+	// file path contains service account token.
+	// token's value is auto-rotated by kubernetes, based on projected volume configuration.
+	serviceAccountTokenPath string
 }
 
-func newAgentClient(address, agentID string, cs *ClientSet, opts ...grpc.DialOption) (*AgentClient, error) {
-	stream, err := NewRedialableAgentClient(address, agentID, cs, opts...)
+func newAgentClient(address, agentID string, cs *ClientSet, opts ...grpc.DialOption) (*AgentClient, int, error) {
+	a := &AgentClient{
+		cs:                      cs,
+		address:                 address,
+		agentID:                 agentID,
+		opts:                    opts,
+		probeInterval:           cs.probeInterval,
+		stopCh:                  make(chan struct{}),
+		serviceAccountTokenPath: cs.serviceAccountTokenPath,
+		connManager:             newConnectionManager(),
+	}
+	serverCount, err := a.Connect()
 	if err != nil {
+		return nil, 0, err
+	}
+	return a, serverCount, nil
+}
+
+// Connect makes the grpc dial to the proxy server. It returns the serverID
+// it connects to.
+func (a *AgentClient) Connect() (int, error) {
+	conn, err := grpc.Dial(a.address, a.opts...)
+	if err != nil {
+		return 0, err
+	}
+	ctx := metadata.AppendToOutgoingContext(context.Background(), header.AgentID, a.agentID)
+	if a.serviceAccountTokenPath != "" {
+		if ctx, err = a.initializeAuthContext(ctx); err != nil {
+			conn.Close()
+			return 0, err
+		}
+	}
+	stream, err := agent.NewAgentServiceClient(conn).Connect(ctx)
+	if err != nil {
+		conn.Close()
+		return 0, err
+	}
+	serverID, err := serverID(stream)
+	if err != nil {
+		conn.Close()
+		return 0, err
+	}
+	serverCount, err := serverCount(stream)
+	if err != nil {
+		conn.Close()
+		return 0, err
+	}
+	a.conn = conn
+	a.stream = stream
+	a.serverID = serverID
+	klog.Infof("Connect to server %s", serverID)
+	return serverCount, nil
+}
+
+// Close closes the underlying connection.
+func (a *AgentClient) Close() {
+	if a.conn == nil {
+		klog.Warning("Unexpected empty AgentClient.conn")
+	}
+	a.conn.Close()
+	close(a.stopCh)
+}
+
+func (a *AgentClient) Send(pkt *client.Packet) error {
+	a.sendLock.Lock()
+	defer a.sendLock.Unlock()
+
+	err := a.stream.Send(pkt)
+	// TODO: add metrics for send err
+	if err != nil && err != io.EOF {
+		a.cs.RemoveClient(a.serverID)
+	}
+	return err
+}
+
+func (a *AgentClient) Recv() (*client.Packet, error) {
+	a.recvLock.Lock()
+	defer a.recvLock.Unlock()
+
+	pkt, err := a.stream.Recv()
+	// TODO: add metrics for recv err
+	if err != nil && err != io.EOF {
+		a.cs.RemoveClient(a.serverID)
+	}
+	return pkt, err
+}
+
+func serverCount(stream agent.AgentService_ConnectClient) (int, error) {
+	md, err := stream.Header()
+	if err != nil {
+		return 0, err
+	}
+	scounts := md.Get(header.ServerCount)
+	if len(scounts) != 1 {
+		return 0, fmt.Errorf("expected one server count, got %d", len(scounts))
+	}
+	scount := scounts[0]
+	return strconv.Atoi(scount)
+}
+
+func serverID(stream agent.AgentService_ConnectClient) (string, error) {
+	// TODO: this is a blocking call. Add a timeout?
+	md, err := stream.Header()
+	if err != nil {
+		return "", err
+	}
+	sids := md.Get(header.ServerID)
+	if len(sids) != 1 {
+		return "", fmt.Errorf("expected one server ID in the context, got %v", sids)
+	}
+	return sids[0], nil
+}
+
+func (a *AgentClient) initializeAuthContext(ctx context.Context) (context.Context, error) {
+	var err error
+	var b []byte
+
+	// load current service account's token value
+	if b, err = ioutil.ReadFile(a.serviceAccountTokenPath); err != nil {
+		klog.Errorf("Failed to read token from %q. err: %v", a.serviceAccountTokenPath, err)
 		return nil, err
 	}
-	return newAgentClientWithRedialableAgentClient(stream), nil
-}
+	ctx = metadata.AppendToOutgoingContext(ctx, header.AuthenticationTokenContextKey, header.AuthenticationTokenContextSchemePrefix+string(b))
 
-func newAgentClientWithRedialableAgentClient(rac *RedialableAgentClient) *AgentClient {
-	return &AgentClient{
-		connManager: newConnectionManager(),
-		stream:      rac,
-		stopCh:      rac.stopCh,
-	}
-}
-
-// Close closes the underlying stream.
-func (a *AgentClient) Close() {
-	if a.stream == nil {
-		klog.Warning("Unexpected empty AgentClient.stream")
-		return
-	}
-	a.stream.Close()
+	return ctx, nil
 }
 
 // Connect connects to proxy server to establish a gRPC stream,
@@ -119,8 +247,8 @@ func (a *AgentClient) Close() {
 // The requests include things like opening a connection to a server,
 // streaming data and close the connection.
 func (a *AgentClient) Serve() {
-	klog.Infof("Start serving for serverID %s", a.stream.serverID)
-	go a.stream.probe()
+	klog.Infof("Start serving for serverID %s", a.serverID)
+	go a.probe()
 	for {
 		select {
 		case <-a.stopCh:
@@ -129,21 +257,12 @@ func (a *AgentClient) Serve() {
 		default:
 		}
 
-		pkt, err := a.stream.Recv()
+		pkt, err := a.Recv()
 		if err != nil {
-			if err2, ok := err.(*ReconnectError); ok {
-				err3 := err2.Wait()
-				if err3 != nil {
-					klog.Warningf("reconnect error: %v", err3)
-				}
-				continue
-			} else if err == io.EOF {
+			if err == io.EOF {
 				klog.Info("received EOF, exit")
 				return
 			}
-		}
-
-		if err != nil {
 			klog.Warningf("stream read error: %v", err)
 			return
 		}
@@ -169,7 +288,7 @@ func (a *AgentClient) Serve() {
 			conn, err := net.Dial(dialReq.Protocol, dialReq.Address)
 			if err != nil {
 				resp.GetDialResponse().Error = err.Error()
-				if err := a.stream.RetrySend(resp); err != nil {
+				if err := a.Send(resp); err != nil {
 					klog.Warningf("stream send error: %v", err)
 				}
 				continue
@@ -193,7 +312,7 @@ func (a *AgentClient) Serve() {
 						resp.GetCloseResponse().Error = err.Error()
 					}
 
-					if err := a.stream.RetrySend(resp); err != nil {
+					if err := a.Send(resp); err != nil {
 						klog.Warningf("close response send error: %v", err)
 					}
 
@@ -204,7 +323,7 @@ func (a *AgentClient) Serve() {
 			a.connManager.Add(connID, ctx)
 
 			resp.GetDialResponse().ConnectID = connID
-			if err := a.stream.RetrySend(resp); err != nil {
+			if err := a.Send(resp); err != nil {
 				klog.Warningf("stream send error: %v", err)
 				continue
 			}
@@ -237,7 +356,7 @@ func (a *AgentClient) Serve() {
 				}
 				resp.GetCloseResponse().ConnectID = connID
 				resp.GetCloseResponse().Error = "Unknown connectID"
-				if err := a.stream.Send(resp); err != nil {
+				if err := a.Send(resp); err != nil {
 					klog.Warningf("close response send error: %v", err)
 					continue
 				}
@@ -273,7 +392,7 @@ func (a *AgentClient) remoteToProxy(connID int64, ctx *connContext) {
 				Data:      buf[:n],
 				ConnectID: connID,
 			}}
-			if err := a.stream.RetrySend(resp); err != nil {
+			if err := a.Send(resp); err != nil {
 				klog.Warningf("stream send error: %v", err)
 			}
 		}
@@ -298,5 +417,25 @@ func (a *AgentClient) proxyToRemote(connID int64, ctx *connContext) {
 				return
 			}
 		}
+	}
+}
+
+func (a *AgentClient) probe() {
+	for {
+		select {
+		case <-a.stopCh:
+			return
+		case <-time.After(a.probeInterval):
+			if a.conn == nil {
+				continue
+			}
+			// health check
+			if a.conn.GetState() == connectivity.Ready {
+				continue
+			}
+		}
+		klog.Infof("Connection state %v, removing client used to connect to %v", a.conn.GetState(), a.serverID)
+		a.cs.RemoveClient(a.serverID)
+		return
 	}
 }

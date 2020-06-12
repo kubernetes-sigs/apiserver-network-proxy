@@ -68,10 +68,9 @@ type GrpcProxyAgentOptions struct {
 	healthServerPort int
 	adminServerPort  int
 
-	agentID           string
-	syncInterval      time.Duration
-	probeInterval     time.Duration
-	reconnectInterval time.Duration
+	agentID       string
+	syncInterval  time.Duration
+	probeInterval time.Duration
 
 	// file contains service account authorization token for enabling proxy-server token based authorization
 	serviceAccountTokenPath string
@@ -83,7 +82,6 @@ func (o *GrpcProxyAgentOptions) ClientSetConfig(dialOption grpc.DialOption) *age
 		AgentID:                 o.agentID,
 		SyncInterval:            o.syncInterval,
 		ProbeInterval:           o.probeInterval,
-		ReconnectInterval:       o.reconnectInterval,
 		DialOption:              dialOption,
 		ServiceAccountTokenPath: o.serviceAccountTokenPath,
 	}
@@ -101,7 +99,6 @@ func (o *GrpcProxyAgentOptions) Flags() *pflag.FlagSet {
 	flags.StringVar(&o.agentID, "agent-id", o.agentID, "The unique ID of this agent. Default to a generated uuid if not set.")
 	flags.DurationVar(&o.syncInterval, "sync-interval", o.syncInterval, "The initial interval by which the agent periodically checks if it has connections to all instances of the proxy server.")
 	flags.DurationVar(&o.probeInterval, "probe-interval", o.probeInterval, "The interval by which the agent periodically checks if its connections to the proxy server are ready.")
-	flags.DurationVar(&o.reconnectInterval, "reconnect-interval", o.reconnectInterval, "The interval by which the agent tries to reconnect.")
 	flags.StringVar(&o.serviceAccountTokenPath, "service-account-token-path", o.serviceAccountTokenPath, "If non-empty proxy agent uses this token to prove its identity to the proxy server.")
 	return flags
 }
@@ -117,7 +114,6 @@ func (o *GrpcProxyAgentOptions) Print() {
 	klog.Warningf("AgentID set to %s.\n", o.agentID)
 	klog.Warningf("SyncInterval set to %v.\n", o.syncInterval)
 	klog.Warningf("ProbeInterval set to %v.\n", o.probeInterval)
-	klog.Warningf("ReconnectInterval set to %v.\n", o.reconnectInterval)
 	klog.Warningf("ServiceAccountTokenPath set to \"%s\".\n", o.serviceAccountTokenPath)
 }
 
@@ -171,9 +167,8 @@ func newGrpcProxyAgentOptions() *GrpcProxyAgentOptions {
 		healthServerPort:        8093,
 		adminServerPort:         8094,
 		agentID:                 uuid.New().String(),
-		syncInterval:            5 * time.Second,
-		probeInterval:           5 * time.Second,
-		reconnectInterval:       5 * time.Second,
+		syncInterval:            1 * time.Second,
+		probeInterval:           1 * time.Second,
 		serviceAccountTokenPath: "",
 	}
 	return &o

@@ -23,7 +23,7 @@ func TestServeData_HTTP(t *testing.T) {
 		connManager: newConnectionManager(),
 		stopCh:      stopCh,
 	}
-	testClient.stream, stream = pipe2()
+	testClient.stream, stream = pipe()
 
 	// Start agent
 	go testClient.Serve()
@@ -119,7 +119,7 @@ func TestClose_Client(t *testing.T) {
 		connManager: newConnectionManager(),
 		stopCh:      stopCh,
 	}
-	testClient.stream, stream = pipe2()
+	testClient.stream, stream = pipe()
 
 	// Start agent
 	go testClient.Serve()
@@ -208,11 +208,6 @@ func pipe() (agent.AgentService_ConnectClient, agent.AgentService_ConnectClient)
 	s1.r, s1.w = r, w
 	s2.r, s2.w = w, r
 	return s1, s2
-}
-
-func pipe2() (*RedialableAgentClient, agent.AgentService_ConnectClient) {
-	s1, s2 := pipe()
-	return &RedialableAgentClient{stream: s1}, s2
 }
 
 func (s *fakeStream) Send(packet *client.Packet) error {
