@@ -114,7 +114,7 @@ certs: easy-rsa-master cfssl cfssljson
 	cd easy-rsa-master/master; \
 	./easyrsa init-pki; \
 	./easyrsa --batch "--req-cn=127.0.0.1@$(date +%s)" build-ca nopass; \
-	./easyrsa --subject-alt-name="DNS:kubernetes,IP:127.0.0.1" build-server-full "proxy-master" nopass; \
+	./easyrsa --subject-alt-name="DNS:kubernetes,DNS:localhost,IP:127.0.0.1" build-server-full "proxy-master" nopass; \
 	./easyrsa build-client-full proxy-client nopass; \
 	echo '{"signing":{"default":{"expiry":"43800h","usages":["signing","key encipherment","client auth"]}}}' > "ca-config.json"; \
 	echo '{"CN":"proxy","names":[{"O":"system:nodes"}],"hosts":[""],"key":{"algo":"rsa","size":2048}}' | "../../cfssl" gencert -ca=pki/ca.crt -ca-key=pki/private/ca.key -config=ca-config.json - | "../../cfssljson" -bare proxy
@@ -126,7 +126,7 @@ certs: easy-rsa-master cfssl cfssljson
 	cd easy-rsa-master/agent; \
 	./easyrsa init-pki; \
 	./easyrsa --batch "--req-cn=127.0.0.1@$(date +%s)" build-ca nopass; \
-	./easyrsa --subject-alt-name="DNS:kubernetes,IP:127.0.0.1" build-server-full "proxy-master" nopass; \
+	./easyrsa --subject-alt-name="DNS:kubernetes,DNS:localhost,IP:127.0.0.1" build-server-full "proxy-master" nopass; \
 	./easyrsa build-client-full proxy-agent nopass; \
 	echo '{"signing":{"default":{"expiry":"43800h","usages":["signing","key encipherment","agent auth"]}}}' > "ca-config.json"; \
 	echo '{"CN":"proxy","names":[{"O":"system:nodes"}],"hosts":[""],"key":{"algo":"rsa","size":2048}}' | "../../cfssl" gencert -ca=pki/ca.crt -ca-key=pki/private/ca.key -config=ca-config.json - | "../../cfssljson" -bare proxy
