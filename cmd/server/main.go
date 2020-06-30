@@ -30,7 +30,7 @@ import (
 	"syscall"
 
 	"github.com/google/uuid"
-	"github.com/prometheus/client_golang/prometheus"
+	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"github.com/spf13/cobra"
 	"github.com/spf13/pflag"
 	"google.golang.org/grpc"
@@ -517,12 +517,8 @@ func (p *Proxy) runAgentServer(o *ProxyRunOptions, server *server.ProxyServer) e
 }
 
 func (p *Proxy) runAdminServer(o *ProxyRunOptions, server *server.ProxyServer) error {
-	metricsHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		prometheus.Handler().ServeHTTP(w, r)
-	})
-
 	muxHandler := http.NewServeMux()
-	muxHandler.HandleFunc("/metrics", metricsHandler)
+	muxHandler.Handle("/metrics", promhttp.Handler())
 	adminServer := &http.Server{
 		Addr:           fmt.Sprintf("127.0.0.1:%d", o.adminPort),
 		Handler:        muxHandler,

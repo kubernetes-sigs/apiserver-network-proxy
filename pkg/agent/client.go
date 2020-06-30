@@ -32,6 +32,7 @@ import (
 	"google.golang.org/grpc/metadata"
 	"k8s.io/klog/v2"
 	"sigs.k8s.io/apiserver-network-proxy/konnectivity-client/proto/client"
+	"sigs.k8s.io/apiserver-network-proxy/pkg/agent/metrics"
 	"sigs.k8s.io/apiserver-network-proxy/proto/agent"
 	"sigs.k8s.io/apiserver-network-proxy/proto/header"
 )
@@ -174,8 +175,8 @@ func (a *AgentClient) Send(pkt *client.Packet) error {
 	defer a.sendLock.Unlock()
 
 	err := a.stream.Send(pkt)
-	// TODO: add metrics for send err
 	if err != nil && err != io.EOF {
+		metrics.Metrics.ObserveFailure(metrics.DirectionToServer)
 		a.cs.RemoveClient(a.serverID)
 	}
 	return err
@@ -186,8 +187,8 @@ func (a *AgentClient) Recv() (*client.Packet, error) {
 	defer a.recvLock.Unlock()
 
 	pkt, err := a.stream.Recv()
-	// TODO: add metrics for recv err
 	if err != nil && err != io.EOF {
+		metrics.Metrics.ObserveFailure(metrics.DirectionFromServer)
 		a.cs.RemoveClient(a.serverID)
 	}
 	return pkt, err
