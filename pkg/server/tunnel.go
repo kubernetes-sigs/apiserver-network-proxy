@@ -21,6 +21,7 @@ import (
 	"io"
 	"math/rand"
 	"net/http"
+	"time"
 
 	"k8s.io/klog/v2"
 	"sigs.k8s.io/apiserver-network-proxy/konnectivity-client/proto/client"
@@ -72,6 +73,7 @@ func (t *Tunnel) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		Mode:      "http-connect",
 		HTTP:      conn,
 		connected: connected,
+		start:     time.Now(),
 	}
 	t.Server.PendingDial.Add(random, connection)
 	backend, err := t.Server.BackendManager.Backend()
