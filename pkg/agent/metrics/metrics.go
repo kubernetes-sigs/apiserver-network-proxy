@@ -17,6 +17,8 @@ limitations under the License.
 package metrics
 
 import (
+	"time"
+
 	"github.com/prometheus/client_golang/prometheus"
 )
 
@@ -35,17 +37,31 @@ const (
 )
 
 var (
+	// Use buckets ranging from 5 ms to 30 seconds.
+	latencyBuckets = []float64{0.005, 0.025, 0.1, 0.5, 2.5, 10, 30}
+
 	// Metrics provides access to all dial metrics.
 	Metrics = newAgentMetrics()
 )
 
 // AgentMetrics includes all the metrics of the proxy agent.
 type AgentMetrics struct {
-	failures *prometheus.CounterVec
+	latencies *prometheus.HistogramVec
+	failures  *prometheus.CounterVec
 }
 
 // newAgentMetrics create a new AgentMetrics, configured with default metric names.
 func newAgentMetrics() *AgentMetrics {
+	latencies := prometheus.NewHistogramVec(
+		prometheus.HistogramOpts{
+			Namespace: namespace,
+			Subsystem: subsystem,
+			Name:      "dial_duration_seconds",
+			Help:      "Latency of dial to the remote endpoint in seconds",
+			Buckets:   latencyBuckets,
+		},
+		[]string{},
+	)
 	failures := prometheus.NewCounterVec(
 		prometheus.CounterOpts{
 			Namespace: namespace,
@@ -56,16 +72,23 @@ func newAgentMetrics() *AgentMetrics {
 		[]string{"direction"},
 	)
 	prometheus.MustRegister(failures)
-	return &AgentMetrics{failures: failures}
+	prometheus.MustRegister(latencies)
+	return &AgentMetrics{failures: failures, latencies: latencies}
 }
 
 // Reset resets the metrics.
 func (a *AgentMetrics) Reset() {
 	a.failures.Reset()
+	a.latencies.Reset()
 }
 
 // ObserveFailure records a failure to send to or receive from the proxy
 // server, labeled by the direction.
 func (a *AgentMetrics) ObserveFailure(direction Direction) {
 	a.failures.WithLabelValues(string(direction)).Inc()
+}
+
+// ObserveDialLatency records the latency of dial to the remote endpoint.
+func (a *AgentMetrics) ObserveDialLatency(elapsed time.Duration) {
+	a.latencies.WithLabelValues().Observe(elapsed.Seconds())
 }
