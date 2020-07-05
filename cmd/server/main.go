@@ -25,8 +25,10 @@ import (
 	"io/ioutil"
 	"net"
 	"net/http"
+	"net/http/pprof"
 	"os"
 	"os/signal"
+	"runtime"
 	"syscall"
 
 	"github.com/google/uuid"
@@ -85,6 +87,11 @@ type ProxyRunOptions struct {
 	adminPort uint
 	// Port we listen for health connections on.
 	healthPort uint
+	// Enables pprof at host:adminPort/debug/pprof.
+	enableProfiling bool
+	// If enableProfiling is true, this enables the lock contention
+	// profiling at host:adminPort/debug/pprof/block.
+	enableContentionProfiling bool
 
 	// ID of this proxy server.
 	serverID string
@@ -114,6 +121,8 @@ func (o *ProxyRunOptions) Flags() *pflag.FlagSet {
 	flags.UintVar(&o.agentPort, "agent-port", o.agentPort, "Port we listen for agent connections on.")
 	flags.UintVar(&o.adminPort, "admin-port", o.adminPort, "Port we listen for admin connections on.")
 	flags.UintVar(&o.healthPort, "health-port", o.healthPort, "Port we listen for health connections on.")
+	flags.BoolVar(&o.enableProfiling, "enable-profiling", o.enableProfiling, "enable pprof at host:admin-port/debug/pprof")
+	flags.BoolVar(&o.enableContentionProfiling, "enable-contention-profiling", o.enableContentionProfiling, "enable contention profiling at host:admin-port/debug/pprof/block. \"--enable-profiling\" must also be set.")
 	flags.StringVar(&o.serverID, "server-id", o.serverID, "The unique ID of this server.")
 	flags.UintVar(&o.serverCount, "server-count", o.serverCount, "The number of proxy server instances, should be 1 unless it is an HA server.")
 	flags.StringVar(&o.agentNamespace, "agent-namespace", o.agentNamespace, "Expected agent's namespace during agent authentication (used with agent-service-account, authentication-audience, kubeconfig).")
@@ -136,6 +145,8 @@ func (o *ProxyRunOptions) Print() {
 	klog.Warningf("Agent port set to %d.\n", o.agentPort)
 	klog.Warningf("Admin port set to %d.\n", o.adminPort)
 	klog.Warningf("Health port set to %d.\n", o.healthPort)
+	klog.Warningf("EnableProfiling set to %v.\n", o.enableProfiling)
+	klog.Warningf("EnableContentionProfiling set to %v.\n", o.enableContentionProfiling)
 	klog.Warningf("ServerID set to %s.\n", o.serverID)
 	klog.Warningf("ServerCount set to %d.\n", o.serverCount)
 	klog.Warningf("AgentNamespace set to %q.\n", o.agentNamespace)
@@ -231,6 +242,9 @@ func (o *ProxyRunOptions) Validate() error {
 	if o.healthPort < 1024 {
 		return fmt.Errorf("please do not try to use reserved port %d for the health port", o.healthPort)
 	}
+	if o.enableContentionProfiling && !o.enableProfiling {
+		return fmt.Errorf("if --enable-contention-profiling is set, --enable-profiling must also be set")
+	}
 
 	// validate agent authentication params
 	// all 4 parametes must be empty or must have value (except kubeconfigPath that might be empty)
@@ -259,24 +273,26 @@ func (o *ProxyRunOptions) Validate() error {
 
 func newProxyRunOptions() *ProxyRunOptions {
 	o := ProxyRunOptions{
-		serverCert:             "",
-		serverKey:              "",
-		serverCaCert:           "",
-		clusterCert:            "",
-		clusterKey:             "",
-		clusterCaCert:          "",
-		mode:                   "grpc",
-		udsName:                "",
-		serverPort:             8090,
-		agentPort:              8091,
-		healthPort:             8092,
-		adminPort:              8093,
-		serverID:               uuid.New().String(),
-		serverCount:            1,
-		agentNamespace:         "",
-		agentServiceAccount:    "",
-		kubeconfigPath:         "",
-		authenticationAudience: "",
+		serverCert:                "",
+		serverKey:                 "",
+		serverCaCert:              "",
+		clusterCert:               "",
+		clusterKey:                "",
+		clusterCaCert:             "",
+		mode:                      "grpc",
+		udsName:                   "",
+		serverPort:                8090,
+		agentPort:                 8091,
+		healthPort:                8092,
+		adminPort:                 8093,
+		enableProfiling:           false,
+		enableContentionProfiling: false,
+		serverID:                  uuid.New().String(),
+		serverCount:               1,
+		agentNamespace:            "",
+		agentServiceAccount:       "",
+		kubeconfigPath:            "",
+		authenticationAudience:    "",
 	}
 	return &o
 }
@@ -516,9 +532,23 @@ func (p *Proxy) runAgentServer(o *ProxyRunOptions, server *server.ProxyServer) e
 	return nil
 }
 
+// redirectTo redirects request to a certain destination.
+func redirectTo(to string) func(http.ResponseWriter, *http.Request) {
+	return func(rw http.ResponseWriter, req *http.Request) {
+		http.Redirect(rw, req, to, http.StatusMovedPermanently)
+	}
+}
+
 func (p *Proxy) runAdminServer(o *ProxyRunOptions, server *server.ProxyServer) error {
 	muxHandler := http.NewServeMux()
 	muxHandler.Handle("/metrics", promhttp.Handler())
+	if o.enableProfiling {
+		muxHandler.HandleFunc("/debug/pprof", redirectTo("/debug/pprof/"))
+		muxHandler.HandleFunc("/debug/pprof/", pprof.Index)
+		if o.enableContentionProfiling {
+			runtime.SetBlockProfileRate(1)
+		}
+	}
 	adminServer := &http.Server{
 		Addr:           fmt.Sprintf("127.0.0.1:%d", o.adminPort),
 		Handler:        muxHandler,
