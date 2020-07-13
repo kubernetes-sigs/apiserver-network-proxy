@@ -23,10 +23,12 @@ STAGING_REGISTRY := gcr.io/k8s-staging-kas-network-proxy
 SERVER_IMAGE_NAME ?= proxy-server
 AGENT_IMAGE_NAME ?= proxy-agent
 TEST_CLIENT_IMAGE_NAME ?= proxy-test-client
+TEST_SERVER_IMAGE_NAME ?= http-test-server
 
 SERVER_FULL_IMAGE ?= $(REGISTRY)/$(SERVER_IMAGE_NAME)
 AGENT_FULL_IMAGE ?= $(REGISTRY)/$(AGENT_IMAGE_NAME)
 TEST_CLIENT_FULL_IMAGE ?= $(REGISTRY)/$(TEST_CLIENT_IMAGE_NAME)
+TEST_SERVER_FULL_IMAGE ?= $(REGISTRY)/$(TEST_SERVER_IMAGE_NAME)
 
 TAG ?= $(shell git rev-parse HEAD)
 
@@ -54,13 +56,16 @@ bin:
 	mkdir -p bin
 
 .PHONY: build
-build: bin/proxy-agent bin/proxy-server bin/proxy-test-client
+build: bin/proxy-agent bin/proxy-server bin/proxy-test-client bin/http-test-server
 
 bin/proxy-agent: proto/agent/agent.pb.go konnectivity-client/proto/client/client.pb.go bin cmd/agent/main.go
 	GO111MODULE=on go build -o bin/proxy-agent cmd/agent/main.go
 
 bin/proxy-test-client: konnectivity-client/proto/client/client.pb.go bin cmd/client/main.go
 	GO111MODULE=on go build -o bin/proxy-test-client cmd/client/main.go
+
+bin/http-test-server: bin cmd/test-server/main.go
+	GO111MODULE=on go build -o bin/http-test-server cmd/test-server/main.go
 
 bin/proxy-server: proto/agent/agent.pb.go konnectivity-client/proto/client/client.pb.go bin cmd/server/main.go
 	GO111MODULE=on go build -o bin/proxy-server cmd/server/main.go
@@ -140,10 +145,10 @@ certs: easy-rsa-master cfssl cfssljson
 ## --------------------------------------
 
 .PHONY: docker-build
-docker-build: docker-build/proxy-agent docker-build/proxy-server docker-build/proxy-test-client
+docker-build: docker-build/proxy-agent docker-build/proxy-server docker-build/proxy-test-client docker-build/http-test-server
 
 .PHONY: docker-push
-docker-push: docker-push/proxy-agent docker-push/proxy-server docker-push/proxy-test-client
+docker-push: docker-push/proxy-agent docker-push/proxy-server docker-push/proxy-test-client docker-build/http-test-server
 
 .PHONY: docker-build/proxy-agent
 docker-build/proxy-agent: cmd/agent/main.go proto/agent/agent.pb.go
@@ -178,18 +183,30 @@ docker-push/proxy-test-client: docker-build/proxy-test-client
 	@[ "${DOCKER_CMD}" ] || ( echo "DOCKER_CMD is not set"; exit 1 )
 	${DOCKER_CMD} push ${TEST_CLIENT_FULL_IMAGE}-$(ARCH):${TAG}
 
+.PHONY: docker-build/http-test-server
+docker-build/http-test-server: cmd/test-server/main.go
+	@[ "${TAG}" ] || ( echo "TAG is not set"; exit 1 )
+	echo "Building http-test-server for ${ARCH}"
+	${DOCKER_CMD} build . --build-arg ARCH=$(ARCH) -f artifacts/images/test-server-build.Dockerfile -t ${TEST_SERVER_FULL_IMAGE}-$(ARCH):${TAG}
+
+.PHONY: docker-push/http-test-server
+docker-push/http-test-server: docker-build/http-test-server
+	@[ "${DOCKER_CMD}" ] || ( echo "DOCKER_CMD is not set"; exit 1 )
+	${DOCKER_CMD} push ${TEST_SERVER_FULL_IMAGE}-$(ARCH):${TAG}
+
 ## --------------------------------------
 ## Docker — All ARCH
 ## --------------------------------------
 
 .PHONY: docker-build-all
-docker-build-all: $(addprefix docker-build/proxy-agent-,$(ALL_ARCH)) $(addprefix docker-build/proxy-server-,$(ALL_ARCH)) $(addprefix docker-build/proxy-test-client-,$(ALL_ARCH))
+docker-build-all: $(addprefix docker-build/proxy-agent-,$(ALL_ARCH)) $(addprefix docker-build/proxy-server-,$(ALL_ARCH)) $(addprefix docker-build/proxy-test-client-,$(ALL_ARCH)) $(addprefix docker-build/http-test-server-,$(ALL_ARCH))
 
 .PHONY: docker-push-all
-docker-push-all: $(addprefix docker-push/proxy-agent-,$(ALL_ARCH)) $(addprefix docker-push/proxy-server-,$(ALL_ARCH)) $(addprefix docker-push/proxy-test-client-,$(ALL_ARCH))
+docker-push-all: $(addprefix docker-push/proxy-agent-,$(ALL_ARCH)) $(addprefix docker-push/proxy-server-,$(ALL_ARCH)) $(addprefix docker-push/proxy-test-client-,$(ALL_ARCH)) $(addprefix docker-push/http-test-server-,$(ALL_ARCH))
 	$(MAKE) docker-push-manifest/proxy-agent
 	$(MAKE) docker-push-manifest/proxy-server
 	$(MAKE) docker-push-manifest/proxy-test-client
+	$(MAKE) docker-push-manifest/http-test-server
 
 docker-build/proxy-agent-%:
 	$(MAKE) ARCH=$* docker-build/proxy-agent
@@ -208,6 +225,12 @@ docker-build/proxy-test-client-%:
 
 docker-push/proxy-test-client-%:
 	$(MAKE) ARCH=$* docker-push/proxy-test-client
+
+docker-build/http-test-server-%:
+	$(MAKE) ARCH=$* docker-build/http-test-server
+
+docker-push/http-test-server-%:
+	$(MAKE) ARCH=$* docker-push/http-test-server
 
 
 .PHONY: docker-push-manifest/proxy-agent
@@ -231,6 +254,13 @@ docker-push-manifest/proxy-test-client: ## Push the fat manifest docker image.
 	@for arch in $(ALL_ARCH); do ${DOCKER_CMD} manifest annotate --arch $${arch} ${TEST_CLIENT_FULL_IMAGE}:${TAG} ${TEST_CLIENT_FULL_IMAGE}-$${arch}:${TAG}; done
 	${DOCKER_CMD} manifest push --purge $(TEST_CLIENT_FULL_IMAGE):$(TAG)
 
+.PHONY: docker-push-manifest/http-test-server
+docker-push-manifest/http-test-server: ## Push the fat manifest docker image.
+	## Minimum docker version 18.06.0 is required for creating and pushing manifest images.
+	${DOCKER_CMD} manifest create --amend $(TEST_SERVER_FULL_IMAGE):$(TAG) $(shell echo $(ALL_ARCH) | sed -e "s~[^ ]*~$(TEST_SERVER_FULL_IMAGE)\-&:$(TAG)~g")
+	@for arch in $(ALL_ARCH); do ${DOCKER_CMD} manifest annotate --arch $${arch} ${TEST_SERVER_FULL_IMAGE}:${TAG} ${TEST_SERVER_FULL_IMAGE}-$${arch}:${TAG}; done
+	${DOCKER_CMD} manifest push --purge $(TEST_SERVER_FULL_IMAGE):$(TAG)
+
 ## --------------------------------------
 ## Release
 ## --------------------------------------
@@ -244,6 +274,7 @@ release-alias-tag: # Adds the tag to the last build tag. BASE_REF comes from the
 	gcloud container images add-tag $(AGENT_FULL_IMAGE):$(TAG) $(AGENT_FULL_IMAGE):$(BASE_REF)
 	gcloud container images add-tag $(SERVER_FULL_IMAGE):$(TAG) $(SERVER_FULL_IMAGE):$(BASE_REF)
 	gcloud container images add-tag $(TEST_CLIENT_FULL_IMAGE):$(TAG) $(TEST_CLIENT_FULL_IMAGE):$(BASE_REF)
+	gcloud container images add-tag $(TEST_SERVER_FULL_IMAGE):$(TAG) $(TEST_SERVER_FULL_IMAGE):$(BASE_REF)
 
 ## --------------------------------------
 ## Cleanup / Verification
