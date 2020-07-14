@@ -56,15 +56,15 @@ requests on the other.
 ### GRPC Client using mTLS Proxy with dial back Agent
 
 ```
-client =HTTP over GRPC=> (:8090) proxy (:8091) <=GRPC= agent =HTTP=> SimpleHTTPServer(:8000)
+client =HTTP over GRPC=> (:8090) proxy (:8091) <=GRPC= agent =HTTP=> http-test-server(:8000)
   |                                                    ^
   |                          Tunnel                    |
   +----------------------------------------------------+
 ```
 
-- Start SimpleHTTPServer (Sample destination)
+- Start Simple test HTTP Server (Sample destination)
 ```console
-python -m SimpleHTTPServer
+./bin/http-test-server
 ```
 
 - Start proxy service
@@ -82,6 +82,36 @@ python -m SimpleHTTPServer
 ./bin/proxy-test-client --ca-cert=certs/master/issued/ca.crt --client-cert=certs/master/issued/proxy-client.crt --client-key=certs/master/private/proxy-client.key
 ```
 
+### GRPC+UDP Client using Proxy with dial back Agent
+
+```
+client =HTTP over GRPC+UDP=> (/tmp/uds-proxy) proxy (:8091) <=GRPC= agent =HTTP=> SimpleHTTPServer(:8000)
+  |                                                    ^
+  |                          Tunnel                    |
+  +----------------------------------------------------+
+```
+
+- Start Simple test HTTP Server (Sample destination)
+```console
+./bin/http-test-server
+```
+
+- Start proxy service
+```console
+./bin/proxy-server --server-port=0 --uds-name=/tmp/uds-proxy --cluster-ca-cert=certs/agent/issued/ca.crt --cluster-cert=certs/agent/issued/proxy-master.crt --cluster-key=certs/agent/private/proxy-master.key
+```
+
+- Start agent service
+```console
+./bin/proxy-agent --ca-cert=certs/agent/issued/ca.crt --agent-cert=certs/agent/issued/proxy-agent.crt --agent-key=certs/agent/private/proxy-agent.key
+```
+
+- Run client (mTLS enabled sample client)
+```console
+./bin/proxy-test-client --proxy-port=0 --proxy-uds=/tmp/uds-proxy --proxy-host=""
+```
+
+
 ### HTTP-Connect Client using mTLS Proxy with dial back Agent (Either curl OR test client)
 
 ```
@@ -93,7 +123,7 @@ client =HTTP-CONNECT=> (:8090) proxy (:8091) <=GRPC= agent =HTTP=> SimpleHTTPSer
 
 - Start SimpleHTTPServer (Sample destination)
 ```console
-python -m SimpleHTTPServer
+./bin/http-test-server
 ```
 
 - Start proxy service

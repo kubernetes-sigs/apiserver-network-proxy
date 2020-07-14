@@ -27,6 +27,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"time"
 
 	"github.com/spf13/cobra"
 	"github.com/spf13/pflag"
@@ -71,6 +72,8 @@ type GrpcProxyClientOptions struct {
 	proxyUdsName string
 	mode         string
 	userAgent    string
+	testRequests int
+	testDelaySec int
 }
 
 func (o *GrpcProxyClientOptions) Flags() *pflag.FlagSet {
@@ -87,6 +90,8 @@ func (o *GrpcProxyClientOptions) Flags() *pflag.FlagSet {
 	flags.StringVar(&o.proxyUdsName, "proxy-uds", o.proxyUdsName, "The UDS name to connect to.")
 	flags.StringVar(&o.mode, "mode", o.mode, "Mode can be either 'grpc' or 'http-connect'.")
 	flags.StringVar(&o.userAgent, "user-agent", o.userAgent, "User agent to pass to the proxy server")
+	flags.IntVar(&o.testRequests, "test-requests", o.testRequests, "The number of times to send the request.")
+	flags.IntVar(&o.testDelaySec, "test-delay", o.testDelaySec, "The delay in seconds between sending requests.")
 
 	return flags
 }
@@ -102,7 +107,8 @@ func (o *GrpcProxyClientOptions) Print() {
 	klog.Warningf("ProxyHost set to %q.\n", o.proxyHost)
 	klog.Warningf("ProxyPort set to %d.\n", o.proxyPort)
 	klog.Warningf("ProxyUdsName set to %q.\n", o.proxyUdsName)
-	klog.Warningf("Mode set to %q.\n", o.mode)
+	klog.Warningf("TestRequests set to %q.\n", o.testRequests)
+	klog.Warningf("TestDelaySec set to %d.\n", o.testDelaySec)
 }
 
 func (o *GrpcProxyClientOptions) Validate() error {
@@ -154,6 +160,12 @@ func (o *GrpcProxyClientOptions) Validate() error {
 				o.clientKey, o.clientCert, o.caCert)
 		}
 	}
+	if o.testRequests < 1 {
+		return fmt.Errorf("please do not ask for fewer than 1 test request(%d)", o.testRequests)
+	}
+	if o.testDelaySec < 0 {
+		return fmt.Errorf("please do not ask for less than a 0 second delay(%d)", o.testDelaySec)
+	}
 	return nil
 }
 
@@ -163,7 +175,7 @@ func newGrpcProxyClientOptions() *GrpcProxyClientOptions {
 		clientKey:    "",
 		caCert:       "",
 		requestProto: "http",
-		requestPath:  "/",
+		requestPath:  "success",
 		requestHost:  "localhost",
 		requestPort:  8000,
 		proxyHost:    "localhost",
@@ -171,6 +183,8 @@ func newGrpcProxyClientOptions() *GrpcProxyClientOptions {
 		proxyUdsName: "",
 		mode:         "grpc",
 		userAgent:    "test-client",
+		testRequests: 1,
+		testDelaySec: 0,
 	}
 	return &o
 }
@@ -209,7 +223,38 @@ func (c *Client) run(o *GrpcProxyClientOptions) error {
 	client := &http.Client{
 		Transport: transport,
 	}
-	requestURL := fmt.Sprintf("%s://%s:%d%s", o.requestProto, o.requestHost, o.requestPort, o.requestPath)
+
+	// The apiserver network proxy does not support reusing the same dialer for multiple connections.
+	// With HTTP 1.1 Connection reuse, network proxy should support subsequent requests with the original connection
+	// as long as the connection has not been closed. This means that this connection/client cannot be shared.
+	// golang's default IdleConnTimeout is 90 seconds (https://golang.org/src/net/http/transport.go?s=13608:13676)
+	// k/k abides by this default.
+	//
+	// When running the test-client with a delay parameter greater than 90s (even when no agent restart is done)
+	// --test-requests=2 --test-delay=100 the second request will fail 100% of the time because currently network proxy
+	// explicitly closes the tunnel when a close request is sent to to the inner TCP connection.
+	// We do this as there is no way for us to know whether a tunnel will be reused.
+	// So to prevent leaking too many tunnel connections,
+	// we explicitly close the tunnel on the first CLOSE_RSP we obtain from the inner TCP connection
+	// (https://github.com/kubernetes-sigs/apiserver-network-proxy/blob/master/konnectivity-client/pkg/client/client.go#L137).
+	for i := 1; i <= o.testRequests; i++ {
+		err = c.makeRequest(o, client)
+		if err != nil {
+			return err
+		}
+
+		if i != o.testRequests {
+			klog.Warningf("Waiting for %d seconds.", o.testDelaySec)
+			wait := time.Duration(o.testDelaySec) * time.Second
+			time.Sleep(wait)
+		}
+	}
+
+	return nil
+}
+
+func (c *Client) makeRequest(o *GrpcProxyClientOptions, client *http.Client) error {
+	requestURL := fmt.Sprintf("%s://%s:%d/%s", o.requestProto, o.requestHost, o.requestPort, o.requestPath)
 	request, err := http.NewRequest("GET", requestURL, nil)
 	if err != nil {
 		return fmt.Errorf("failed to create request %s to send, got %v", requestURL, err)
@@ -225,7 +270,6 @@ func (c *Client) run(o *GrpcProxyClientOptions) error {
 		return fmt.Errorf("failed to read response from client, got %v", err)
 	}
 	klog.Info(string(data))
-
 	return nil
 }
 
