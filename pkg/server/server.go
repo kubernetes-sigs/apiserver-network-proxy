@@ -31,7 +31,7 @@ import (
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/klog/v2"
 	"sigs.k8s.io/apiserver-network-proxy/konnectivity-client/proto/client"
-	"sigs.k8s.io/apiserver-network-proxy/pkg/agent/metrics"
+	"sigs.k8s.io/apiserver-network-proxy/pkg/server/metrics"
 	"sigs.k8s.io/apiserver-network-proxy/proto/agent"
 	"sigs.k8s.io/apiserver-network-proxy/proto/header"
 )
@@ -258,9 +258,6 @@ func (s *ProxyServer) serveRecvFrontend(stream client.ProxyService_ProxyServer, 
 				klog.Errorf(">>> failed to get a backend: %v", err)
 				continue
 			}
-			if err := backend.Send(pkt); err != nil {
-				klog.Warningf(">>> DIAL_REQ to Backend failed: %v", err)
-			}
 			s.PendingDial.Add(
 				pkt.GetDialRequest().Random,
 				&ProxyClientConnection{
@@ -269,6 +266,9 @@ func (s *ProxyServer) serveRecvFrontend(stream client.ProxyService_ProxyServer, 
 					connected: make(chan struct{}),
 					start:     time.Now(),
 				})
+			if err := backend.Send(pkt); err != nil {
+				klog.Warningf(">>> DIAL_REQ to Backend failed: %v", err)
+			}
 			klog.Info(">>> DIAL_REQ sent to backend") // got this. but backend didn't receive anything.
 
 		case client.PacketType_CLOSE_REQ:

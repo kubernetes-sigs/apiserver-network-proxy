@@ -68,6 +68,11 @@ func (t *Tunnel) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		},
 	}
 	klog.Infof("Set pending(rand=%d) to %v", random, w)
+	backend, err := t.Server.BackendManager.Backend()
+	if err != nil {
+		http.Error(w, fmt.Sprintf("currently no tunnels available: %v", err), http.StatusInternalServerError)
+		return
+	}
 	connected := make(chan struct{})
 	connection := &ProxyClientConnection{
 		Mode:      "http-connect",
@@ -76,11 +81,6 @@ func (t *Tunnel) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		start:     time.Now(),
 	}
 	t.Server.PendingDial.Add(random, connection)
-	backend, err := t.Server.BackendManager.Backend()
-	if err != nil {
-		http.Error(w, fmt.Sprintf("currently no tunnels available: %v", err), http.StatusInternalServerError)
-		return
-	}
 	if err := backend.Send(dialRequest); err != nil {
 		klog.Errorf("failed to tunnel dial request %v", err)
 		return
