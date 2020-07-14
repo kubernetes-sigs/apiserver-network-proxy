@@ -21,6 +21,7 @@ import (
 	"io"
 	"math/rand"
 	"net/http"
+	"time"
 
 	"k8s.io/klog/v2"
 	"sigs.k8s.io/apiserver-network-proxy/konnectivity-client/proto/client"
@@ -67,18 +68,19 @@ func (t *Tunnel) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		},
 	}
 	klog.Infof("Set pending(rand=%d) to %v", random, w)
-	connected := make(chan struct{})
-	connection := &ProxyClientConnection{
-		Mode:      "http-connect",
-		HTTP:      conn,
-		connected: connected,
-	}
-	t.Server.PendingDial.Add(random, connection)
 	backend, err := t.Server.BackendManager.Backend()
 	if err != nil {
 		http.Error(w, fmt.Sprintf("currently no tunnels available: %v", err), http.StatusInternalServerError)
 		return
 	}
+	connected := make(chan struct{})
+	connection := &ProxyClientConnection{
+		Mode:      "http-connect",
+		HTTP:      conn,
+		connected: connected,
+		start:     time.Now(),
+	}
+	t.Server.PendingDial.Add(random, connection)
 	if err := backend.Send(dialRequest); err != nil {
 		klog.Errorf("failed to tunnel dial request %v", err)
 		return

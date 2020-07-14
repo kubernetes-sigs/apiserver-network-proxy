@@ -24,12 +24,14 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"time"
 
 	"google.golang.org/grpc/metadata"
 	authv1 "k8s.io/api/authentication/v1"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/klog/v2"
 	"sigs.k8s.io/apiserver-network-proxy/konnectivity-client/proto/client"
+	"sigs.k8s.io/apiserver-network-proxy/pkg/server/metrics"
 	"sigs.k8s.io/apiserver-network-proxy/proto/agent"
 	"sigs.k8s.io/apiserver-network-proxy/proto/header"
 )
@@ -42,6 +44,7 @@ type ProxyClientConnection struct {
 	connected chan struct{}
 	connectID int64
 	agentID   string
+	start     time.Time
 }
 
 func (c *ProxyClientConnection) send(pkt *client.Packet) error {
@@ -255,16 +258,17 @@ func (s *ProxyServer) serveRecvFrontend(stream client.ProxyService_ProxyServer, 
 				klog.Errorf(">>> failed to get a backend: %v", err)
 				continue
 			}
-			if err := backend.Send(pkt); err != nil {
-				klog.Warningf(">>> DIAL_REQ to Backend failed: %v", err)
-			}
 			s.PendingDial.Add(
 				pkt.GetDialRequest().Random,
 				&ProxyClientConnection{
 					Mode:      "grpc",
 					Grpc:      stream,
 					connected: make(chan struct{}),
+					start:     time.Now(),
 				})
+			if err := backend.Send(pkt); err != nil {
+				klog.Warningf(">>> DIAL_REQ to Backend failed: %v", err)
+			}
 			klog.Info(">>> DIAL_REQ sent to backend") // got this. but backend didn't receive anything.
 
 		case client.PacketType_CLOSE_REQ:
@@ -499,6 +503,7 @@ func (s *ProxyServer) serveRecvBackend(stream agent.AgentService_ConnectServer, 
 				client.agentID = agentID
 				s.addFrontend(agentID, resp.ConnectID, client)
 				close(client.connected)
+				metrics.Metrics.ObserveDialLatency(time.Since(client.start))
 			}
 
 		case client.PacketType_DATA:
