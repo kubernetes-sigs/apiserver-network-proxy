@@ -286,6 +286,7 @@ func (a *AgentClient) Serve() {
 			dialReq := pkt.GetDialRequest()
 			resp.GetDialResponse().Random = dialReq.Random
 
+			start := time.Now()
 			conn, err := net.Dial(dialReq.Protocol, dialReq.Address)
 			if err != nil {
 				resp.GetDialResponse().Error = err.Error()
@@ -294,6 +295,7 @@ func (a *AgentClient) Serve() {
 				}
 				continue
 			}
+			metrics.Metrics.ObserveDialLatency(time.Since(start))
 
 			connID := atomic.AddInt64(&a.nextConnID, 1)
 			dataCh := make(chan []byte, 5)
