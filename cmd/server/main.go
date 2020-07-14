@@ -79,6 +79,8 @@ type ProxyRunOptions struct {
 	mode string
 	// Location for use by the "unix" network. Setting enables UDS for server connections.
 	udsName string
+	// If file udsName already exists, delete the file before listen on that UDS file.
+	deleteUDSFile bool
 	// Port we listen for server connections on.
 	serverPort uint
 	// Port we listen for agent connections on.
@@ -117,6 +119,7 @@ func (o *ProxyRunOptions) Flags() *pflag.FlagSet {
 	flags.StringVar(&o.clusterCaCert, "cluster-ca-cert", o.clusterCaCert, "If non-empty the CA we use to validate Agent clients.")
 	flags.StringVar(&o.mode, "mode", o.mode, "Mode can be either 'grpc' or 'http-connect'.")
 	flags.StringVar(&o.udsName, "uds-name", o.udsName, "uds-name should be empty for TCP traffic. For UDS set to its name.")
+	flags.BoolVar(&o.deleteUDSFile, "delete-existing-uds-file", o.deleteUDSFile, "If true and if file udsName already exists, delete the file before listen on that UDS file")
 	flags.UintVar(&o.serverPort, "server-port", o.serverPort, "Port we listen for server connections on. Set to 0 for UDS.")
 	flags.UintVar(&o.agentPort, "agent-port", o.agentPort, "Port we listen for agent connections on.")
 	flags.UintVar(&o.adminPort, "admin-port", o.adminPort, "Port we listen for admin connections on.")
@@ -141,6 +144,7 @@ func (o *ProxyRunOptions) Print() {
 	klog.Warningf("ClusterCACert set to %q.\n", o.clusterCaCert)
 	klog.Warningf("Mode set to %q.\n", o.mode)
 	klog.Warningf("UDSName set to %q.\n", o.udsName)
+	klog.Warningf("DeleteUDSFile set to %v.\n", o.deleteUDSFile)
 	klog.Warningf("Server port set to %d.\n", o.serverPort)
 	klog.Warningf("Agent port set to %d.\n", o.agentPort)
 	klog.Warningf("Admin port set to %d.\n", o.adminPort)
@@ -281,6 +285,7 @@ func newProxyRunOptions() *ProxyRunOptions {
 		clusterCaCert:             "",
 		mode:                      "grpc",
 		udsName:                   "",
+		deleteUDSFile:             false,
 		serverPort:                8090,
 		agentPort:                 8091,
 		healthPort:                8092,
@@ -403,6 +408,11 @@ func (p *Proxy) runMasterServer(ctx context.Context, o *ProxyRunOptions, server 
 }
 
 func (p *Proxy) runUDSMasterServer(ctx context.Context, o *ProxyRunOptions, s *server.ProxyServer) (StopFunc, error) {
+	if o.deleteUDSFile {
+		if err := os.Remove(o.udsName); err != nil && !os.IsNotExist(err) {
+			klog.Warningf("failed to delete file %s: %v", o.udsName, err)
+		}
+	}
 	var stop StopFunc
 	if o.mode == "grpc" {
 		grpcServer := grpc.NewServer()
