@@ -485,6 +485,28 @@ func (s *ProxyServer) Connect(stream agent.AgentService_ConnectServer) error {
 
 // route the packet back to the correct client
 func (s *ProxyServer) serveRecvBackend(stream agent.AgentService_ConnectServer, agentID string, recvCh <-chan *client.Packet) {
+	defer func() {
+		// Close all connected frontends when the agent connection is closed
+		// TODO(#126): Frontends in PendingDial state that have not been added to the
+		//             list of frontends should also be closed.
+		frontends, _ := s.getFrontends(agentID)
+		klog.Infof("<<< Close %d frontends connected to agent %s", len(frontends), agentID)
+
+		for _, frontend := range frontends {
+			s.removeFrontend(agentID, frontend.connectID)
+			pkt := &client.Packet{
+				Type: client.PacketType_CLOSE_RSP,
+				Payload: &client.Packet_CloseResponse{
+					CloseResponse: &client.CloseResponse{},
+				},
+			}
+			pkt.GetCloseResponse().ConnectID = frontend.connectID
+			if err := frontend.send(pkt); err != nil {
+				klog.Warningf("<<< CLOSE_RSP to frontend failed: %v", err)
+			}
+		}
+	}()
+
 	for pkt := range recvCh {
 		switch pkt.Type {
 		case client.PacketType_DIAL_RSP:
@@ -552,25 +574,4 @@ func (s *ProxyServer) serveRecvBackend(stream agent.AgentService_ConnectServer, 
 		}
 	}
 	klog.Infof("<<< Close backend %v of agent %s", stream, agentID)
-
-	// Close all connected frontends when the agent connection is closed
-	// TODO(#126): Frontends in PendingDial state that have not been added to the
-	//             list of frontends should also be closed.
-	frontends, _ := s.getFrontends(agentID)
-	klog.Infof("<<< Close %d frontends connected to agent %s", len(frontends), agentID)
-
-	for _, frontend := range frontends {
-		s.removeFrontend(agentID, frontend.connectID)
-		pkt := &client.Packet{
-			Type: client.PacketType_CLOSE_RSP,
-			Payload: &client.Packet_CloseResponse{
-				CloseResponse: &client.CloseResponse{},
-			},
-		}
-		pkt.GetCloseResponse().ConnectID = frontend.connectID
-		if err := frontend.send(pkt); err != nil {
-			klog.Warningf("<<< CLOSE_RSP to frontend failed: %v", err)
-		}
-	}
-
 }
