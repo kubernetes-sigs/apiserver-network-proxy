@@ -16,6 +16,8 @@ ARCH ?= amd64
 ALL_ARCH = amd64 arm arm64 ppc64le s390x
 
 GOPATH ?= $(GOPATH)
+GOOS ?= $(shell go env GOOS)
+GOARCH ?= $(shell go env GOARCH)
 
 REGISTRY ?= gcr.io/$(shell gcloud config get-value project)
 STAGING_REGISTRY := gcr.io/k8s-staging-kas-network-proxy
@@ -103,14 +105,19 @@ easy-rsa-master: easy-rsa.tar.gz
 	tar xvf easy-rsa.tar.gz
 
 cfssl:
-	curl --retry 10 -L -o cfssl https://pkg.cfssl.org/R1.2/cfssl_linux-amd64
-	chmod +x cfssl
+	@if ! command -v cfssl &> /dev/null; then \
+		curl --retry 10 -L -o cfssl https://pkg.cfssl.org/R1.2/cfssl_$(GOOS)-$(GOARCH); \
+		chmod +x cfssl; \
+	fi
 
 cfssljson:
-	curl --retry 10 -L -o cfssljson https://pkg.cfssl.org/R1.2/cfssljson_linux-amd64
-	chmod +x cfssljson
+	@if ! command -v cfssljson &> /dev/null; then \
+		curl --retry 10 -L -o cfssljson https://pkg.cfssl.org/R1.2/cfssljson_$(GOOS)-$(GOARCH); \
+		chmod +x cfssljson; \
+	fi
 
 .PHONY: certs
+certs: export PATH := $(shell pwd):$(PATH)
 certs: easy-rsa-master cfssl cfssljson
 	# set up easy-rsa
 	cp -rf easy-rsa-master/easyrsa3 easy-rsa-master/master
@@ -122,7 +129,7 @@ certs: easy-rsa-master cfssl cfssljson
 	./easyrsa --subject-alt-name="DNS:kubernetes,DNS:localhost,IP:127.0.0.1" build-server-full "proxy-master" nopass; \
 	./easyrsa build-client-full proxy-client nopass; \
 	echo '{"signing":{"default":{"expiry":"43800h","usages":["signing","key encipherment","client auth"]}}}' > "ca-config.json"; \
-	echo '{"CN":"proxy","names":[{"O":"system:nodes"}],"hosts":[""],"key":{"algo":"rsa","size":2048}}' | "../../cfssl" gencert -ca=pki/ca.crt -ca-key=pki/private/ca.key -config=ca-config.json - | "../../cfssljson" -bare proxy
+	echo '{"CN":"proxy","names":[{"O":"system:nodes"}],"hosts":[""],"key":{"algo":"rsa","size":2048}}' | cfssl gencert -ca=pki/ca.crt -ca-key=pki/private/ca.key -config=ca-config.json - | cfssljson -bare proxy
 	mkdir -p certs/master
 	cp -r easy-rsa-master/master/pki/private certs/master
 	cp -r easy-rsa-master/master/pki/issued certs/master
@@ -134,7 +141,7 @@ certs: easy-rsa-master cfssl cfssljson
 	./easyrsa --subject-alt-name="DNS:kubernetes,DNS:localhost,IP:127.0.0.1" build-server-full "proxy-master" nopass; \
 	./easyrsa build-client-full proxy-agent nopass; \
 	echo '{"signing":{"default":{"expiry":"43800h","usages":["signing","key encipherment","agent auth"]}}}' > "ca-config.json"; \
-	echo '{"CN":"proxy","names":[{"O":"system:nodes"}],"hosts":[""],"key":{"algo":"rsa","size":2048}}' | "../../cfssl" gencert -ca=pki/ca.crt -ca-key=pki/private/ca.key -config=ca-config.json - | "../../cfssljson" -bare proxy
+	echo '{"CN":"proxy","names":[{"O":"system:nodes"}],"hosts":[""],"key":{"algo":"rsa","size":2048}}' | cfssl gencert -ca=pki/ca.crt -ca-key=pki/private/ca.key -config=ca-config.json - | cfssljson -bare proxy
 	mkdir -p certs/agent
 	cp -r easy-rsa-master/agent/pki/private certs/agent
 	cp -r easy-rsa-master/agent/pki/issued certs/agent
