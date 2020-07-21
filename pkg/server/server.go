@@ -183,6 +183,16 @@ func (s *ProxyServer) getFrontend(agentID string, connID int64) (*ProxyClientCon
 	return conn, nil
 }
 
+func (s *ProxyServer) getFrontends(agentID string) (map[int64]*ProxyClientConnection, error) {
+	s.fmu.RLock()
+	defer s.fmu.RUnlock()
+	conns, ok := s.frontends[agentID]
+	if !ok {
+		return nil, fmt.Errorf("can't find agentID %s in the frontends", agentID)
+	}
+	return conns, nil
+}
+
 // NewProxyServer creates a new ProxyServer instance
 func NewProxyServer(serverID string, serverCount int, agentAuthenticationOptions *AgentTokenAuthenticationOptions) *ProxyServer {
 	bm := NewDefaultBackendManager()
@@ -301,8 +311,9 @@ func (s *ProxyServer) serveRecvFrontend(stream client.ProxyService_ProxyServer, 
 			if err := backend.Send(pkt); err != nil {
 				// TODO: retry with other backends connecting to this agent.
 				klog.Warningf(">>> DATA to Backend failed: %v", err)
+				continue
 			}
-			klog.Info(">>> DATA sent to backend")
+			klog.Info(">>> DATA sent to Backend")
 
 		default:
 			klog.Infof(">>> Ignore %v packet coming from frontend", pkt.Type)
@@ -474,13 +485,35 @@ func (s *ProxyServer) Connect(stream agent.AgentService_ConnectServer) error {
 
 // route the packet back to the correct client
 func (s *ProxyServer) serveRecvBackend(stream agent.AgentService_ConnectServer, agentID string, recvCh <-chan *client.Packet) {
+	defer func() {
+		// Close all connected frontends when the agent connection is closed
+		// TODO(#126): Frontends in PendingDial state that have not been added to the
+		//             list of frontends should also be closed.
+		frontends, _ := s.getFrontends(agentID)
+		klog.Infof("<<< Close %d frontends connected to agent %s", len(frontends), agentID)
+
+		for _, frontend := range frontends {
+			s.removeFrontend(agentID, frontend.connectID)
+			pkt := &client.Packet{
+				Type: client.PacketType_CLOSE_RSP,
+				Payload: &client.Packet_CloseResponse{
+					CloseResponse: &client.CloseResponse{},
+				},
+			}
+			pkt.GetCloseResponse().ConnectID = frontend.connectID
+			if err := frontend.send(pkt); err != nil {
+				klog.Warningf("<<< CLOSE_RSP to frontend failed: %v", err)
+			}
+		}
+	}()
+
 	for pkt := range recvCh {
 		switch pkt.Type {
 		case client.PacketType_DIAL_RSP:
 			resp := pkt.GetDialResponse()
 			klog.Infof("<<< Received DIAL_RSP(rand=%d), agentID %s, connID %d)", resp.Random, agentID, resp.ConnectID)
 
-			if client, ok := s.PendingDial.Get(resp.Random); !ok {
+			if frontend, ok := s.PendingDial.Get(resp.Random); !ok {
 				klog.Warning("<<< DialResp not recognized; dropped")
 			} else {
 				dialErr := false
@@ -488,33 +521,32 @@ func (s *ProxyServer) serveRecvBackend(stream agent.AgentService_ConnectServer, 
 					klog.Warningf("<<< DIAL_RSP contains error: %v", resp.Error)
 					dialErr = true
 				}
-				err := client.send(pkt)
+				err := frontend.send(pkt)
 				s.PendingDial.Remove(resp.Random)
 				if err != nil {
-					klog.Warningf("<<< DIAL_RSP send to client stream error: %v", err)
+					klog.Warningf("<<< DIAL_RSP send to frontend stream error: %v", err)
 					dialErr = true
 				}
 				// Avoid adding the frontend if there was an error dialing the destination
 				if dialErr == true {
 					break
 				}
-
-				client.connectID = resp.ConnectID
-				client.agentID = agentID
-				s.addFrontend(agentID, resp.ConnectID, client)
-				close(client.connected)
-				metrics.Metrics.ObserveDialLatency(time.Since(client.start))
+				frontend.connectID = resp.ConnectID
+				frontend.agentID = agentID
+				s.addFrontend(agentID, resp.ConnectID, frontend)
+				close(frontend.connected)
+				metrics.Metrics.ObserveDialLatency(time.Since(frontend.start))
 			}
 
 		case client.PacketType_DATA:
 			resp := pkt.GetData()
 			klog.Infof("<<< Received %d bytes of DATA from agentID %s, connID %d", len(resp.Data), agentID, resp.ConnectID)
-			client, err := s.getFrontend(agentID, resp.ConnectID)
+			frontend, err := s.getFrontend(agentID, resp.ConnectID)
 			if err != nil {
 				klog.Warning(err)
 				break
 			}
-			if err := client.send(pkt); err != nil {
+			if err := frontend.send(pkt); err != nil {
 				klog.Warningf("<<< DATA send to client stream error: %v", err)
 			} else {
 				klog.V(6).Infof("<<< DATA sent to frontend")
@@ -523,12 +555,12 @@ func (s *ProxyServer) serveRecvBackend(stream agent.AgentService_ConnectServer, 
 		case client.PacketType_CLOSE_RSP:
 			resp := pkt.GetCloseResponse()
 			klog.Infof("<<< Received CLOSE_RSP(id=%d)", resp.ConnectID)
-			client, err := s.getFrontend(agentID, resp.ConnectID)
+			frontend, err := s.getFrontend(agentID, resp.ConnectID)
 			if err != nil {
 				klog.Warning(err)
 				break
 			}
-			if err := client.send(pkt); err != nil {
+			if err := frontend.send(pkt); err != nil {
 				// Normal when frontend closes it.
 				klog.Infof("<<< CLOSE_RSP send to client stream error: %v", err)
 			} else {

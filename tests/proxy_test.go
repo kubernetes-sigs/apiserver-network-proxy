@@ -253,8 +253,9 @@ func localAddr(addr net.Addr) string {
 }
 
 type proxy struct {
-	front string
-	agent string
+	server *server.ProxyServer
+	front  string
+	agent  string
 }
 
 func runGRPCProxyServer() (proxy, func(), error) {
@@ -298,6 +299,7 @@ func runGRPCProxyServerWithServerCount(serverCount int) (proxy, *server.ProxySer
 		agentServer.Serve(lis2)
 	}()
 	proxy.agent = localAddr(lis2.Addr())
+	proxy.server = server
 
 	return proxy, server, cleanup, nil
 }
@@ -341,6 +343,7 @@ func runHTTPConnProxyServer() (proxy, func(), error) {
 		lis2.Close()
 		httpServer.Shutdown(context.Background())
 	}
+	proxy.server = s
 
 	return proxy, cleanup, nil
 }
