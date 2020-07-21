@@ -33,7 +33,7 @@ type Backend interface {
 }
 
 var _ Backend = &backend{}
-var _Backend = new(agent.AgentService_ConnectServer)
+var _ Backend = agent.AgentService_ConnectServer(nil)
 
 type backend struct {
 	// TODO: this is a multi-writer single-reader pattern, it's tricky to
