@@ -61,8 +61,8 @@ func TestAddRemoveBackends(t *testing.T) {
 	// This is invalid. agent1 doesn't have conn3. This should be a no-op.
 	p.RemoveBackend("agent1", conn3)
 	expectedBackends = map[string][]*backend{
-		"agent1": []*backend{newBackend(conn12)},
-		"agent3": []*backend{newBackend(conn3)},
+		"agent1": []*backend{newBackend("agent1", conn12)},
+		"agent3": []*backend{newBackend("agent3", conn3)},
 	}
 	expectedAgentIDs = []string{"agent1", "agent3"}
 	if e, a := expectedBackends, p.backends; !reflect.DeepEqual(e, a) {

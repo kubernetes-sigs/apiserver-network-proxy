@@ -30,16 +30,17 @@ import (
 type Backend interface {
 	Send(p *client.Packet) error
 	Context() context.Context
+	AgentID() string
 }
 
 var _ Backend = &backend{}
-var _Backend = new(agent.AgentService_ConnectServer)
 
 type backend struct {
 	// TODO: this is a multi-writer single-reader pattern, it's tricky to
 	// write it using channel. Let's worry about performance later.
-	mu   sync.Mutex // mu protects conn
-	conn agent.AgentService_ConnectServer
+	mu      sync.Mutex // mu protects conn
+	conn    agent.AgentService_ConnectServer
+	agentID string
 }
 
 func (b *backend) Send(p *client.Packet) error {
@@ -53,8 +54,12 @@ func (b *backend) Context() context.Context {
 	return b.conn.Context()
 }
 
-func newBackend(conn agent.AgentService_ConnectServer) *backend {
-	return &backend{conn: conn}
+func (b *backend) AgentID() string {
+	return b.agentID
+}
+
+func newBackend(agentID string, conn agent.AgentService_ConnectServer) *backend {
+	return &backend{agentID: agentID, conn: conn}
 }
 
 // BackendManager is an interface to manage backend connections, i.e.,
@@ -107,10 +112,10 @@ func (s *DefaultBackendManager) AddBackend(agentID string, conn agent.AgentServi
 				return
 			}
 		}
-		s.backends[agentID] = append(s.backends[agentID], newBackend(conn))
+		s.backends[agentID] = append(s.backends[agentID], newBackend(agentID, conn))
 		return
 	}
-	s.backends[agentID] = []*backend{newBackend(conn)}
+	s.backends[agentID] = []*backend{newBackend(agentID, conn)}
 	s.agentIDs = append(s.agentIDs, agentID)
 }
 

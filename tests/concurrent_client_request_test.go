@@ -2,6 +2,7 @@ package tests
 
 import (
 	"bytes"
+	"context"
 	"fmt"
 	"io/ioutil"
 	"net/http"
@@ -11,7 +12,9 @@ import (
 	"time"
 
 	"google.golang.org/grpc"
+	"k8s.io/klog/v2"
 	"sigs.k8s.io/apiserver-network-proxy/konnectivity-client/pkg/client"
+	clientproto "sigs.k8s.io/apiserver-network-proxy/konnectivity-client/proto/client"
 	"sigs.k8s.io/apiserver-network-proxy/pkg/server"
 	"sigs.k8s.io/apiserver-network-proxy/proto/agent"
 )
@@ -52,39 +55,103 @@ func getTestClient(front string, t *testing.T) *http.Client {
 	}
 }
 
+type backend struct {
+	mu      sync.Mutex // mu protects conn
+	conn    agent.AgentService_ConnectServer
+	agentID string
+}
+
+func (b *backend) Send(p *clientproto.Packet) error {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.conn.Send(p)
+}
+
+func (b *backend) Context() context.Context {
+	// TODO: does Context require lock protection?
+	return b.conn.Context()
+}
+
+func (b *backend) AgentID() string {
+	return b.agentID
+}
+
+func newBackend(agentID string, conn agent.AgentService_ConnectServer) *backend {
+	return &backend{agentID: agentID, conn: conn}
+}
+
 // singleTimeManager makes sure that a backend only serves one request.
 type singleTimeManager struct {
 	mu       sync.Mutex
-	backends map[string]agent.AgentService_ConnectServer
+	backends map[string][]*backend
 	used     map[string]struct{}
+	agentIDs []string
 }
 
 func (s *singleTimeManager) AddBackend(agentID string, conn agent.AgentService_ConnectServer) {
+	klog.Infof("register Backend %v for agentID %s", conn, agentID)
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	s.backends[agentID] = conn
+	_, ok := s.backends[agentID]
+	if ok {
+		for _, v := range s.backends[agentID] {
+			if v.conn == conn {
+				klog.Warningf("this should not happen. Adding existing connection %v for agentID %s", conn, agentID)
+				return
+			}
+		}
+		s.backends[agentID] = append(s.backends[agentID], newBackend(agentID, conn))
+		return
+	}
+	s.backends[agentID] = []*backend{newBackend(agentID, conn)}
 }
 
 func (s *singleTimeManager) RemoveBackend(agentID string, conn agent.AgentService_ConnectServer) {
+	klog.Infof("remove Backend %v for agentID %s", conn, agentID)
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	v, ok := s.backends[agentID]
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	backends, ok := s.backends[agentID]
 	if !ok {
-		panic(fmt.Errorf("no backends found for %s", agentID))
+		klog.Warningf("can't find agentID %s in the backends", agentID)
+		return
 	}
-	if v != conn {
-		panic(fmt.Errorf("recorded connection %v does not match conn %v", v, conn))
+	var found bool
+	for i, c := range backends {
+		if c.conn == conn {
+			s.backends[agentID] = append(s.backends[agentID][:i], s.backends[agentID][i+1:]...)
+			if i == 0 && len(s.backends[agentID]) != 0 {
+				klog.Warningf("this should not happen. Removed connection %v that is not the first connection, remaining connections are %v", conn, s.backends[agentID])
+			}
+			found = true
+		}
 	}
-	delete(s.backends, agentID)
+	if len(s.backends[agentID]) == 0 {
+		delete(s.backends, agentID)
+		for i := range s.agentIDs {
+			if s.agentIDs[i] == agentID {
+				s.agentIDs[i] = s.agentIDs[len(s.agentIDs)-1]
+				s.agentIDs = s.agentIDs[:len(s.agentIDs)-1]
+				break
+			}
+		}
+	}
+	if !found {
+		klog.Errorf("can't find conn %v for agentID %s in the backends", conn, agentID)
+	}
 }
 
 func (s *singleTimeManager) Backend() (server.Backend, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	for k, v := range s.backends {
-		if _, ok := s.used[k]; !ok {
-			s.used[k] = struct{}{}
-			return v, nil
+	for k, backends := range s.backends {
+		for i, v := range backends {
+			idx := fmt.Sprintf("%s%d", k, i)
+			if _, ok := s.used[idx]; !ok {
+				s.used[idx] = struct{}{}
+				return v, nil
+			}
 		}
 	}
 	return nil, fmt.Errorf("cannot find backend to a new agent")
@@ -93,7 +160,7 @@ func (s *singleTimeManager) Backend() (server.Backend, error) {
 func newSingleTimeGetter(m *server.DefaultBackendManager) *singleTimeManager {
 	return &singleTimeManager{
 		used:     make(map[string]struct{}),
-		backends: make(map[string]agent.AgentService_ConnectServer),
+		backends: make(map[string][]*backend),
 	}
 }
 
