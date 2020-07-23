@@ -148,7 +148,7 @@ certs: easy-rsa-master cfssl cfssljson
 docker-build: docker-build/proxy-agent docker-build/proxy-server docker-build/proxy-test-client docker-build/http-test-server
 
 .PHONY: docker-push
-docker-push: docker-push/proxy-agent docker-push/proxy-server docker-push/proxy-test-client docker-build/http-test-server
+docker-push: docker-push/proxy-agent docker-push/proxy-server docker-push/proxy-test-client docker-push/http-test-server
 
 .PHONY: docker-build/proxy-agent
 docker-build/proxy-agent: cmd/agent/main.go proto/agent/agent.pb.go
