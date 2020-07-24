@@ -40,7 +40,7 @@ func TestDial(t *testing.T) {
 		conns:       make(map[int64]*conn),
 	}
 
-	go tunnel.serve()
+	go tunnel.serve(&fakeConn{})
 	go ts.serve()
 
 	_, err := tunnel.Dial("tcp", "127.0.0.1:80")
@@ -70,7 +70,7 @@ func TestData(t *testing.T) {
 		conns:       make(map[int64]*conn),
 	}
 
-	go tunnel.serve()
+	go tunnel.serve(&fakeConn{})
 	go ts.serve()
 
 	conn, err := tunnel.Dial("tcp", "127.0.0.1:80")
@@ -127,7 +127,7 @@ func TestClose(t *testing.T) {
 		conns:       make(map[int64]*conn),
 	}
 
-	go tunnel.serve()
+	go tunnel.serve(&fakeConn{})
 	go ts.serve()
 
 	conn, err := tunnel.Dial("tcp", "127.0.0.1:80")
@@ -155,6 +155,15 @@ type fakeStream struct {
 	r <-chan *client.Packet
 	w chan<- *client.Packet
 }
+
+type fakeConn struct {
+}
+
+func (f *fakeConn) Close() error {
+	return nil
+}
+
+var _ clientConn = &fakeConn{}
 
 var _ client.ProxyService_ProxyClient = &fakeStream{}
 
