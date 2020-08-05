@@ -26,6 +26,7 @@ import (
 type testServer struct {
 	echo   []byte
 	chunks int
+	wchan  chan struct{}
 }
 
 func newEchoServer(echo string) *testServer {
@@ -44,6 +45,11 @@ func newSizedServer(length, chunks int) *testServer {
 
 func (s *testServer) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 	for i := 0; i < s.chunks; i++ {
+		// Wait before sending the last chunk if test requires it
+		if i == (s.chunks-1) && s.wchan != nil {
+			<-s.wchan
+		}
+
 		w.Write(s.echo)
 	}
 }
@@ -349,9 +355,13 @@ func runHTTPConnProxyServer() (proxy, func(), error) {
 }
 
 func runAgent(addr string, stopCh <-chan struct{}) *agent.ClientSet {
+	return runAgentWithID(uuid.New().String(), addr, stopCh)
+}
+
+func runAgentWithID(agentID, addr string, stopCh <-chan struct{}) *agent.ClientSet {
 	cc := agent.ClientSetConfig{
 		Address:       addr,
-		AgentID:       uuid.New().String(),
+		AgentID:       agentID,
 		SyncInterval:  100 * time.Millisecond,
 		ProbeInterval: 100 * time.Millisecond,
 		DialOption:    grpc.WithInsecure(),

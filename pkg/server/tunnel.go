@@ -79,6 +79,7 @@ func (t *Tunnel) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		HTTP:      conn,
 		connected: connected,
 		start:     time.Now(),
+		backend:   backend,
 	}
 	t.Server.PendingDial.Add(random, connection)
 	if err := backend.Send(dialRequest); err != nil {
