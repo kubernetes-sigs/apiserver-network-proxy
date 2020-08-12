@@ -63,7 +63,7 @@ type BackendManager interface {
 	// Backend returns a single backend.
 	Backend() (Backend, error)
 	// AddBackend adds a backend.
-	AddBackend(agentID string, conn agent.AgentService_ConnectServer)
+	AddBackend(agentID string, conn agent.AgentService_ConnectServer) Backend
 	// RemoveBackend removes a backend.
 	RemoveBackend(agentID string, conn agent.AgentService_ConnectServer)
 }
@@ -95,23 +95,25 @@ func NewDefaultBackendManager() *DefaultBackendManager {
 }
 
 // AddBackend adds a backend.
-func (s *DefaultBackendManager) AddBackend(agentID string, conn agent.AgentService_ConnectServer) {
+func (s *DefaultBackendManager) AddBackend(agentID string, conn agent.AgentService_ConnectServer) Backend {
 	klog.Infof("register Backend %v for agentID %s", conn, agentID)
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	_, ok := s.backends[agentID]
+	addedBackend := newBackend(conn)
 	if ok {
 		for _, v := range s.backends[agentID] {
 			if v.conn == conn {
 				klog.Warningf("this should not happen. Adding existing connection %v for agentID %s", conn, agentID)
-				return
+				return v
 			}
 		}
-		s.backends[agentID] = append(s.backends[agentID], newBackend(conn))
-		return
+		s.backends[agentID] = append(s.backends[agentID], addedBackend)
+		return addedBackend
 	}
-	s.backends[agentID] = []*backend{newBackend(conn)}
+	s.backends[agentID] = []*backend{addedBackend}
 	s.agentIDs = append(s.agentIDs, agentID)
+	return addedBackend
 }
 
 // RemoveBackend removes a backend.

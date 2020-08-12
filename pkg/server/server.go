@@ -45,6 +45,7 @@ type ProxyClientConnection struct {
 	connectID int64
 	agentID   string
 	start     time.Time
+	backend   Backend
 }
 
 func (c *ProxyClientConnection) send(pkt *client.Packet) error {
@@ -183,14 +184,20 @@ func (s *ProxyServer) getFrontend(agentID string, connID int64) (*ProxyClientCon
 	return conn, nil
 }
 
-func (s *ProxyServer) getFrontends(agentID string) (map[int64]*ProxyClientConnection, error) {
+func (s *ProxyServer) getFrontendsForBackendConn(agentID string, backend Backend) ([]*ProxyClientConnection, error) {
+	var ret []*ProxyClientConnection
 	s.fmu.RLock()
 	defer s.fmu.RUnlock()
-	conns, ok := s.frontends[agentID]
+	frontends, ok := s.frontends[agentID]
 	if !ok {
 		return nil, fmt.Errorf("can't find agentID %s in the frontends", agentID)
 	}
-	return conns, nil
+	for _, frontend := range frontends {
+		if frontend.backend == backend {
+			ret = append(ret, frontend)
+		}
+	}
+	return ret, nil
 }
 
 // NewProxyServer creates a new ProxyServer instance
@@ -275,6 +282,7 @@ func (s *ProxyServer) serveRecvFrontend(stream client.ProxyService_ProxyServer, 
 					Grpc:      stream,
 					connected: make(chan struct{}),
 					start:     time.Now(),
+					backend:   backend,
 				})
 			if err := backend.Send(pkt); err != nil {
 				klog.Warningf(">>> DIAL_REQ to Backend failed: %v", err)
@@ -439,7 +447,7 @@ func (s *ProxyServer) Connect(stream agent.AgentService_ConnectServer) error {
 		return err
 	}
 	klog.Infof("Connect request from agent %s", agentID)
-	s.BackendManager.AddBackend(agentID, stream)
+	backend := s.BackendManager.AddBackend(agentID, stream)
 	defer s.BackendManager.RemoveBackend(agentID, stream)
 
 	h := metadata.Pairs(header.ServerID, s.serverID, header.ServerCount, strconv.Itoa(s.serverCount))
@@ -457,7 +465,7 @@ func (s *ProxyServer) Connect(stream agent.AgentService_ConnectServer) error {
 		}
 	}
 
-	go s.serveRecvBackend(stream, agentID, recvCh)
+	go s.serveRecvBackend(backend, stream, agentID, recvCh)
 
 	defer func() {
 		close(recvCh)
@@ -484,12 +492,12 @@ func (s *ProxyServer) Connect(stream agent.AgentService_ConnectServer) error {
 }
 
 // route the packet back to the correct client
-func (s *ProxyServer) serveRecvBackend(stream agent.AgentService_ConnectServer, agentID string, recvCh <-chan *client.Packet) {
+func (s *ProxyServer) serveRecvBackend(backend Backend, stream agent.AgentService_ConnectServer, agentID string, recvCh <-chan *client.Packet) {
 	defer func() {
 		// Close all connected frontends when the agent connection is closed
 		// TODO(#126): Frontends in PendingDial state that have not been added to the
 		//             list of frontends should also be closed.
-		frontends, _ := s.getFrontends(agentID)
+		frontends, _ := s.getFrontendsForBackendConn(agentID, backend)
 		klog.Infof("<<< Close %d frontends connected to agent %s", len(frontends), agentID)
 
 		for _, frontend := range frontends {

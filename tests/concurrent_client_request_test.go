@@ -59,10 +59,11 @@ type singleTimeManager struct {
 	used     map[string]struct{}
 }
 
-func (s *singleTimeManager) AddBackend(agentID string, conn agent.AgentService_ConnectServer) {
+func (s *singleTimeManager) AddBackend(agentID string, conn agent.AgentService_ConnectServer) server.Backend {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.backends[agentID] = conn
+	return conn
 }
 
 func (s *singleTimeManager) RemoveBackend(agentID string, conn agent.AgentService_ConnectServer) {

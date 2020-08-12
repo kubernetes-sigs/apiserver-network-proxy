@@ -136,7 +136,6 @@ func TestProxy_Agent_Reconnect(t *testing.T) {
 			}
 
 			_, err = clientRequest(c, server.URL)
-
 			if err != nil {
 				t.Errorf("expected no error on proxy request, got %v", err)
 			}
