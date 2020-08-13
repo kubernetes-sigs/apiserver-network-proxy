@@ -274,7 +274,7 @@ docker-push-manifest/http-test-server: ## Push the fat manifest docker image.
 
 .PHONY: release-staging
 release-staging: ## Builds and push container images to the staging bucket.
-	REGISTRY=$(STAGING_REGISTRY) $(MAKE) docker-build-all docker-push-all release-alias-tag
+	REGISTRY=$(STAGING_REGISTRY) $(MAKE) docker-push-all release-alias-tag
 
 .PHONY: release-alias-tag
 release-alias-tag: # Adds the tag to the last build tag. BASE_REF comes from the cloudbuild.yaml
