@@ -20,6 +20,7 @@ import (
 	"crypto/tls"
 	"flag"
 	"fmt"
+	"net"
 	"net/http"
 	"os"
 	"time"
@@ -236,6 +237,7 @@ func (a *Agent) runHealthServer(o *GrpcProxyAgentOptions) error {
 	})
 
 	muxHandler := http.NewServeMux()
+	muxHandler.Handle("/metrics", promhttp.Handler())
 	muxHandler.HandleFunc("/healthz", livenessHandler)
 	muxHandler.HandleFunc("/ready", readinessHandler)
 	healthServer := &http.Server{
@@ -257,7 +259,16 @@ func (a *Agent) runHealthServer(o *GrpcProxyAgentOptions) error {
 
 func (a *Agent) runAdminServer(o *GrpcProxyAgentOptions) error {
 	muxHandler := http.NewServeMux()
-	muxHandler.Handle("/metrics", promhttp.Handler())
+	muxHandler.Handle("/metrics", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		host, _, err := net.SplitHostPort(r.Host)
+		// The port number may be omitted if the admin server is running on port
+		// 80, the default port for HTTP
+		if err != nil {
+			host = r.Host
+		}
+		http.Redirect(w, r, fmt.Sprintf("%s:%d%s", host, o.healthServerPort, r.URL.Path), http.StatusMovedPermanently)
+	}))
+
 	adminServer := &http.Server{
 		Addr:           fmt.Sprintf("127.0.0.1:%d", o.adminServerPort),
 		Handler:        muxHandler,
