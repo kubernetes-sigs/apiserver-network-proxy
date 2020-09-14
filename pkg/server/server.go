@@ -270,7 +270,7 @@ func (s *ProxyServer) serveRecvFrontend(stream client.ProxyService_ProxyServer, 
 			// the address, then we can send the Dial_REQ to the
 			// same agent. That way we save the agent from creating
 			// a new connection to the address.
-			backend, err = s.BackendManager.Backend()
+			backend, err = s.BackendManager.Backend(context.TODO())
 			if err != nil {
 				klog.Errorf(">>> failed to get a backend: %v", err)
 				continue

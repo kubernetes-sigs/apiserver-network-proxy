@@ -2,6 +2,7 @@ package tests
 
 import (
 	"bytes"
+	"context"
 	"fmt"
 	"io/ioutil"
 	"net/http"
@@ -79,7 +80,7 @@ func (s *singleTimeManager) RemoveBackend(agentID string, conn agent.AgentServic
 	delete(s.backends, agentID)
 }
 
-func (s *singleTimeManager) Backend() (server.Backend, error) {
+func (s *singleTimeManager) Backend(_ context.Context) (server.Backend, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	for k, v := range s.backends {
@@ -89,6 +90,14 @@ func (s *singleTimeManager) Backend() (server.Backend, error) {
 		}
 	}
 	return nil, fmt.Errorf("cannot find backend to a new agent")
+}
+
+func (s *singleTimeManager) GetBackend(agentID string) server.Backend {
+	return nil
+}
+
+func (s *singleTimeManager) NumBackends() int {
+	return 0
 }
 
 func newSingleTimeGetter(m *server.DefaultBackendManager) *singleTimeManager {

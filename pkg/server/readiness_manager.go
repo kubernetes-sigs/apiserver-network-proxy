@@ -26,11 +26,8 @@ type ReadinessManager interface {
 var _ ReadinessManager = &DefaultBackendManager{}
 
 func (s *DefaultBackendManager) Ready() (bool, string) {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-	if len(s.backends) == 0 {
+	if s.NumBackends() == 0 {
 		return false, "no connection to any proxy agent"
 	}
 	return true, ""
-
 }
