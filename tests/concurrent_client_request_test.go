@@ -109,6 +109,10 @@ func newSingleTimeGetter(m *server.DefaultBackendManager) *singleTimeManager {
 
 var _ server.BackendManager = &singleTimeManager{}
 
+func (stm *singleTimeManager) Ready() (bool, string) {
+	return true, ""
+}
+
 func TestConcurrentClientRequest(t *testing.T) {
 	s := httptest.NewServer(&simpleServer{receivedSecondReq: make(chan struct{})})
 	defer s.Close()
@@ -118,7 +122,7 @@ func TestConcurrentClientRequest(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer cleanup()
-	ps.BackendManager = newSingleTimeGetter(server.NewDefaultBackendManager())
+	ps.BackendManagers = []server.BackendManager{newSingleTimeGetter(server.NewDefaultBackendManager())}
 
 	stopCh := make(chan struct{})
 	defer close(stopCh)

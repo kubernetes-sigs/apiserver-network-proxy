@@ -115,6 +115,14 @@ type ProxyRunOptions struct {
 	authenticationAudience string
 	// Path to kubeconfig (used by kubernetes client)
 	kubeconfigPath string
+
+	// Proxy strategies used by the server.
+	// NOTE the order of the strategies matters. e.g., for list
+	// "destHost,destCIDR", the server will try to find a backend associating
+	// to the destination host first, if not found, it will try to find a
+	// backend within the destCIDR. if it still can't find any backend,
+	// it will use the default backend manager to choose a random backend.
+	proxyStrategies string
 }
 
 func (o *ProxyRunOptions) Flags() *pflag.FlagSet {
@@ -141,6 +149,7 @@ func (o *ProxyRunOptions) Flags() *pflag.FlagSet {
 	flags.StringVar(&o.agentServiceAccount, "agent-service-account", o.agentServiceAccount, "Expected agent's service account during agent authentication (used with agent-namespace, authentication-audience, kubeconfig).")
 	flags.StringVar(&o.kubeconfigPath, "kubeconfig", o.kubeconfigPath, "absolute path to the kubeconfig file (used with agent-namespace, agent-service-account, authentication-audience).")
 	flags.StringVar(&o.authenticationAudience, "authentication-audience", o.authenticationAudience, "Expected agent's token authentication audience (used with agent-namespace, agent-service-account, kubeconfig).")
+	flags.StringVar(&o.proxyStrategies, "proxy-strategies", o.proxyStrategies, "The list of proxy strategies used by the server. e.g., \"destHost,default\"")
 	return flags
 }
 
@@ -167,6 +176,7 @@ func (o *ProxyRunOptions) Print() {
 	klog.V(1).Infof("AgentServiceAccount set to %q.\n", o.agentServiceAccount)
 	klog.V(1).Infof("AuthenticationAudience set to %q.\n", o.authenticationAudience)
 	klog.V(1).Infof("KubeconfigPath set to %q.\n", o.kubeconfigPath)
+	klog.V(1).Infof("ProxyStrategies set to %s.\n", o.proxyStrategies)
 }
 
 func (o *ProxyRunOptions) Validate() error {
@@ -309,6 +319,7 @@ func newProxyRunOptions() *ProxyRunOptions {
 		agentServiceAccount:       "",
 		kubeconfigPath:            "",
 		authenticationAudience:    "",
+		proxyStrategies:           "default",
 	}
 	return &o
 }
@@ -358,8 +369,10 @@ func (p *Proxy) run(o *ProxyRunOptions) error {
 		KubernetesClient:       k8sClient,
 		AuthenticationAudience: o.authenticationAudience,
 	}
-	server := server.NewProxyServer(o.serverID, int(o.serverCount), authOpt)
 	klog.V(1).Infoln("Starting master server for client connections.")
+	ps := server.GenProxyStrategiesFromStr(o.proxyStrategies)
+	server := server.NewProxyServer(o.serverID, ps, int(o.serverCount), authOpt)
+
 	masterStop, err := p.runMasterServer(ctx, o, server)
 	if err != nil {
 		return fmt.Errorf("failed to run the master server: %v", err)

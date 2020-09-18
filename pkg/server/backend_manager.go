@@ -19,6 +19,7 @@ package server
 import (
 	"context"
 	"math/rand"
+	"strings"
 	"sync"
 	"time"
 
@@ -26,6 +27,29 @@ import (
 	client "sigs.k8s.io/apiserver-network-proxy/konnectivity-client/proto/client"
 	"sigs.k8s.io/apiserver-network-proxy/proto/agent"
 )
+
+type ProxyStrategy string
+
+const (
+	ProxyStrategyDestHost ProxyStrategy = "destHost"
+	ProxyStrategyDefault  ProxyStrategy = "default"
+)
+
+// GenProxyStrategiesFromStr generates the list of proxy strategies from the
+// comma-seperated string, i.e., destHost,defualt.
+func GenProxyStrategiesFromStr(proxyStrategies string) []ProxyStrategy {
+	var ps []ProxyStrategy
+	strs := strings.Split(proxyStrategies, ",")
+	for _, s := range strs {
+		switch s {
+		case string(ProxyStrategyDestHost):
+			ps = append(ps, ProxyStrategyDestHost)
+		default:
+		}
+	}
+	// always append the default backendmanager as the last one
+	return append(ps, ProxyStrategyDefault)
+}
 
 type Backend interface {
 	Send(p *client.Packet) error
@@ -78,6 +102,7 @@ type BackendManager interface {
 	// contains multiple requests.
 	Backend(ctx context.Context) (Backend, error)
 	BackendStorage
+	ReadinessManager
 }
 
 var _ BackendManager = &DefaultBackendManager{}
@@ -88,6 +113,7 @@ type DefaultBackendManager struct {
 }
 
 func (dbm *DefaultBackendManager) Backend(_ context.Context) (Backend, error) {
+	klog.V(5).InfoS("Get a random backend through the DefaultBackendManager")
 	return dbm.DefaultBackendStorage.GetRandomBackend()
 }
 
@@ -190,6 +216,13 @@ type ErrNotFound struct{}
 // Error returns the error message.
 func (e *ErrNotFound) Error() string {
 	return "No backend available"
+}
+
+func ignoreNotFound(err error) error {
+	if _, ok := err.(*ErrNotFound); ok {
+		return nil
+	}
+	return err
 }
 
 // GetRandomBackend returns a random backend.

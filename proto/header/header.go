@@ -17,9 +17,10 @@ limitations under the License.
 package header
 
 const (
-	ServerCount = "serverCount"
-	ServerID    = "serverID"
-	AgentID     = "agentID"
+	ServerCount  = "serverCount"
+	ServerID     = "serverID"
+	AgentID      = "agentID"
+	AgentAddress = "agentAddress"
 	// AuthenticationTokenContextKey will be used as a key to store authentication tokens in grpc call
 	// (https://tools.ietf.org/html/rfc6750#section-2.1)
 	AuthenticationTokenContextKey = "Authorization"

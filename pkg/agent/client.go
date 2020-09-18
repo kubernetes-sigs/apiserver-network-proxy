@@ -23,6 +23,7 @@ import (
 	"io/ioutil"
 	"net"
 	"strconv"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -79,6 +80,60 @@ func newConnectionManager() *connectionManager {
 	}
 }
 
+// AgentAddress stores addresses that are reachable though an agent
+type AgentAddress struct {
+	IPv4        []string
+	IPv6        []string
+	Host        []string
+	CIDR        []string
+	FailureZone []string
+}
+
+type AddressType string
+
+const (
+	IPv4        AddressType = "ipv4"
+	IPv6        AddressType = "ipv6"
+	Host        AddressType = "host"
+	CIDR        AddressType = "cidr"
+	FailureZone AddressType = "failure-zone"
+)
+
+// GenAgentAddress generates an AgentAddress based on the input string, the
+// input string should be a comma-seprated list with each item in the format
+// of <addressType>=<address>
+func GenAgentAddress(addrs string) AgentAddress {
+	var agentAddr AgentAddress
+	entries := strings.Split(addrs, ",")
+	for _, entry := range entries {
+		kv := strings.Split(entry, "=")
+		if len(kv) != 2 {
+			klog.V(4).InfoS("Invalid agent address input format",
+				"got", entry, "expect", "<addressType>=<address>")
+			continue
+		}
+		if kv[1] == "" {
+			continue
+		}
+		switch AddressType(kv[0]) {
+		case IPv4:
+			agentAddr.IPv4 = append(agentAddr.IPv4, kv[1])
+		case IPv6:
+			agentAddr.IPv6 = append(agentAddr.IPv6, kv[1])
+		case Host:
+			agentAddr.Host = append(agentAddr.Host, kv[1])
+		case CIDR:
+			agentAddr.CIDR = append(agentAddr.CIDR, kv[1])
+		case FailureZone:
+			agentAddr.FailureZone = append(agentAddr.FailureZone, kv[1])
+		default:
+			klog.V(5).InfoS("Unknown address type", "Address Type", kv[0])
+			continue
+		}
+	}
+	return agentAddr
+}
+
 // AgentClient runs on the node network side. It connects to proxy server and establishes
 // a stream connection from which it sends and receives network traffic.
 type AgentClient struct {
@@ -88,9 +143,10 @@ type AgentClient struct {
 
 	cs *ClientSet // the clientset that includes this AgentClient.
 
-	stream   agent.AgentService_ConnectClient
-	agentID  string
-	serverID string // the id of the proxy server this client connects to.
+	stream       agent.AgentService_ConnectClient
+	agentID      string
+	agentAddress string
+	serverID     string // the id of the proxy server this client connects to.
 
 	// connect opts
 	address string
@@ -107,11 +163,12 @@ type AgentClient struct {
 	serviceAccountTokenPath string
 }
 
-func newAgentClient(address, agentID string, cs *ClientSet, opts ...grpc.DialOption) (*AgentClient, int, error) {
+func newAgentClient(address, agentID, agentAddress string, cs *ClientSet, opts ...grpc.DialOption) (*AgentClient, int, error) {
 	a := &AgentClient{
 		cs:                      cs,
 		address:                 address,
 		agentID:                 agentID,
+		agentAddress:            agentAddress,
 		opts:                    opts,
 		probeInterval:           cs.probeInterval,
 		stopCh:                  make(chan struct{}),
@@ -132,7 +189,9 @@ func (a *AgentClient) Connect() (int, error) {
 	if err != nil {
 		return 0, err
 	}
-	ctx := metadata.AppendToOutgoingContext(context.Background(), header.AgentID, a.agentID)
+	ctx := metadata.AppendToOutgoingContext(context.Background(),
+		header.AgentID, a.agentID,
+		header.AgentAddress, a.agentAddress)
 	if a.serviceAccountTokenPath != "" {
 		if ctx, err = a.initializeAuthContext(ctx); err != nil {
 			conn.Close()
