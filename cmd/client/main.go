@@ -244,7 +244,7 @@ func (c *Client) run(o *GrpcProxyClientOptions) error {
 		}
 
 		if i != o.testRequests {
-			klog.V(1).InfoS("Wating for next connection test.", "seconds", o.testDelaySec)
+			klog.V(1).InfoS("Waiting for next connection test.", "seconds", o.testDelaySec)
 			wait := time.Duration(o.testDelaySec) * time.Second
 			time.Sleep(wait)
 		}

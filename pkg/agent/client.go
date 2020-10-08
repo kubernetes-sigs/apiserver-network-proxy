@@ -271,7 +271,7 @@ func (a *AgentClient) Serve() {
 		klog.V(5).InfoS("[tracing] recv packet", "type", pkt.Type)
 
 		if pkt == nil {
-			klog.V(2).Infoln("empty packet received")
+			klog.V(3).Infoln("empty packet received")
 			continue
 		}
 
