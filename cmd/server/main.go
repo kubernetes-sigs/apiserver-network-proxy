@@ -136,27 +136,27 @@ func (o *ProxyRunOptions) Flags() *pflag.FlagSet {
 }
 
 func (o *ProxyRunOptions) Print() {
-	klog.Warningf("ServerCert set to %q.\n", o.serverCert)
-	klog.Warningf("ServerKey set to %q.\n", o.serverKey)
-	klog.Warningf("ServerCACert set to %q.\n", o.serverCaCert)
-	klog.Warningf("ClusterCert set to %q.\n", o.clusterCert)
-	klog.Warningf("ClusterKey set to %q.\n", o.clusterKey)
-	klog.Warningf("ClusterCACert set to %q.\n", o.clusterCaCert)
-	klog.Warningf("Mode set to %q.\n", o.mode)
-	klog.Warningf("UDSName set to %q.\n", o.udsName)
-	klog.Warningf("DeleteUDSFile set to %v.\n", o.deleteUDSFile)
-	klog.Warningf("Server port set to %d.\n", o.serverPort)
-	klog.Warningf("Agent port set to %d.\n", o.agentPort)
-	klog.Warningf("Admin port set to %d.\n", o.adminPort)
-	klog.Warningf("Health port set to %d.\n", o.healthPort)
-	klog.Warningf("EnableProfiling set to %v.\n", o.enableProfiling)
-	klog.Warningf("EnableContentionProfiling set to %v.\n", o.enableContentionProfiling)
-	klog.Warningf("ServerID set to %s.\n", o.serverID)
-	klog.Warningf("ServerCount set to %d.\n", o.serverCount)
-	klog.Warningf("AgentNamespace set to %q.\n", o.agentNamespace)
-	klog.Warningf("AgentServiceAccount set to %q.\n", o.agentServiceAccount)
-	klog.Warningf("AuthenticationAudience set to %q.\n", o.authenticationAudience)
-	klog.Warningf("KubeconfigPath set to %q.\n", o.kubeconfigPath)
+	klog.V(1).Infof("ServerCert set to %q.\n", o.serverCert)
+	klog.V(1).Infof("ServerKey set to %q.\n", o.serverKey)
+	klog.V(1).Infof("ServerCACert set to %q.\n", o.serverCaCert)
+	klog.V(1).Infof("ClusterCert set to %q.\n", o.clusterCert)
+	klog.V(1).Infof("ClusterKey set to %q.\n", o.clusterKey)
+	klog.V(1).Infof("ClusterCACert set to %q.\n", o.clusterCaCert)
+	klog.V(1).Infof("Mode set to %q.\n", o.mode)
+	klog.V(1).Infof("UDSName set to %q.\n", o.udsName)
+	klog.V(1).Infof("DeleteUDSFile set to %v.\n", o.deleteUDSFile)
+	klog.V(1).Infof("Server port set to %d.\n", o.serverPort)
+	klog.V(1).Infof("Agent port set to %d.\n", o.agentPort)
+	klog.V(1).Infof("Admin port set to %d.\n", o.adminPort)
+	klog.V(1).Infof("Health port set to %d.\n", o.healthPort)
+	klog.V(1).Infof("EnableProfiling set to %v.\n", o.enableProfiling)
+	klog.V(1).Infof("EnableContentionProfiling set to %v.\n", o.enableContentionProfiling)
+	klog.V(1).Infof("ServerID set to %s.\n", o.serverID)
+	klog.V(1).Infof("ServerCount set to %d.\n", o.serverCount)
+	klog.V(1).Infof("AgentNamespace set to %q.\n", o.agentNamespace)
+	klog.V(1).Infof("AgentServiceAccount set to %q.\n", o.agentServiceAccount)
+	klog.V(1).Infof("AuthenticationAudience set to %q.\n", o.authenticationAudience)
+	klog.V(1).Infof("KubeconfigPath set to %q.\n", o.kubeconfigPath)
 }
 
 func (o *ProxyRunOptions) Validate() error {
@@ -348,26 +348,23 @@ func (p *Proxy) run(o *ProxyRunOptions) error {
 		AuthenticationAudience: o.authenticationAudience,
 	}
 	server := server.NewProxyServer(o.serverID, int(o.serverCount), authOpt)
-
-	klog.Info("Starting master server for client connections.")
+	klog.V(1).Infoln("Starting master server for client connections.")
 	masterStop, err := p.runMasterServer(ctx, o, server)
 	if err != nil {
 		return fmt.Errorf("failed to run the master server: %v", err)
 	}
 
-	klog.Info("Starting agent server for tunnel connections.")
+	klog.V(1).Infoln("Starting agent server for tunnel connections.")
 	err = p.runAgentServer(o, server)
 	if err != nil {
 		return fmt.Errorf("failed to run the agent server: %v", err)
 	}
-
-	klog.Info("Starting admin server for debug connections.")
+	klog.V(1).Infoln("Starting admin server for debug connections.")
 	err = p.runAdminServer(o, server)
 	if err != nil {
 		return fmt.Errorf("failed to run the admin server: %v", err)
 	}
-
-	klog.Info("Starting health server for healthchecks.")
+	klog.V(1).Infoln("Starting health server for healthchecks.")
 	err = p.runHealthServer(o, server)
 	if err != nil {
 		return fmt.Errorf("failed to run the health server: %v", err)
@@ -375,7 +372,7 @@ func (p *Proxy) run(o *ProxyRunOptions) error {
 
 	stopCh := SetupSignalHandler()
 	<-stopCh
-	klog.Info("Shutting down server.")
+	klog.V(1).Infoln("Shutting down server.")
 
 	if masterStop != nil {
 		masterStop()
@@ -410,7 +407,7 @@ func (p *Proxy) runMasterServer(ctx context.Context, o *ProxyRunOptions, server 
 func (p *Proxy) runUDSMasterServer(ctx context.Context, o *ProxyRunOptions, s *server.ProxyServer) (StopFunc, error) {
 	if o.deleteUDSFile {
 		if err := os.Remove(o.udsName); err != nil && !os.IsNotExist(err) {
-			klog.Warningf("failed to delete file %s: %v", o.udsName, err)
+			klog.ErrorS(err, "failed to delete file", "file", o.udsName)
 		}
 	}
 	var stop StopFunc
@@ -436,14 +433,14 @@ func (p *Proxy) runUDSMasterServer(ctx context.Context, o *ProxyRunOptions, s *s
 			var lc net.ListenConfig
 			udsListener, err := lc.Listen(ctx, "unix", o.udsName)
 			if err != nil {
-				klog.Errorf("failed to listen on uds name %s: %v ", o.udsName, err)
+				klog.ErrorS(err, "failed to listen on uds", "name", o.udsName)
 			}
 			defer func() {
 				udsListener.Close()
 			}()
 			err = server.Serve(udsListener)
 			if err != nil {
-				klog.Errorf("failed to serve uds requests: %v", err)
+				klog.ErrorS(err, "failed to serve uds requests")
 			}
 		}()
 	}
@@ -514,7 +511,7 @@ func (p *Proxy) runMTLSMasterServer(ctx context.Context, o *ProxyRunOptions, s *
 		go func() {
 			err := server.ListenAndServeTLS("", "") // empty files defaults to tlsConfig
 			if err != nil {
-				klog.Errorf("failed to listen on master port %v", err)
+				klog.ErrorS(err, "failed to listen on master port")
 			}
 		}()
 	}
@@ -568,9 +565,9 @@ func (p *Proxy) runAdminServer(o *ProxyRunOptions, server *server.ProxyServer) e
 	go func() {
 		err := adminServer.ListenAndServe()
 		if err != nil {
-			klog.Warningf("admin server received %v.\n", err)
+			klog.ErrorS(err, "admin server could not listen")
 		}
-		klog.Warningf("Admin server stopped listening\n")
+		klog.V(1).Infoln("Admin server stopped listening")
 	}()
 
 	return nil
@@ -603,9 +600,9 @@ func (p *Proxy) runHealthServer(o *ProxyRunOptions, server *server.ProxyServer) 
 	go func() {
 		err := healthServer.ListenAndServe()
 		if err != nil {
-			klog.Warningf("health server received %v.\n", err)
+			klog.ErrorS(err, "health server could not listen")
 		}
-		klog.Warningf("Health server stopped listening\n")
+		klog.V(1).Infoln("Health server stopped listening")
 	}()
 
 	return nil

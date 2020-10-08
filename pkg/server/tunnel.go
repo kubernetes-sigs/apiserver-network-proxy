@@ -35,9 +35,9 @@ type Tunnel struct {
 }
 
 func (t *Tunnel) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	klog.Infof("Received %s request to %q from userAgent %s", r.Method, r.Host, r.UserAgent())
+	klog.V(2).InfoS("Received request for host", "method", r.Method, "host", r.Host, "userAgent", r.UserAgent())
 	if r.TLS != nil {
-		klog.Infof("TLS CommonName: %v", r.TLS.PeerCertificates[0].Subject.CommonName)
+		klog.V(2).InfoS("TLS", "commonName", r.TLS.PeerCertificates[0].Subject.CommonName)
 	}
 	if r.Method != http.MethodConnect {
 		http.Error(w, "this proxy only supports CONNECT passthrough", http.StatusMethodNotAllowed)
@@ -68,7 +68,7 @@ func (t *Tunnel) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			},
 		},
 	}
-	klog.Infof("Set pending(rand=%d) to %v", random, w)
+	klog.V(4).InfoS("Set pending", "random", random, "value", w)
 	backend, err := t.Server.BackendManager.Backend(context.TODO())
 	if err != nil {
 		http.Error(w, fmt.Sprintf("currently no tunnels available: %v", err), http.StatusInternalServerError)
@@ -84,17 +84,17 @@ func (t *Tunnel) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	t.Server.PendingDial.Add(random, connection)
 	if err := backend.Send(dialRequest); err != nil {
-		klog.Errorf("failed to tunnel dial request %v", err)
+		klog.ErrorS(err, "failed to tunnel dial request")
 		return
 	}
 	ctxt := backend.Context()
 	if ctxt.Err() != nil {
-		klog.Errorf("context reports error %v", err)
+		klog.ErrorS(err, "context reports failure")
 	}
 
 	select {
 	case <-ctxt.Done():
-		klog.Errorf("context reports done!!!")
+		klog.V(5).Infoln("context reports done")
 	default:
 	}
 
@@ -104,7 +104,7 @@ func (t *Tunnel) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	defer conn.Close()
 
-	klog.Infof("Starting proxy to %q", r.Host)
+	klog.V(3).InfoS("Starting proxy to host", "host", r.Host)
 	pkt := make([]byte, 1<<12)
 
 	connID := connection.connectID
@@ -115,11 +115,11 @@ func (t *Tunnel) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		n, err := bufrw.Read(pkt[:])
 		acc += n
 		if err == io.EOF {
-			klog.Warningf("EOF from %v", r.Host)
+			klog.V(1).InfoS("EOF from host", "host", r.Host)
 			break
 		}
 		if err != nil {
-			klog.Errorf("Received error on connection %v", err)
+			klog.ErrorS(err, "Received failure on connection")
 			break
 		}
 
@@ -134,11 +134,15 @@ func (t *Tunnel) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 		err = backend.Send(packet)
 		if err != nil {
-			klog.Errorf("error sending packet %v", err)
+			klog.ErrorS(err, "error sending packet")
 			break
 		}
-		klog.Infof("Forwarding %d (total %d) bytes of DATA on tunnel for agentID %s, connID %d", n, acc, connection.agentID, connection.connectID)
+		klog.V(5).InfoS("Forwarding data on tunnel to agent",
+			"bytes", n,
+			"totalBytes", acc,
+			"agentID", connection.agentID,
+			"connectionID", connection.connectID)
 	}
 
-	klog.Infof("Stopping transfer to %q, agentID %s, connID %d", r.Host, agentID, connID)
+	klog.V(5).InfoS("Stopping transfer to host", "host", r.Host, "agentID", agentID, "connectionID", connID)
 }

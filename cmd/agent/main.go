@@ -105,17 +105,17 @@ func (o *GrpcProxyAgentOptions) Flags() *pflag.FlagSet {
 }
 
 func (o *GrpcProxyAgentOptions) Print() {
-	klog.Warningf("AgentCert set to \"%s\".\n", o.agentCert)
-	klog.Warningf("AgentKey set to \"%s\".\n", o.agentKey)
-	klog.Warningf("CACert set to \"%s\".\n", o.caCert)
-	klog.Warningf("ProxyServerHost set to \"%s\".\n", o.proxyServerHost)
-	klog.Warningf("ProxyServerPort set to %d.\n", o.proxyServerPort)
-	klog.Warningf("HealthServerPort set to %d.\n", o.healthServerPort)
-	klog.Warningf("AdminServerPort set to %d.\n", o.adminServerPort)
-	klog.Warningf("AgentID set to %s.\n", o.agentID)
-	klog.Warningf("SyncInterval set to %v.\n", o.syncInterval)
-	klog.Warningf("ProbeInterval set to %v.\n", o.probeInterval)
-	klog.Warningf("ServiceAccountTokenPath set to \"%s\".\n", o.serviceAccountTokenPath)
+	klog.V(1).Infof("AgentCert set to %q.\n", o.agentCert)
+	klog.V(1).Infof("AgentKey set to %q.\n", o.agentKey)
+	klog.V(1).Infof("CACert set to %q.\n", o.caCert)
+	klog.V(1).Infof("ProxyServerHost set to %q.\n", o.proxyServerHost)
+	klog.V(1).Infof("ProxyServerPort set to %d.\n", o.proxyServerPort)
+	klog.V(1).Infof("HealthServerPort set to %d.\n", o.healthServerPort)
+	klog.V(1).Infof("AdminServerPort set to %d.\n", o.adminServerPort)
+	klog.V(1).Infof("AgentID set to %s.\n", o.agentID)
+	klog.V(1).Infof("SyncInterval set to %v.\n", o.syncInterval)
+	klog.V(1).Infof("ProbeInterval set to %v.\n", o.probeInterval)
+	klog.V(1).Infof("ServiceAccountTokenPath set to %q.\n", o.serviceAccountTokenPath)
 }
 
 func (o *GrpcProxyAgentOptions) Validate() error {
@@ -249,9 +249,9 @@ func (a *Agent) runHealthServer(o *GrpcProxyAgentOptions) error {
 	go func() {
 		err := healthServer.ListenAndServe()
 		if err != nil {
-			klog.Warningf("health server received %v.\n", err)
+			klog.ErrorS(err, "health server could not listen")
 		}
-		klog.Warningf("Health server stopped listening\n")
+		klog.V(0).Infoln("Health server stopped listening")
 	}()
 
 	return nil
@@ -278,9 +278,9 @@ func (a *Agent) runAdminServer(o *GrpcProxyAgentOptions) error {
 	go func() {
 		err := adminServer.ListenAndServe()
 		if err != nil {
-			klog.Warningf("admin server received %v.\n", err)
+			klog.ErrorS(err, "admin server could not listen")
 		}
-		klog.Warningf("Admin server stopped listening\n")
+		klog.V(0).Infoln("Admin server stopped listening")
 	}()
 
 	return nil

@@ -211,7 +211,7 @@ func pipe() (agent.AgentService_ConnectClient, agent.AgentService_ConnectClient)
 }
 
 func (s *fakeStream) Send(packet *client.Packet) error {
-	klog.Infof("[DEBUG] send packet %+v", packet)
+	klog.V(4).InfoS("[DEBUG] send", "packet", packet)
 	s.w <- packet
 	return nil
 }
@@ -219,7 +219,7 @@ func (s *fakeStream) Send(packet *client.Packet) error {
 func (s *fakeStream) Recv() (*client.Packet, error) {
 	select {
 	case pkg := <-s.r:
-		klog.Infof("[DEBUG] recv packet %+v", pkg)
+		klog.V(4).InfoS("[DEBUG] recv", "packet", pkg)
 		return pkg, nil
 	case <-time.After(5 * time.Second):
 		return nil, errors.New("timeout recv")

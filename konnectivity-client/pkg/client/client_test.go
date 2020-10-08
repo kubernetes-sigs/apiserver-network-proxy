@@ -176,7 +176,7 @@ func pipe() (*fakeStream, *fakeStream) {
 }
 
 func (s *fakeStream) Send(packet *client.Packet) error {
-	klog.Infof("[DEBUG] send packet %+v", packet)
+	klog.V(4).InfoS("[DEBUG] send", "packet", packet)
 	if packet == nil {
 		return nil
 	}
@@ -187,7 +187,7 @@ func (s *fakeStream) Send(packet *client.Packet) error {
 func (s *fakeStream) Recv() (*client.Packet, error) {
 	select {
 	case pkt := <-s.r:
-		klog.Infof("[DEBUG] recv packet %+v", pkt)
+		klog.V(4).InfoS("[DEBUG] recv", "packet", pkt)
 		return pkt, nil
 	case <-time.After(5 * time.Second):
 		return nil, errors.New("timeout recv")

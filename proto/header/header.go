@@ -29,5 +29,5 @@ const (
 	AuthenticationTokenContextSchemePrefix = "Bearer "
 
 	// UserAgent is used to provide the client information in a proxy request
-	UserAgent   = "user-agent"
+	UserAgent = "user-agent"
 )

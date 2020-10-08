@@ -157,14 +157,14 @@ func (a *AgentClient) Connect() (int, error) {
 	a.conn = conn
 	a.stream = stream
 	a.serverID = serverID
-	klog.Infof("Connect to server %s", serverID)
+	klog.V(2).InfoS("Connect to", "server", serverID)
 	return serverCount, nil
 }
 
 // Close closes the underlying connection.
 func (a *AgentClient) Close() {
 	if a.conn == nil {
-		klog.Warning("Unexpected empty AgentClient.conn")
+		klog.Errorln("Unexpected empty AgentClient.conn")
 	}
 	a.conn.Close()
 	close(a.stopCh)
@@ -226,7 +226,7 @@ func (a *AgentClient) initializeAuthContext(ctx context.Context) (context.Contex
 
 	// load current service account's token value
 	if b, err = ioutil.ReadFile(a.serviceAccountTokenPath); err != nil {
-		klog.Errorf("Failed to read token from %q. err: %v", a.serviceAccountTokenPath, err)
+		klog.ErrorS(err, "Failed to read token", "path", a.serviceAccountTokenPath)
 		return nil, err
 	}
 	ctx = metadata.AppendToOutgoingContext(ctx, header.AuthenticationTokenContextKey, header.AuthenticationTokenContextSchemePrefix+string(b))
@@ -248,12 +248,12 @@ func (a *AgentClient) initializeAuthContext(ctx context.Context) (context.Contex
 // The requests include things like opening a connection to a server,
 // streaming data and close the connection.
 func (a *AgentClient) Serve() {
-	klog.Infof("Start serving for serverID %s", a.serverID)
+	klog.V(2).InfoS("Start serving", "serverID", a.serverID)
 	go a.probe()
 	for {
 		select {
 		case <-a.stopCh:
-			klog.Info("stop agent client.")
+			klog.V(2).Infoln("stop agent client.")
 			return
 		default:
 		}
@@ -261,23 +261,23 @@ func (a *AgentClient) Serve() {
 		pkt, err := a.Recv()
 		if err != nil {
 			if err == io.EOF {
-				klog.Info("received EOF, exit")
+				klog.V(2).Infoln("received EOF, exit")
 				return
 			}
-			klog.Warningf("stream read error: %v", err)
+			klog.ErrorS(err, "could not read stream")
 			return
 		}
 
-		klog.Infof("[tracing] recv packet, type: %s", pkt.Type)
+		klog.V(5).InfoS("[tracing] recv packet", "type", pkt.Type)
 
 		if pkt == nil {
-			klog.Warningf("empty packet received")
+			klog.V(3).Infoln("empty packet received")
 			continue
 		}
 
 		switch pkt.Type {
 		case client.PacketType_DIAL_REQ:
-			klog.Info("received DIAL_REQ")
+			klog.V(4).Infoln("received DIAL_REQ")
 			resp := &client.Packet{
 				Type:    client.PacketType_DIAL_RSP,
 				Payload: &client.Packet_DialResponse{DialResponse: &client.DialResponse{}},
@@ -291,7 +291,7 @@ func (a *AgentClient) Serve() {
 			if err != nil {
 				resp.GetDialResponse().Error = err.Error()
 				if err := a.Send(resp); err != nil {
-					klog.Warningf("stream send error: %v", err)
+					klog.ErrorS(err, "could not send stream")
 				}
 				continue
 			}
@@ -303,7 +303,7 @@ func (a *AgentClient) Serve() {
 				conn:   conn,
 				dataCh: dataCh,
 				cleanFunc: func() {
-					klog.Infof("close connection(id=%d)", connID)
+					klog.V(4).InfoS("close connection", "connectionID", connID)
 					resp := &client.Packet{
 						Type:    client.PacketType_CLOSE_RSP,
 						Payload: &client.Packet_CloseResponse{CloseResponse: &client.CloseResponse{}},
@@ -316,7 +316,7 @@ func (a *AgentClient) Serve() {
 					}
 
 					if err := a.Send(resp); err != nil {
-						klog.Warningf("close response send error: %v", err)
+						klog.ErrorS(err, "close response failure")
 					}
 
 					close(dataCh)
@@ -327,7 +327,7 @@ func (a *AgentClient) Serve() {
 
 			resp.GetDialResponse().ConnectID = connID
 			if err := a.Send(resp); err != nil {
-				klog.Warningf("stream send error: %v", err)
+				klog.ErrorS(err, "stream send failure")
 				continue
 			}
 
@@ -336,7 +336,7 @@ func (a *AgentClient) Serve() {
 
 		case client.PacketType_DATA:
 			data := pkt.GetData()
-			klog.Infof("received DATA(id=%d)", data.ConnectID)
+			klog.V(4).InfoS("received DATA", "connectionID", data.ConnectID)
 
 			ctx, ok := a.connManager.Get(data.ConnectID)
 			if ok {
@@ -347,7 +347,7 @@ func (a *AgentClient) Serve() {
 			closeReq := pkt.GetCloseRequest()
 			connID := closeReq.ConnectID
 
-			klog.Infof("received CLOSE_REQ(id=%d)", connID)
+			klog.V(4).InfoS("received CLOSE_REQ", "connectionID", connID)
 
 			ctx, ok := a.connManager.Get(connID)
 			if ok {
@@ -360,13 +360,13 @@ func (a *AgentClient) Serve() {
 				resp.GetCloseResponse().ConnectID = connID
 				resp.GetCloseResponse().Error = "Unknown connectID"
 				if err := a.Send(resp); err != nil {
-					klog.Warningf("close response send error: %v", err)
+					klog.ErrorS(err, "close response send failure", err)
 					continue
 				}
 			}
 
 		default:
-			klog.Warningf("unrecognized packet type: %+v", pkt)
+			klog.V(2).InfoS("unrecognized packet", "type", pkt)
 		}
 	}
 }
@@ -381,14 +381,14 @@ func (a *AgentClient) remoteToProxy(connID int64, ctx *connContext) {
 
 	for {
 		n, err := ctx.conn.Read(buf[:])
-		klog.Infof("received %d bytes from remote for connID[%d]", n, connID)
+		klog.V(4).InfoS("received data from remote", "bytes", n, "connID", connID)
 
 		if err == io.EOF {
-			klog.Info("connection EOF")
+			klog.V(2).Infoln("connection EOF")
 			return
 		} else if err != nil {
 			// Normal when receive a CLOSE_REQ
-			klog.Warningf("connection read error: %v", err)
+			klog.ErrorS(err, "connection read failure")
 			return
 		} else {
 			resp.Payload = &client.Packet_Data{Data: &client.Data{
@@ -396,7 +396,7 @@ func (a *AgentClient) remoteToProxy(connID int64, ctx *connContext) {
 				ConnectID: connID,
 			}}
 			if err := a.Send(resp); err != nil {
-				klog.Warningf("stream send error: %v", err)
+				klog.ErrorS(err, "stream send failure")
 			}
 		}
 	}
@@ -410,13 +410,13 @@ func (a *AgentClient) proxyToRemote(connID int64, ctx *connContext) {
 		for {
 			n, err := ctx.conn.Write(d[pos:])
 			if err == nil {
-				klog.Infof("[connID: %d] write last %d data to remote", connID, n)
+				klog.V(4).InfoS("write to remote", "connID", connID, "lastData", n)
 				break
 			} else if n > 0 {
-				klog.Infof("[connID: %d] write %d data to remote with error: %v", connID, n, err)
+				klog.ErrorS(err, "write to remote with failure", "connID", connID, "lastData", n)
 				pos += n
 			} else {
-				klog.Errorf("conn write error: %v", err)
+				klog.ErrorS(err, "conn write failure")
 				return
 			}
 		}
@@ -437,7 +437,7 @@ func (a *AgentClient) probe() {
 				continue
 			}
 		}
-		klog.Infof("Connection state %v, removing client used to connect to %v", a.conn.GetState(), a.serverID)
+		klog.V(1).InfoS("Removing client used for server connection", "state", a.conn.GetState(), "serverID", a.serverID)
 		a.cs.RemoveClient(a.serverID)
 		return
 	}

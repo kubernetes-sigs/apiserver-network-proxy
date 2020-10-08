@@ -122,7 +122,7 @@ func NewDefaultBackendStorage() *DefaultBackendStorage {
 
 // AddBackend adds a backend.
 func (s *DefaultBackendStorage) AddBackend(agentID string, conn agent.AgentService_ConnectServer) Backend {
-	klog.Infof("register Backend %v for agentID %s", conn, agentID)
+	klog.V(2).InfoS("Register backend for agent", "connection", conn, "agentID", agentID)
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	_, ok := s.backends[agentID]
@@ -130,7 +130,7 @@ func (s *DefaultBackendStorage) AddBackend(agentID string, conn agent.AgentServi
 	if ok {
 		for _, v := range s.backends[agentID] {
 			if v.conn == conn {
-				klog.Warningf("this should not happen. Adding existing connection %v for agentID %s", conn, agentID)
+				klog.V(1).InfoS("This should not happen. Adding existing backend for agent", "connection", conn, "agentID", agentID)
 				return v
 			}
 		}
@@ -144,12 +144,12 @@ func (s *DefaultBackendStorage) AddBackend(agentID string, conn agent.AgentServi
 
 // RemoveBackend removes a backend.
 func (s *DefaultBackendStorage) RemoveBackend(agentID string, conn agent.AgentService_ConnectServer) {
-	klog.Infof("remove Backend %v for agentID %s", conn, agentID)
+	klog.V(2).InfoS("Remove connection for agent", "connection", conn, "agentID", agentID)
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	backends, ok := s.backends[agentID]
 	if !ok {
-		klog.Warningf("can't find agentID %s in the backends", agentID)
+		klog.V(1).InfoS("Cannot find agent in backends", "agentID", agentID)
 		return
 	}
 	var found bool
@@ -157,7 +157,7 @@ func (s *DefaultBackendStorage) RemoveBackend(agentID string, conn agent.AgentSe
 		if c.conn == conn {
 			s.backends[agentID] = append(s.backends[agentID][:i], s.backends[agentID][i+1:]...)
 			if i == 0 && len(s.backends[agentID]) != 0 {
-				klog.Warningf("this should not happen. Removed connection %v that is not the first connection, remaining connections are %v", conn, s.backends[agentID])
+				klog.V(1).InfoS("This should not happen. Removed connection that is not the first connection", "connection", conn, "remainingConnections", s.backends[agentID])
 			}
 			found = true
 		}
@@ -173,7 +173,7 @@ func (s *DefaultBackendStorage) RemoveBackend(agentID string, conn agent.AgentSe
 		}
 	}
 	if !found {
-		klog.Errorf("can't find conn %v for agentID %s in the backends", conn, agentID)
+		klog.V(1).InfoS("Cannot find connection for agent in backends", "connection", conn, "agentID", agentID)
 	}
 }
 
@@ -200,7 +200,7 @@ func (s *DefaultBackendStorage) GetRandomBackend() (Backend, error) {
 		return nil, &ErrNotFound{}
 	}
 	agentID := s.agentIDs[s.random.Intn(len(s.agentIDs))]
-	klog.Infof("pick agentID=%s as backend", agentID)
+	klog.V(4).InfoS("Pick agent as backend", "agentID", agentID)
 	// always return the first connection to an agent, because the agent
 	// will close later connections if there are multiple.
 	return s.backends[agentID][0], nil

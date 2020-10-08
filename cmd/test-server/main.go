@@ -80,7 +80,7 @@ func (o *TestServerRunOptions) Validate() error {
 
 func newTestServerRunOptions() *TestServerRunOptions {
 	o := TestServerRunOptions{
-		serverPort:             8000,
+		serverPort: 8000,
 	}
 	return &o
 }

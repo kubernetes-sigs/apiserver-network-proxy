@@ -148,7 +148,7 @@ func (cs *ClientSet) sync() {
 	var duration time.Duration
 	for {
 		if err := cs.syncOnce(); err != nil {
-			klog.Error(err)
+			klog.ErrorS(err, "cannot sync once")
 			duration = backoff.Step()
 		} else {
 			backoff = cs.resetBackoff()
@@ -172,17 +172,17 @@ func (cs *ClientSet) syncOnce() error {
 		return err
 	}
 	if cs.serverCount != 0 && cs.serverCount != serverCount {
-		klog.Warningf("current server count is %d, server %s suggests there are %d servers",
-			cs.serverCount, c.serverID, serverCount)
+		klog.V(2).InfoS("Server count change suggestion by server",
+			"current", cs.serverCount, "serverID", c.serverID, "actual", serverCount)
 
 	}
 	cs.serverCount = serverCount
 	if err := cs.AddClient(c.serverID, c); err != nil {
-		klog.Infof("closing connection: %v", err)
+		klog.ErrorS(err, "closing connection failure when adding a client")
 		c.Close()
 		return nil
 	}
-	klog.Infof("sync added client connecting to proxy server %s", c.serverID)
+	klog.V(2).InfoS("sync added client connecting to proxy server", "serverID", c.serverID)
 	go c.Serve()
 	return nil
 }
