@@ -29,6 +29,7 @@ import (
 	"os"
 	"os/signal"
 	"runtime"
+	"sync"
 	"syscall"
 
 	"github.com/google/uuid"
@@ -45,6 +46,8 @@ import (
 	"sigs.k8s.io/apiserver-network-proxy/pkg/util"
 	"sigs.k8s.io/apiserver-network-proxy/proto/agent"
 )
+
+var udsListenerLock sync.Mutex
 
 func main() {
 	// flag.CommandLine.Parse(os.Args[1:])
@@ -397,6 +400,19 @@ func SetupSignalHandler() (stopCh <-chan struct{}) {
 	return stop
 }
 
+func getUDSListener(ctx context.Context, udsName string) (net.Listener, error) {
+	udsListenerLock.Lock()
+	defer udsListenerLock.Unlock()
+	oldUmask := syscall.Umask(0007)
+	defer syscall.Umask(oldUmask)
+	var lc net.ListenConfig
+	lis, err := lc.Listen(ctx, "unix", udsName)
+	if err != nil {
+		return nil, fmt.Errorf("failed to listen(unix) name %s: %v", udsName, err)
+	}
+	return lis, nil
+}
+
 func (p *Proxy) runMasterServer(ctx context.Context, o *ProxyRunOptions, server *server.ProxyServer) (StopFunc, error) {
 	if o.udsName != "" {
 		return p.runUDSMasterServer(ctx, o, server)
@@ -414,10 +430,9 @@ func (p *Proxy) runUDSMasterServer(ctx context.Context, o *ProxyRunOptions, s *s
 	if o.mode == "grpc" {
 		grpcServer := grpc.NewServer()
 		client.RegisterProxyServiceServer(grpcServer, s)
-		var lc net.ListenConfig
-		lis, err := lc.Listen(ctx, "unix", o.udsName)
+		lis, err := getUDSListener(ctx, o.udsName)
 		if err != nil {
-			return nil, fmt.Errorf("failed to listen(unix) name %s: %v", o.udsName, err)
+			return nil, fmt.Errorf("failed to get uds listener: %v", err)
 		}
 		go grpcServer.Serve(lis)
 		stop = grpcServer.GracefulStop
@@ -430,10 +445,9 @@ func (p *Proxy) runUDSMasterServer(ctx context.Context, o *ProxyRunOptions, s *s
 		}
 		stop = func() { server.Shutdown(ctx) }
 		go func() {
-			var lc net.ListenConfig
-			udsListener, err := lc.Listen(ctx, "unix", o.udsName)
+			udsListener, err := getUDSListener(ctx, o.udsName)
 			if err != nil {
-				klog.ErrorS(err, "failed to listen on uds", "name", o.udsName)
+				klog.ErrorS(err, "failed to get uds listener")
 			}
 			defer func() {
 				udsListener.Close()
