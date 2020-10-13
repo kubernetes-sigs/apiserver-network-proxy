@@ -47,6 +47,7 @@ func main() {
 	flags.AddFlagSet(o.Flags())
 	local := flag.NewFlagSet(os.Args[0], flag.ExitOnError)
 	klog.InitFlags(local)
+	local.Set("v", "4")
 	local.VisitAll(func(fl *flag.Flag) {
 		fl.Name = util.Normalize(fl.Name)
 		flags.AddGoFlag(fl)
@@ -269,7 +270,7 @@ func (c *Client) makeRequest(o *GrpcProxyClientOptions, client *http.Client) err
 	if err != nil {
 		return fmt.Errorf("failed to read response from client, got %v", err)
 	}
-	klog.V(4).Infoln(string(data))
+	klog.V(4).Infof("HTML Response:\n%s\n", string(data))
 	return nil
 }
 
