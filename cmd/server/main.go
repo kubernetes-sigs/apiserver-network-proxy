@@ -292,7 +292,7 @@ func newProxyRunOptions() *ProxyRunOptions {
 		serverPort:                8090,
 		agentPort:                 8091,
 		healthPort:                8092,
-		adminPort:                 8093,
+		adminPort:                 8095,
 		enableProfiling:           false,
 		enableContentionProfiling: false,
 		serverID:                  uuid.New().String(),
