@@ -77,13 +77,13 @@ type GrpcProxyAgentOptions struct {
 	serviceAccountTokenPath string
 }
 
-func (o *GrpcProxyAgentOptions) ClientSetConfig(dialOption grpc.DialOption) *agent.ClientSetConfig {
+func (o *GrpcProxyAgentOptions) ClientSetConfig(dialOptions ...grpc.DialOption) *agent.ClientSetConfig {
 	return &agent.ClientSetConfig{
 		Address:                 fmt.Sprintf("%s:%d", o.proxyServerHost, o.proxyServerPort),
 		AgentID:                 o.agentID,
 		SyncInterval:            o.syncInterval,
 		ProbeInterval:           o.probeInterval,
-		DialOption:              dialOption,
+		DialOptions:             dialOptions,
 		ServiceAccountTokenPath: o.serviceAccountTokenPath,
 	}
 }

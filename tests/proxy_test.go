@@ -364,7 +364,7 @@ func runAgentWithID(agentID, addr string, stopCh <-chan struct{}) *agent.ClientS
 		AgentID:       agentID,
 		SyncInterval:  100 * time.Millisecond,
 		ProbeInterval: 100 * time.Millisecond,
-		DialOption:    grpc.WithInsecure(),
+		DialOptions:   []grpc.DialOption{grpc.WithInsecure()},
 	}
 	client := cc.NewAgentClientSet(stopCh)
 	client.Serve()
