@@ -26,6 +26,7 @@ spec:
       "--agent-port=8091",
       "--health-port=8092",
       "--admin-port=8093",
+      "--keepalive-time=1h",
       "--mode=http-connect",
       "--agent-namespace=kube-system",
       "--agent-service-account=konnectivity-agent",

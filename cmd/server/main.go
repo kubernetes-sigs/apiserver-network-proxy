@@ -31,6 +31,7 @@ import (
 	"runtime"
 	"sync"
 	"syscall"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
@@ -38,6 +39,7 @@ import (
 	"github.com/spf13/pflag"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials"
+	"google.golang.org/grpc/keepalive"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/tools/clientcmd"
 	"k8s.io/klog/v2"
@@ -92,6 +94,9 @@ type ProxyRunOptions struct {
 	adminPort uint
 	// Port we listen for health connections on.
 	healthPort uint
+	// After a duration of this time if the server doesn't see any activity it
+	// pings the client to see if the transport is still alive.
+	keepaliveTime time.Duration
 	// Enables pprof at host:adminPort/debug/pprof.
 	enableProfiling bool
 	// If enableProfiling is true, this enables the lock contention
@@ -127,6 +132,7 @@ func (o *ProxyRunOptions) Flags() *pflag.FlagSet {
 	flags.UintVar(&o.agentPort, "agent-port", o.agentPort, "Port we listen for agent connections on.")
 	flags.UintVar(&o.adminPort, "admin-port", o.adminPort, "Port we listen for admin connections on.")
 	flags.UintVar(&o.healthPort, "health-port", o.healthPort, "Port we listen for health connections on.")
+	flags.DurationVar(&o.keepaliveTime, "keepalive-time", o.keepaliveTime, "Time for gRPC server keepalive.")
 	flags.BoolVar(&o.enableProfiling, "enable-profiling", o.enableProfiling, "enable pprof at host:admin-port/debug/pprof")
 	flags.BoolVar(&o.enableContentionProfiling, "enable-contention-profiling", o.enableContentionProfiling, "enable contention profiling at host:admin-port/debug/pprof/block. \"--enable-profiling\" must also be set.")
 	flags.StringVar(&o.serverID, "server-id", o.serverID, "The unique ID of this server.")
@@ -152,6 +158,7 @@ func (o *ProxyRunOptions) Print() {
 	klog.V(1).Infof("Agent port set to %d.\n", o.agentPort)
 	klog.V(1).Infof("Admin port set to %d.\n", o.adminPort)
 	klog.V(1).Infof("Health port set to %d.\n", o.healthPort)
+	klog.V(1).Infof("Keepalive time set to %v.\n", o.keepaliveTime)
 	klog.V(1).Infof("EnableProfiling set to %v.\n", o.enableProfiling)
 	klog.V(1).Infof("EnableContentionProfiling set to %v.\n", o.enableContentionProfiling)
 	klog.V(1).Infof("ServerID set to %s.\n", o.serverID)
@@ -293,6 +300,7 @@ func newProxyRunOptions() *ProxyRunOptions {
 		agentPort:                 8091,
 		healthPort:                8092,
 		adminPort:                 8095,
+		keepaliveTime:             1 * time.Hour,
 		enableProfiling:           false,
 		enableContentionProfiling: false,
 		serverID:                  uuid.New().String(),
@@ -541,8 +549,11 @@ func (p *Proxy) runAgentServer(o *ProxyRunOptions, server *server.ProxyServer) e
 	}
 
 	addr := fmt.Sprintf(":%d", o.agentPort)
-	serverOption := grpc.Creds(credentials.NewTLS(tlsConfig))
-	grpcServer := grpc.NewServer(serverOption)
+	serverOptions := []grpc.ServerOption {
+		grpc.Creds(credentials.NewTLS(tlsConfig)),
+		grpc.KeepaliveParams(keepalive.ServerParameters{Time: o.keepaliveTime}),
+	}
+	grpcServer := grpc.NewServer(serverOptions...)
 	agent.RegisterAgentServiceServer(grpcServer, server)
 	lis, err := net.Listen("tcp", addr)
 	if err != nil {
