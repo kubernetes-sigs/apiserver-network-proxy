@@ -358,7 +358,7 @@ func (p *Proxy) run(o *ProxyRunOptions) error {
 		KubernetesClient:       k8sClient,
 		AuthenticationAudience: o.authenticationAudience,
 	}
-	server := server.NewProxyServer(o.serverID, int(o.serverCount), authOpt)
+	server := server.NewProxyServer(o.serverID, int(o.serverCount), authOpt, o.keepaliveTime)
 	klog.V(1).Infoln("Starting master server for client connections.")
 	masterStop, err := p.runMasterServer(ctx, o, server)
 	if err != nil {

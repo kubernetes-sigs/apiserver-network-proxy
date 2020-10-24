@@ -60,7 +60,8 @@ bin:
 .PHONY: build
 build: bin/proxy-agent bin/proxy-server bin/proxy-test-client bin/http-test-server
 
-bin/proxy-agent: proto/agent/agent.pb.go konnectivity-client/proto/client/client.pb.go bin cmd/agent/main.go
+agent_targets := $(wildcard cmd/agent/*.go pkg/agent/*.go pkg/util/*.go)
+bin/proxy-agent: proto/agent/agent.pb.go konnectivity-client/proto/client/client.pb.go bin $(agent_targets)
 	GO111MODULE=on go build -o bin/proxy-agent cmd/agent/main.go
 
 bin/proxy-test-client: konnectivity-client/proto/client/client.pb.go bin cmd/client/main.go
@@ -69,7 +70,8 @@ bin/proxy-test-client: konnectivity-client/proto/client/client.pb.go bin cmd/cli
 bin/http-test-server: bin cmd/test-server/main.go
 	GO111MODULE=on go build -o bin/http-test-server cmd/test-server/main.go
 
-bin/proxy-server: proto/agent/agent.pb.go konnectivity-client/proto/client/client.pb.go bin cmd/server/main.go
+server_targets := $(wildcard cmd/server/*.go pkg/server/*.go pkg/util/*.go)
+bin/proxy-server: proto/agent/agent.pb.go konnectivity-client/proto/client/client.pb.go bin $(server_targets)
 	GO111MODULE=on go build -o bin/proxy-server cmd/server/main.go
 
 ## --------------------------------------

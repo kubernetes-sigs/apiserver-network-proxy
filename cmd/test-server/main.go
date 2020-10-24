@@ -144,7 +144,7 @@ func SetupSignalHandler() (stopCh <-chan struct{}) {
 }
 
 func returnSuccess(w http.ResponseWriter, req *http.Request) {
-	fmt.Fprintf(w, "<!DOCTYPE html>\n<html>\n    <head>\n        <title>Success</title>\n    </head>\n    <body>\n        <p>The success test page!</p>\n    </body>\n</html>")
+	fmt.Fprintf(w, "<!DOCTYPE html>\n<html>\n    <head>\n        <title>Success on Jura</title>\n    </head>\n    <body>\n        <p>The success test page!</p>\n    </body>\n</html>")
 }
 
 func returnError(w http.ResponseWriter, req *http.Request) {

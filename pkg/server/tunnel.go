@@ -69,7 +69,7 @@ func (t *Tunnel) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		},
 	}
 	klog.V(4).InfoS("Set pending", "random", random, "value", w)
-	backend, err := t.Server.BackendManager.Backend(context.TODO())
+	backend, agentID, err := t.Server.BackendManager.Backend(context.TODO())
 	if err != nil {
 		http.Error(w, fmt.Sprintf("currently no tunnels available: %v", err), http.StatusInternalServerError)
 		return
@@ -79,6 +79,7 @@ func (t *Tunnel) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		Mode:      "http-connect",
 		HTTP:      conn,
 		connected: connected,
+		agentID:   agentID,
 		start:     time.Now(),
 		backend:   backend,
 	}
@@ -108,7 +109,12 @@ func (t *Tunnel) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	pkt := make([]byte, 1<<12)
 
 	connID := connection.connectID
-	agentID := connection.agentID
+	newAgentID := connection.agentID
+	if agentID != newAgentID {
+		klog.V(1).InfoS("agent ID mismatch setting up tunnel",
+			"original agentID", agentID,
+			"new agentID", newAgentID)
+	}
 	var acc int
 
 	for {

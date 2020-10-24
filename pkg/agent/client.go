@@ -130,27 +130,32 @@ func newAgentClient(address, agentID string, cs *ClientSet, opts ...grpc.DialOpt
 func (a *AgentClient) Connect() (int, error) {
 	conn, err := grpc.Dial(a.address, a.opts...)
 	if err != nil {
+		klog.V(2).InfoS("WRF: Failed to dial", "address", a.address)
 		return 0, err
 	}
 	ctx := metadata.AppendToOutgoingContext(context.Background(), header.AgentID, a.agentID)
 	if a.serviceAccountTokenPath != "" {
 		if ctx, err = a.initializeAuthContext(ctx); err != nil {
 			conn.Close()
+			klog.V(2).InfoS("WRF: Failed to init auth", "address", a.address)
 			return 0, err
 		}
 	}
 	stream, err := agent.NewAgentServiceClient(conn).Connect(ctx)
 	if err != nil {
+		klog.V(2).InfoS("WRF: Failed to connect stream", "address", a.address)
 		conn.Close()
 		return 0, err
 	}
 	serverID, err := serverID(stream)
 	if err != nil {
+		klog.V(2).InfoS("WRF: Failed to get server ID", "address", a.address)
 		conn.Close()
 		return 0, err
 	}
 	serverCount, err := serverCount(stream)
 	if err != nil {
+		klog.V(2).InfoS("WRF: Failed to get server count", "address", a.address)
 		conn.Close()
 		return 0, err
 	}
