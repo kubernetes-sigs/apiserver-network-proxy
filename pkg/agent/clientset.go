@@ -43,7 +43,7 @@ type ClientSet struct {
 	// proxy server.
 	probeInterval time.Duration // The interval by which the agent
 	// periodically checks if its connections to the proxy server is ready.
-	dialOption grpc.DialOption
+	dialOptions []grpc.DialOption
 	// file path contains service account token
 	serviceAccountTokenPath string
 	// channel to signal shutting down the client set. Primarily for test.
@@ -110,7 +110,7 @@ type ClientSetConfig struct {
 	AgentID                 string
 	SyncInterval            time.Duration
 	ProbeInterval           time.Duration
-	DialOption              grpc.DialOption
+	DialOptions             []grpc.DialOption
 	ServiceAccountTokenPath string
 }
 
@@ -121,14 +121,14 @@ func (cc *ClientSetConfig) NewAgentClientSet(stopCh <-chan struct{}) *ClientSet 
 		address:                 cc.Address,
 		syncInterval:            cc.SyncInterval,
 		probeInterval:           cc.ProbeInterval,
-		dialOption:              cc.DialOption,
+		dialOptions:             cc.DialOptions,
 		serviceAccountTokenPath: cc.ServiceAccountTokenPath,
 		stopCh:                  stopCh,
 	}
 }
 
 func (cs *ClientSet) newAgentClient() (*AgentClient, int, error) {
-	return newAgentClient(cs.address, cs.agentID, cs, cs.dialOption)
+	return newAgentClient(cs.address, cs.agentID, cs, cs.dialOptions...)
 }
 
 func (cs *ClientSet) resetBackoff() *wait.Backoff {
