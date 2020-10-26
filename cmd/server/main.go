@@ -29,6 +29,7 @@ import (
 	"os"
 	"os/signal"
 	"runtime"
+	"strings"
 	"sync"
 	"syscall"
 	"time"
@@ -149,7 +150,7 @@ func (o *ProxyRunOptions) Flags() *pflag.FlagSet {
 	flags.StringVar(&o.agentServiceAccount, "agent-service-account", o.agentServiceAccount, "Expected agent's service account during agent authentication (used with agent-namespace, authentication-audience, kubeconfig).")
 	flags.StringVar(&o.kubeconfigPath, "kubeconfig", o.kubeconfigPath, "absolute path to the kubeconfig file (used with agent-namespace, agent-service-account, authentication-audience).")
 	flags.StringVar(&o.authenticationAudience, "authentication-audience", o.authenticationAudience, "Expected agent's token authentication audience (used with agent-namespace, agent-service-account, kubeconfig).")
-	flags.StringVar(&o.proxyStrategies, "proxy-strategies", o.proxyStrategies, "The list of proxy strategies used by the server. e.g., \"destHost,default\"")
+	flags.StringVar(&o.proxyStrategies, "proxy-strategies", o.proxyStrategies, "The list of proxy strategies used by the server to pick a backend/tunnel. e.g., \"destHost,\"")
 	return flags
 }
 
@@ -176,7 +177,7 @@ func (o *ProxyRunOptions) Print() {
 	klog.V(1).Infof("AgentServiceAccount set to %q.\n", o.agentServiceAccount)
 	klog.V(1).Infof("AuthenticationAudience set to %q.\n", o.authenticationAudience)
 	klog.V(1).Infof("KubeconfigPath set to %q.\n", o.kubeconfigPath)
-	klog.V(1).Infof("ProxyStrategies set to %s.\n", o.proxyStrategies)
+	klog.V(1).Infof("ProxyStrategies set to %q.\n", o.proxyStrategies)
 }
 
 func (o *ProxyRunOptions) Validate() error {
@@ -292,6 +293,14 @@ func (o *ProxyRunOptions) Validate() error {
 		}
 	}
 
+	// validate the proxy strategies
+	pss := strings.Split(o.proxyStrategies, ",")
+	for _, ps := range pss {
+		if ps != string(server.ProxyStrategyDestHost) {
+			return fmt.Errorf("unknown proxy strategy: %s, available strategy is: destHost", ps)
+		}
+	}
+
 	return nil
 }
 
@@ -319,7 +328,7 @@ func newProxyRunOptions() *ProxyRunOptions {
 		agentServiceAccount:       "",
 		kubeconfigPath:            "",
 		authenticationAudience:    "",
-		proxyStrategies:           "default",
+		proxyStrategies:           "",
 	}
 	return &o
 }
@@ -562,7 +571,7 @@ func (p *Proxy) runAgentServer(o *ProxyRunOptions, server *server.ProxyServer) e
 	}
 
 	addr := fmt.Sprintf(":%d", o.agentPort)
-	serverOptions := []grpc.ServerOption {
+	serverOptions := []grpc.ServerOption{
 		grpc.Creds(credentials.NewTLS(tlsConfig)),
 		grpc.KeepaliveParams(keepalive.ServerParameters{Time: o.keepaliveTime}),
 	}

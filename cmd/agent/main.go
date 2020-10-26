@@ -71,10 +71,10 @@ type GrpcProxyAgentOptions struct {
 	healthServerPort int
 	adminServerPort  int
 
-	agentID       string
-	agentAddress  string
-	syncInterval  time.Duration
-	probeInterval time.Duration
+	agentID          string
+	agentIdentifiers string
+	syncInterval     time.Duration
+	probeInterval    time.Duration
 
 	// file contains service account authorization token for enabling proxy-server token based authorization
 	serviceAccountTokenPath string
@@ -84,7 +84,7 @@ func (o *GrpcProxyAgentOptions) ClientSetConfig(dialOptions ...grpc.DialOption) 
 	return &agent.ClientSetConfig{
 		Address:                 fmt.Sprintf("%s:%d", o.proxyServerHost, o.proxyServerPort),
 		AgentID:                 o.agentID,
-		AgentAddress:            o.agentAddress,
+		AgentIdentifiers:        o.agentIdentifiers,
 		SyncInterval:            o.syncInterval,
 		ProbeInterval:           o.probeInterval,
 		DialOptions:             dialOptions,
@@ -105,7 +105,7 @@ func (o *GrpcProxyAgentOptions) Flags() *pflag.FlagSet {
 	flags.DurationVar(&o.syncInterval, "sync-interval", o.syncInterval, "The initial interval by which the agent periodically checks if it has connections to all instances of the proxy server.")
 	flags.DurationVar(&o.probeInterval, "probe-interval", o.probeInterval, "The interval by which the agent periodically checks if its connections to the proxy server are ready.")
 	flags.StringVar(&o.serviceAccountTokenPath, "service-account-token-path", o.serviceAccountTokenPath, "If non-empty proxy agent uses this token to prove its identity to the proxy server.")
-	flags.StringVar(&o.agentAddress, "agent-addr", o.agentAddress, "Addresses that are reachable through this agent. e.g.,host=localhost,cidr=127.0.0.1/16,ipv6=:::::,failure-zone=us-central1-b.")
+	flags.StringVar(&o.agentIdentifiers, "agent-identifiers", o.agentIdentifiers, "Identifiers of the agent that will be used by the server when choosing agent. e.g.,host=localhost,host=node1.mydomain.com,cidr=127.0.0.1/16,ipv4=1.2.3.4,ipv4=5.6.7.8,ipv6=:::::,failure-zone=us-central1-b.")
 	return flags
 }
 
@@ -121,7 +121,7 @@ func (o *GrpcProxyAgentOptions) Print() {
 	klog.V(1).Infof("SyncInterval set to %v.\n", o.syncInterval)
 	klog.V(1).Infof("ProbeInterval set to %v.\n", o.probeInterval)
 	klog.V(1).Infof("ServiceAccountTokenPath set to %q.\n", o.serviceAccountTokenPath)
-	klog.V(1).Infof("AgentAddress set to %s.\n", o.agentAddress)
+	klog.V(1).Infof("AgentIdentifiers set to %s.\n", o.agentIdentifiers)
 }
 
 func (o *GrpcProxyAgentOptions) Validate() error {
@@ -161,21 +161,21 @@ func (o *GrpcProxyAgentOptions) Validate() error {
 			return fmt.Errorf("error checking service account token path %s, got %v", o.serviceAccountTokenPath, err)
 		}
 	}
-	if err := validateAgentAddress(o.agentAddress); err != nil {
+	if err := validateAgentIdentifiers(o.agentIdentifiers); err != nil {
 		return fmt.Errorf("agent address is invalid: %v", err)
 	}
 	return nil
 }
 
-func validateAgentAddress(agentAddr string) error {
-	entries := strings.Split(agentAddr, ",")
+func validateAgentIdentifiers(agentIdentifiers string) error {
+	entries := strings.Split(agentIdentifiers, ",")
 	for _, entry := range entries {
 		kv := strings.Split(entry, "=")
 		if len(kv) != 2 {
 			return errors.New("invalid arguments format, the valid format is " +
 				"<addressType1>=<address1>,<addressType2>=<address2>")
 		}
-		switch agent.AddressType(kv[0]) {
+		switch agent.IdentifierType(kv[0]) {
 		case agent.IPv4:
 		case agent.IPv6:
 		case agent.CIDR:
@@ -198,7 +198,7 @@ func newGrpcProxyAgentOptions() *GrpcProxyAgentOptions {
 		healthServerPort:        8093,
 		adminServerPort:         8094,
 		agentID:                 uuid.New().String(),
-		agentAddress:            "",
+		agentIdentifiers:        "",
 		syncInterval:            1 * time.Second,
 		probeInterval:           1 * time.Second,
 		serviceAccountTokenPath: "",

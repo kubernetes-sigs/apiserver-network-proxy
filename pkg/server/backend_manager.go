@@ -18,6 +18,7 @@ package server
 
 import (
 	"context"
+	"fmt"
 	"math/rand"
 	"strings"
 	"sync"
@@ -25,6 +26,7 @@ import (
 
 	"k8s.io/klog/v2"
 	client "sigs.k8s.io/apiserver-network-proxy/konnectivity-client/proto/client"
+	pkgagent "sigs.k8s.io/apiserver-network-proxy/pkg/agent"
 	"sigs.k8s.io/apiserver-network-proxy/proto/agent"
 )
 
@@ -32,11 +34,10 @@ type ProxyStrategy string
 
 const (
 	ProxyStrategyDestHost ProxyStrategy = "destHost"
-	ProxyStrategyDefault  ProxyStrategy = "default"
 )
 
 // GenProxyStrategiesFromStr generates the list of proxy strategies from the
-// comma-seperated string, i.e., destHost,defualt.
+// comma-seperated string, i.e., destHost.
 func GenProxyStrategiesFromStr(proxyStrategies string) []ProxyStrategy {
 	var ps []ProxyStrategy
 	strs := strings.Split(proxyStrategies, ",")
@@ -47,8 +48,7 @@ func GenProxyStrategiesFromStr(proxyStrategies string) []ProxyStrategy {
 		default:
 		}
 	}
-	// always append the default backendmanager as the last one
-	return append(ps, ProxyStrategyDefault)
+	return ps
 }
 
 type Backend interface {
@@ -85,7 +85,7 @@ func newBackend(conn agent.AgentService_ConnectServer) *backend {
 // connections, i.e., get, add and remove
 type BackendStorage interface {
 	// AddBackend adds a backend.
-	AddBackend(agentID string, conn agent.AgentService_ConnectServer) Backend
+	AddBackend(identifier string, idType pkgagent.IdentifierType, conn agent.AgentService_ConnectServer) Backend
 	// RemoveBackend removes a backend.
 	RemoveBackend(agentID string, conn agent.AgentService_ConnectServer)
 	// NumBackends returns the number of backends.
@@ -131,23 +131,45 @@ type DefaultBackendStorage struct {
 	// Golang.
 	agentIDs []string
 	random   *rand.Rand
+	// idTypes contains the valid identifier types for this
+	// DefaultBackendStorage. The DefaultBackendStorage may only tolerate certain
+	// types of identifiers when associating to a specific BackendManager,
+	// e.g., when associating to the DestHostBackendManager, it can only use the
+	// identifiers of types, IPv4, IPv6 and Host.
+	idTypes []pkgagent.IdentifierType
 }
 
 // NewDefaultBackendManager returns a DefaultBackendManager.
 func NewDefaultBackendManager() *DefaultBackendManager {
-	return &DefaultBackendManager{DefaultBackendStorage: NewDefaultBackendStorage()}
+	return &DefaultBackendManager{
+		DefaultBackendStorage: NewDefaultBackendStorage(
+			[]pkgagent.IdentifierType{pkgagent.UID})}
 }
 
 // NewDefaultBackendStorage returns a DefaultBackendStorage
-func NewDefaultBackendStorage() *DefaultBackendStorage {
+func NewDefaultBackendStorage(idTypes []pkgagent.IdentifierType) *DefaultBackendStorage {
 	return &DefaultBackendStorage{
 		backends: make(map[string][]*backend),
 		random:   rand.New(rand.NewSource(time.Now().UnixNano())),
+		idTypes:  idTypes,
 	}
 }
 
+func containIdType(idTypes []pkgagent.IdentifierType, idType pkgagent.IdentifierType) bool {
+	for _, it := range idTypes {
+		if it == idType {
+			return true
+		}
+	}
+	return false
+}
+
 // AddBackend adds a backend.
-func (s *DefaultBackendStorage) AddBackend(agentID string, conn agent.AgentService_ConnectServer) Backend {
+func (s *DefaultBackendStorage) AddBackend(agentID string, idType pkgagent.IdentifierType, conn agent.AgentService_ConnectServer) Backend {
+	if !containIdType(s.idTypes, idType) {
+		klog.ErrorS(&ErrWrongIDType{idType, s.idTypes}, "fail to add backend")
+		return nil
+	}
 	klog.V(2).InfoS("Register backend for agent", "connection", conn, "agentID", agentID)
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -216,6 +238,15 @@ type ErrNotFound struct{}
 // Error returns the error message.
 func (e *ErrNotFound) Error() string {
 	return "No backend available"
+}
+
+type ErrWrongIDType struct {
+	got    pkgagent.IdentifierType
+	expect []pkgagent.IdentifierType
+}
+
+func (e *ErrWrongIDType) Error() string {
+	return fmt.Sprintf("incorrect id type: got %s, expect %s", e.got, e.expect)
 }
 
 func ignoreNotFound(err error) error {

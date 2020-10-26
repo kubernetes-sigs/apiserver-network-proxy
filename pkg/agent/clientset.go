@@ -49,7 +49,8 @@ type ClientSet struct {
 	// channel to signal shutting down the client set. Primarily for test.
 	stopCh <-chan struct{}
 
-	agentAddress string // The IP address of the agent
+	agentIdentifiers string // The identifiers of the agent, which will be used
+	// by the server when choosing agent
 }
 
 func (cs *ClientSet) ClientsCount() int {
@@ -110,7 +111,7 @@ func (cs *ClientSet) RemoveClient(serverID string) {
 type ClientSetConfig struct {
 	Address                 string
 	AgentID                 string
-	AgentAddress            string
+	AgentIdentifiers        string
 	SyncInterval            time.Duration
 	ProbeInterval           time.Duration
 	DialOptions             []grpc.DialOption
@@ -121,7 +122,7 @@ func (cc *ClientSetConfig) NewAgentClientSet(stopCh <-chan struct{}) *ClientSet 
 	return &ClientSet{
 		clients:                 make(map[string]*AgentClient),
 		agentID:                 cc.AgentID,
-		agentAddress:            cc.AgentAddress,
+		agentIdentifiers:        cc.AgentIdentifiers,
 		address:                 cc.Address,
 		syncInterval:            cc.SyncInterval,
 		probeInterval:           cc.ProbeInterval,
@@ -132,7 +133,7 @@ func (cc *ClientSetConfig) NewAgentClientSet(stopCh <-chan struct{}) *ClientSet 
 }
 
 func (cs *ClientSet) newAgentClient() (*AgentClient, int, error) {
-	return newAgentClient(cs.address, cs.agentID, cs.agentAddress, cs, cs.dialOptions...)
+	return newAgentClient(cs.address, cs.agentID, cs.agentIdentifiers, cs, cs.dialOptions...)
 }
 
 func (cs *ClientSet) resetBackoff() *wait.Backoff {

@@ -20,6 +20,7 @@ import (
 	"reflect"
 	"testing"
 
+	pkgagent "sigs.k8s.io/apiserver-network-proxy/pkg/agent"
 	"sigs.k8s.io/apiserver-network-proxy/proto/agent"
 )
 
@@ -36,7 +37,7 @@ func TestAddRemoveBackends(t *testing.T) {
 
 	p := NewDefaultBackendManager()
 
-	p.AddBackend("agent1", conn1)
+	p.AddBackend("agent1", pkgagent.UID, conn1)
 	p.RemoveBackend("agent1", conn1)
 	expectedBackends := make(map[string][]*backend)
 	expectedAgentIDs := []string{}
@@ -48,13 +49,13 @@ func TestAddRemoveBackends(t *testing.T) {
 	}
 
 	p = NewDefaultBackendManager()
-	p.AddBackend("agent1", conn1)
-	p.AddBackend("agent1", conn12)
+	p.AddBackend("agent1", pkgagent.UID, conn1)
+	p.AddBackend("agent1", pkgagent.UID, conn12)
 	// Adding the same connection again should be a no-op.
-	p.AddBackend("agent1", conn12)
-	p.AddBackend("agent2", conn2)
-	p.AddBackend("agent2", conn22)
-	p.AddBackend("agent3", conn3)
+	p.AddBackend("agent1", pkgagent.UID, conn12)
+	p.AddBackend("agent2", pkgagent.UID, conn2)
+	p.AddBackend("agent2", pkgagent.UID, conn22)
+	p.AddBackend("agent3", pkgagent.UID, conn3)
 	p.RemoveBackend("agent2", conn22)
 	p.RemoveBackend("agent2", conn2)
 	p.RemoveBackend("agent1", conn1)

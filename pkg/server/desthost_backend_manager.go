@@ -4,6 +4,7 @@ import (
 	"context"
 
 	"k8s.io/klog/v2"
+	"sigs.k8s.io/apiserver-network-proxy/pkg/agent"
 )
 
 type DestHostBackendManager struct {
@@ -13,7 +14,9 @@ type DestHostBackendManager struct {
 var _ BackendManager = &DestHostBackendManager{}
 
 func NewDestHostBackendManager() *DestHostBackendManager {
-	return &DestHostBackendManager{DefaultBackendStorage: NewDefaultBackendStorage()}
+	return &DestHostBackendManager{
+		DefaultBackendStorage: NewDefaultBackendStorage(
+			[]agent.IdentifierType{agent.IPv4, agent.IPv6, agent.Host})}
 }
 
 // Backend tries to get a backend associating to the request destination host.

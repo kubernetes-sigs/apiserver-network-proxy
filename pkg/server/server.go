@@ -177,26 +177,26 @@ func (s *ProxyServer) addBackend(agentID string, conn agent.AgentService_Connect
 	for i := 0; i < len(s.BackendManagers); i++ {
 		switch s.BackendManagers[i].(type) {
 		case *DestHostBackendManager:
-			agentAddress, err := getAgentAddress(conn)
+			agentIdentifiers, err := getAgentIdentifiers(conn)
 			if err != nil {
 				klog.ErrorS(err, "fail to get the agent Host", "agentID", agentID)
 				break
 			}
-			for _, ipv4 := range agentAddress.IPv4 {
+			for _, ipv4 := range agentIdentifiers.IPv4 {
 				klog.V(5).InfoS("Add the agent to DestHostBackendManager", "agent address", ipv4)
-				s.BackendManagers[i].AddBackend(ipv4, conn)
+				s.BackendManagers[i].AddBackend(ipv4, pkgagent.IPv4, conn)
 			}
-			for _, ipv6 := range agentAddress.IPv6 {
+			for _, ipv6 := range agentIdentifiers.IPv6 {
 				klog.V(5).InfoS("Add the agent to DestHostBackendManager", "agent address", ipv6)
-				s.BackendManagers[i].AddBackend(ipv6, conn)
+				s.BackendManagers[i].AddBackend(ipv6, pkgagent.IPv6, conn)
 			}
-			for _, host := range agentAddress.Host {
+			for _, host := range agentIdentifiers.Host {
 				klog.V(5).InfoS("Add the agent to DestHostBackendManager", "agent address", host)
-				s.BackendManagers[i].AddBackend(host, conn)
+				s.BackendManagers[i].AddBackend(host, pkgagent.Host, conn)
 			}
 		default:
 			klog.V(5).InfoS("Add the agent to DefaultBackendManager", "agentID", agentID)
-			backend = s.BackendManagers[i].AddBackend(agentID, conn)
+			backend = s.BackendManagers[i].AddBackend(agentID, pkgagent.UID, conn)
 		}
 	}
 	return
@@ -206,20 +206,20 @@ func (s *ProxyServer) removeBackend(agentID string, conn agent.AgentService_Conn
 	for _, bm := range s.BackendManagers {
 		switch bm.(type) {
 		case *DestHostBackendManager:
-			agentAddress, err := getAgentAddress(conn)
+			agentIdentifiers, err := getAgentIdentifiers(conn)
 			if err != nil {
 				klog.ErrorS(err, "fail to get the agent Host", "agentID", agentID)
 				break
 			}
-			for _, ipv4 := range agentAddress.IPv4 {
+			for _, ipv4 := range agentIdentifiers.IPv4 {
 				klog.V(5).InfoS("Remove the agent from the DestHostBackendManager", "agentHost", ipv4)
 				bm.RemoveBackend(ipv4, conn)
 			}
-			for _, ipv6 := range agentAddress.IPv6 {
+			for _, ipv6 := range agentIdentifiers.IPv6 {
 				klog.V(5).InfoS("Remove the agent from the DestHostBackendManager", "agentHost", ipv6)
 				bm.RemoveBackend(ipv6, conn)
 			}
-			for _, host := range agentAddress.Host {
+			for _, host := range agentIdentifiers.Host {
 				klog.V(5).InfoS("Remove the agent from the DestHostBackendManager", "agentHost", host)
 				bm.RemoveBackend(host, conn)
 			}
@@ -297,9 +297,9 @@ func NewProxyServer(serverID string, proxyStrategies []ProxyStrategy, serverCoun
 		case ProxyStrategyDestHost:
 			bms = append(bms, NewDestHostBackendManager())
 		default:
-			bms = append(bms, NewDefaultBackendManager())
 		}
 	}
+	bms = append(bms, NewDefaultBackendManager())
 
 	return &ProxyServer{
 		frontends:                  make(map[string](map[int64]*ProxyClientConnection)),
@@ -471,22 +471,22 @@ func agentID(stream agent.AgentService_ConnectServer) (string, error) {
 	return agentIDs[0], nil
 }
 
-func getAgentAddress(stream agent.AgentService_ConnectServer) (pkgagent.AgentAddress, error) {
-	var agentAddr pkgagent.AgentAddress
+func getAgentIdentifiers(stream agent.AgentService_ConnectServer) (pkgagent.AgentIdentifiers, error) {
+	var agentIdentifiers pkgagent.AgentIdentifiers
 	md, ok := metadata.FromIncomingContext(stream.Context())
 	if !ok {
-		return agentAddr, fmt.Errorf("failed to get context")
+		return agentIdentifiers, fmt.Errorf("failed to get context")
 	}
-	agentAddress := md.Get(header.AgentAddress)
-	if len(agentAddress) > 1 {
-		return agentAddr, fmt.Errorf("expected at most one agent IP in the context, got %v", agentAddress)
+	agentIDs := md.Get(header.AgentIdentifiers)
+	if len(agentIDs) > 1 {
+		return agentIdentifiers, fmt.Errorf("expected at most one agent IP in the context, got %v", agentIDs)
 	}
-	if len(agentAddress) == 0 {
-		return agentAddr, nil
+	if len(agentIDs) == 0 {
+		return agentIdentifiers, nil
 	}
 
-	agentAddr = pkgagent.GenAgentAddress(agentAddress[0])
-	return agentAddr, nil
+	agentIdentifiers = pkgagent.GenAgentIdenfiers(agentIDs[0])
+	return agentIdentifiers, nil
 }
 
 func (s *ProxyServer) validateAuthToken(token string) error {
