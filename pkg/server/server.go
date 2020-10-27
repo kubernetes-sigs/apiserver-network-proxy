@@ -174,6 +174,18 @@ func (fs *frontendStream) setAgentID(agentID string) {
 	fs.agentID = agentID
 }
 
+func (fs *frontendStream) getStatus() status {
+	fs.mu.Lock()
+	defer fs.mu.Unlock()
+	return fs.status
+}
+
+func (fs *frontendStream) setStatus(status	status) {
+	fs.mu.Lock()
+	defer fs.mu.Unlock()
+	fs.status = status
+}
+
 
 func (s *ProxyServer) addFrontend(agentID string, connID int64, p *ProxyClientConnection) {
 	klog.V(2).InfoS("Register frontend for agent", "frontend", p, "agentID", agentID, "connectionID", connID)
@@ -279,13 +291,13 @@ func (s *ProxyServer) Proxy(stream client.ProxyService_ProxyServer) error {
 			}
 			if err != nil {
 				if agentID, lookupErr := frontStream.getAgentID(); lookupErr == nil {
-					if frontStream.status != Closing {
+					if frontStream.getStatus() != Closing {
 						klog.ErrorS(err, "Stream read from frontend failure",
 							"agentID", agentID)
 						s.BackendManager.TaintBackend(agentID, err)
 					}
 				} else {
-					if frontStream.status != Closing {
+					if frontStream.getStatus() != Closing {
 						klog.ErrorS(err, "Stream read from frontend failure",
 							"frontStream", frontStream)
 					}
@@ -341,12 +353,12 @@ func (s *ProxyServer) serveRecvFrontend(stream *frontendStream, recvCh <-chan *c
 			if err := backend.Send(pkt); err != nil {
 				klog.ErrorS(err, "DIAL_REQ to Backend failed")
 			}
-			stream.status = Running
+			stream.setStatus(Running)
 			klog.V(5).Infoln("DIAL_REQ sent to backend") // got this. but backend didn't receive anything.
 
 		case client.PacketType_CLOSE_REQ:
 			klog.V(5).InfoS("Received CLOSE_REQ")
-			stream.status = Closing
+			stream.setStatus(Closing)
 			connID := pkt.GetCloseRequest().ConnectID
 			klog.V(5).InfoS("Received CLOSE_REQ", "connectionID", connID)
 			if backend == nil {
@@ -382,7 +394,7 @@ func (s *ProxyServer) serveRecvFrontend(stream *frontendStream, recvCh <-chan *c
 			klog.V(5).Infoln("DATA sent to Backend")
 
 		default:
-			stream.status = Unknown
+			stream.setStatus(Unknown)
 			klog.V(5).InfoS("Ignore packet coming from frontend", "type", pkt.Type)
 		}
 	}
@@ -501,7 +513,6 @@ func (s *ProxyServer) authenticateAgentViaToken(ctx context.Context) error {
 
 // Connect is for agent to connect to ProxyServer as next hop
 func (s *ProxyServer) Connect(stream agent.AgentService_ConnectServer) error {
-	var lastErr error
 	agentID, err := agentID(stream)
 	if err != nil {
 		return err
@@ -536,12 +547,10 @@ func (s *ProxyServer) Connect(stream agent.AgentService_ConnectServer) error {
 			in, err := stream.Recv()
 			if err == io.EOF {
 				klog.ErrorS(err, "stream closed failure")
-				lastErr = err
 				close(stopCh)
 				return
 			}
 			if err != nil {
-				lastErr = err
 				klog.ErrorS(err, "stream read failure", "error type", fmt.Sprintf("%T", err))
 				close(stopCh)
 				return
