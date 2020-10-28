@@ -485,7 +485,7 @@ func getAgentIdentifiers(stream agent.AgentService_ConnectServer) (pkgagent.Agen
 		return agentIdentifiers, nil
 	}
 
-	agentIdentifiers = pkgagent.GenAgentIdenfiers(agentIDs[0])
+	agentIdentifiers = pkgagent.GenAgentIdentifiers(agentIDs[0])
 	return agentIdentifiers, nil
 }
 

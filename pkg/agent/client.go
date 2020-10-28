@@ -99,10 +99,10 @@ const (
 	UID  IdentifierType = "uid"
 )
 
-// GenAgentIdenfiers generates an AgentIdentifiers based on the input string, the
+// GenAgentIdentifiers generates an AgentIdentifiers based on the input string, the
 // input string should be a comma-seprated list with each item in the format
 // of <IdentifierType>=<address>
-func GenAgentIdenfiers(addrs string) AgentIdentifiers {
+func GenAgentIdentifiers(addrs string) AgentIdentifiers {
 	var agentIDs AgentIdentifiers
 	entries := strings.Split(addrs, ",")
 	for _, entry := range entries {
