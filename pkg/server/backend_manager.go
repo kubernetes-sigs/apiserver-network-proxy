@@ -46,6 +46,7 @@ func GenProxyStrategiesFromStr(proxyStrategies string) []ProxyStrategy {
 		case string(ProxyStrategyDestHost):
 			ps = append(ps, ProxyStrategyDestHost)
 		default:
+			klog.V(4).InfoS("Unknown proxy strategy", "strategy", s)
 		}
 	}
 	return ps
@@ -87,7 +88,7 @@ type BackendStorage interface {
 	// AddBackend adds a backend.
 	AddBackend(identifier string, idType pkgagent.IdentifierType, conn agent.AgentService_ConnectServer) Backend
 	// RemoveBackend removes a backend.
-	RemoveBackend(agentID string, conn agent.AgentService_ConnectServer)
+	RemoveBackend(identifier string, idType pkgagent.IdentifierType, conn agent.AgentService_ConnectServer)
 	// NumBackends returns the number of backends.
 	NumBackends() int
 }
@@ -165,7 +166,7 @@ func containIdType(idTypes []pkgagent.IdentifierType, idType pkgagent.Identifier
 }
 
 // AddBackend adds a backend.
-func (s *DefaultBackendStorage) AddBackend(agentID string, idType pkgagent.IdentifierType, conn agent.AgentService_ConnectServer) Backend {
+func (s *DefaultBackendStorage) AddBackend(identifier string, idType pkgagent.IdentifierType, conn agent.AgentService_ConnectServer) Backend {
 	if !containIdType(s.idTypes, idType) {
 		klog.ErrorS(&ErrWrongIDType{idType, s.idTypes}, "fail to add backend")
 		return nil
@@ -173,47 +174,51 @@ func (s *DefaultBackendStorage) AddBackend(agentID string, idType pkgagent.Ident
 	klog.V(2).InfoS("Register backend for agent", "connection", conn, "agentID", agentID)
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	_, ok := s.backends[agentID]
+	_, ok := s.backends[identifier]
 	addedBackend := newBackend(conn)
 	if ok {
-		for _, v := range s.backends[agentID] {
+		for _, v := range s.backends[identifier] {
 			if v.conn == conn {
 				klog.V(1).InfoS("This should not happen. Adding existing backend for agent", "connection", conn, "agentID", agentID)
 				return v
 			}
 		}
-		s.backends[agentID] = append(s.backends[agentID], addedBackend)
+		s.backends[identifier] = append(s.backends[identifier], addedBackend)
 		return addedBackend
 	}
-	s.backends[agentID] = []*backend{addedBackend}
-	s.agentIDs = append(s.agentIDs, agentID)
+	s.backends[identifier] = []*backend{addedBackend}
+	s.agentIDs = append(s.agentIDs, identifier)
 	return addedBackend
 }
 
 // RemoveBackend removes a backend.
-func (s *DefaultBackendStorage) RemoveBackend(agentID string, conn agent.AgentService_ConnectServer) {
-	klog.V(2).InfoS("Remove connection for agent", "connection", conn, "agentID", agentID)
+func (s *DefaultBackendStorage) RemoveBackend(identifier string, idType pkgagent.IdentifierType, conn agent.AgentService_ConnectServer) {
+	if !containIdType(s.idTypes, idType) {
+		klog.ErrorS(&ErrWrongIDType{idType, s.idTypes}, "fail to add backend")
+		return
+	}
+	klog.V(2).InfoS("Remove connection for agent", "connection", conn, "identifier", identifier)
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	backends, ok := s.backends[agentID]
+	backends, ok := s.backends[identifier]
 	if !ok {
-		klog.V(1).InfoS("Cannot find agent in backends", "agentID", agentID)
+		klog.V(1).InfoS("Cannot find agent in backends", "identifier", identifier)
 		return
 	}
 	var found bool
 	for i, c := range backends {
 		if c.conn == conn {
-			s.backends[agentID] = append(s.backends[agentID][:i], s.backends[agentID][i+1:]...)
-			if i == 0 && len(s.backends[agentID]) != 0 {
-				klog.V(1).InfoS("This should not happen. Removed connection that is not the first connection", "connection", conn, "remainingConnections", s.backends[agentID])
+			s.backends[identifier] = append(s.backends[identifier][:i], s.backends[identifier][i+1:]...)
+			if i == 0 && len(s.backends[identifier]) != 0 {
+				klog.V(1).InfoS("This should not happen. Removed connection that is not the first connection", "connection", conn, "remainingConnections", s.backends[identifier])
 			}
 			found = true
 		}
 	}
-	if len(s.backends[agentID]) == 0 {
-		delete(s.backends, agentID)
+	if len(s.backends[identifier]) == 0 {
+		delete(s.backends, identifier)
 		for i := range s.agentIDs {
-			if s.agentIDs[i] == agentID {
+			if s.agentIDs[i] == identifier {
 				s.agentIDs[i] = s.agentIDs[len(s.agentIDs)-1]
 				s.agentIDs = s.agentIDs[:len(s.agentIDs)-1]
 				break

@@ -213,18 +213,18 @@ func (s *ProxyServer) removeBackend(agentID string, conn agent.AgentService_Conn
 			}
 			for _, ipv4 := range agentIdentifiers.IPv4 {
 				klog.V(5).InfoS("Remove the agent from the DestHostBackendManager", "agentHost", ipv4)
-				bm.RemoveBackend(ipv4, conn)
+				bm.RemoveBackend(ipv4, pkgagent.IPv4, conn)
 			}
 			for _, ipv6 := range agentIdentifiers.IPv6 {
 				klog.V(5).InfoS("Remove the agent from the DestHostBackendManager", "agentHost", ipv6)
-				bm.RemoveBackend(ipv6, conn)
+				bm.RemoveBackend(ipv6, pkgagent.IPv6, conn)
 			}
 			for _, host := range agentIdentifiers.Host {
 				klog.V(5).InfoS("Remove the agent from the DestHostBackendManager", "agentHost", host)
-				bm.RemoveBackend(host, conn)
+				bm.RemoveBackend(host, pkgagent.Host, conn)
 			}
 		default:
-			bm.RemoveBackend(agentID, conn)
+			bm.RemoveBackend(agentID, pkgagent.UID, conn)
 		}
 	}
 }

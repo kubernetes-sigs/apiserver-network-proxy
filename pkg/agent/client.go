@@ -83,22 +83,20 @@ func newConnectionManager() *connectionManager {
 // AgentIdentifiers stores identifiers that will be used by the server when
 // choosing agents
 type AgentIdentifiers struct {
-	IPv4        []string
-	IPv6        []string
-	Host        []string
-	CIDR        []string
-	FailureZone []string
+	IPv4 []string
+	IPv6 []string
+	Host []string
+	CIDR []string
 }
 
 type IdentifierType string
 
 const (
-	IPv4        IdentifierType = "ipv4"
-	IPv6        IdentifierType = "ipv6"
-	Host        IdentifierType = "host"
-	CIDR        IdentifierType = "cidr"
-	FailureZone IdentifierType = "failure-zone"
-	UID         IdentifierType = "uid"
+	IPv4 IdentifierType = "ipv4"
+	IPv6 IdentifierType = "ipv6"
+	Host IdentifierType = "host"
+	CIDR IdentifierType = "cidr"
+	UID  IdentifierType = "uid"
 )
 
 // GenAgentIdenfiers generates an AgentIdentifiers based on the input string, the
@@ -126,8 +124,6 @@ func GenAgentIdenfiers(addrs string) AgentIdentifiers {
 			agentIDs.Host = append(agentIDs.Host, kv[1])
 		case CIDR:
 			agentIDs.CIDR = append(agentIDs.CIDR, kv[1])
-		case FailureZone:
-			agentIDs.FailureZone = append(agentIDs.FailureZone, kv[1])
 		default:
 			klog.V(5).InfoS("Unknown address type", "Address Type", kv[0])
 			continue

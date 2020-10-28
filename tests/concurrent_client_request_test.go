@@ -68,7 +68,7 @@ func (s *singleTimeManager) AddBackend(agentID string, _ pkgagent.IdentifierType
 	return conn
 }
 
-func (s *singleTimeManager) RemoveBackend(agentID string, conn agent.AgentService_ConnectServer) {
+func (s *singleTimeManager) RemoveBackend(agentID string, _ pkgagent.IdentifierType, conn agent.AgentService_ConnectServer) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	v, ok := s.backends[agentID]

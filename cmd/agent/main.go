@@ -105,7 +105,7 @@ func (o *GrpcProxyAgentOptions) Flags() *pflag.FlagSet {
 	flags.DurationVar(&o.syncInterval, "sync-interval", o.syncInterval, "The initial interval by which the agent periodically checks if it has connections to all instances of the proxy server.")
 	flags.DurationVar(&o.probeInterval, "probe-interval", o.probeInterval, "The interval by which the agent periodically checks if its connections to the proxy server are ready.")
 	flags.StringVar(&o.serviceAccountTokenPath, "service-account-token-path", o.serviceAccountTokenPath, "If non-empty proxy agent uses this token to prove its identity to the proxy server.")
-	flags.StringVar(&o.agentIdentifiers, "agent-identifiers", o.agentIdentifiers, "Identifiers of the agent that will be used by the server when choosing agent. e.g.,host=localhost,host=node1.mydomain.com,cidr=127.0.0.1/16,ipv4=1.2.3.4,ipv4=5.6.7.8,ipv6=:::::,failure-zone=us-central1-b.")
+	flags.StringVar(&o.agentIdentifiers, "agent-identifiers", o.agentIdentifiers, "Identifiers of the agent that will be used by the server when choosing agent. e.g.,host=localhost,host=node1.mydomain.com,cidr=127.0.0.1/16,ipv4=1.2.3.4,ipv4=5.6.7.8,ipv6=:::::")
 	return flags
 }
 
@@ -180,7 +180,6 @@ func validateAgentIdentifiers(agentIdentifiers string) error {
 		case agent.IPv6:
 		case agent.CIDR:
 		case agent.Host:
-		case agent.FailureZone:
 		default:
 			return fmt.Errorf("unknown address type: %s", kv[0])
 		}
