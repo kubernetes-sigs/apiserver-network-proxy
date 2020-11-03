@@ -20,6 +20,7 @@ import (
 	"context"
 	"fmt"
 	"math/rand"
+	"net/http"
 	"strings"
 	"sync"
 	"time"
@@ -40,6 +41,7 @@ const (
 	// With this strategy the Proxy Server will pick a backend that has the same
 	// associated host as the request.Host to establish the tunnel.
 	ProxyStrategyDestHost ProxyStrategy = "destHost"
+	ProxyHostHeader       string        = "X-Tunnel-Proxy-Host"
 )
 
 // GenProxyStrategiesFromStr generates the list of proxy strategies from the
@@ -281,4 +283,17 @@ func (s *DefaultBackendStorage) GetRandomBackend() (Backend, error) {
 	// always return the first connection to an agent, because the agent
 	// will close later connections if there are multiple.
 	return s.backends[agentID][0], nil
+}
+
+func GenIndexInfoForBackend(req *http.Request) string {
+	if req == nil {
+		return ""
+	}
+
+	indexInfo := req.Host
+	if len(req.Header.Get(ProxyHostHeader)) != 0 {
+		indexInfo = req.Header.Get(ProxyHostHeader)
+	}
+
+	return indexInfo
 }
