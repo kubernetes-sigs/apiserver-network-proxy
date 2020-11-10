@@ -60,6 +60,7 @@ func main() {
 	flags.AddFlagSet(o.Flags())
 	local := flag.NewFlagSet(os.Args[0], flag.ExitOnError)
 	klog.InitFlags(local)
+	local.Set("v", "4")
 	local.VisitAll(func(fl *flag.Flag) {
 		fl.Name = util.Normalize(fl.Name)
 		flags.AddGoFlag(fl)
@@ -549,7 +550,7 @@ func (p *Proxy) runAgentServer(o *ProxyRunOptions, server *server.ProxyServer) e
 	}
 
 	addr := fmt.Sprintf(":%d", o.agentPort)
-	serverOptions := []grpc.ServerOption {
+	serverOptions := []grpc.ServerOption{
 		grpc.Creds(credentials.NewTLS(tlsConfig)),
 		grpc.KeepaliveParams(keepalive.ServerParameters{Time: o.keepaliveTime}),
 	}
