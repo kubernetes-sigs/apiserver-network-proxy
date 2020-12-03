@@ -56,10 +56,18 @@ SERVER_TOKEN=${SERVER_TOKEN} envsubst < examples/kubernetes/kubeconfig
 kubectl create clusterrolebinding --user system:konnectivity-server --clusterrole system:auth-delegator system:konnectivity-server
 ```
 
-# Start **proxy-server** as a [static pod](https://kubernetes.io/docs/tasks/configure-pod-container/static-pod/) with following configuration
+# Start **proxy-server**
+
+- as a [static pod](https://kubernetes.io/docs/tasks/configure-pod-container/static-pod/) with following configuration
 ```bash
 TAG=${TAG} PROXY_IMAGE=${PROXY_IMAGE} CLUSTER_CERT=${CLUSTER_CERT} CLUSTER_KEY=${CLUSTER_KEY} envsubst <  examples/kubernetes/konnectivity-server.yaml
 ```
+
+- as a kubernetes pod with following configuration
+```bash
+TAG=${TAG} PROXY_IMAGE=${PROXY_IMAGE} CLUSTER_CERT=${CLUSTER_CERT} CLUSTER_KEY=${CLUSTER_KEY} envsubst <  examples/kubernetes/konnectivity-server.yaml | kubectl apply -f -
+```
+
 #### GKE specific configuration
 */etc/kubernetes/manifests* is a folder where .yaml file needs to be created for static pod
 
