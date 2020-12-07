@@ -41,6 +41,10 @@ import (
 
 type key int
 
+var (
+	ConnectionSetupTimeout = 15 * time.Second
+)
+
 type ProxyClientConnection struct {
 	Mode      string
 	Grpc      client.ProxyService_ProxyServer
@@ -80,9 +84,33 @@ func (c *ProxyClientConnection) send(pkt *client.Packet) error {
 }
 
 func NewPendingDialManager() *PendingDialManager {
-	return &PendingDialManager{
+	pm := &PendingDialManager{
 		pendingDial: make(map[int64]*ProxyClientConnection),
 	}
+
+	// spawn a goroutine to verify connection waiting is timeout or not.
+	go func() {
+		ticker := time.NewTicker(3 * time.Second)
+		defer ticker.Stop()
+
+		for {
+			select {
+			case <-ticker.C:
+				pm.mu.Lock()
+				for random, proxyClientConn := range pm.pendingDial {
+					// client connection pending over 15seconds
+					if time.Since(proxyClientConn.start) > ConnectionSetupTimeout {
+						delete(pm.pendingDial, random)
+						close(proxyClientConn.connected)
+						klog.V(2).InfoS("connection setup timeout", "random", random)
+					}
+				}
+				pm.mu.Unlock()
+			}
+		}
+	}()
+
+	return pm
 }
 
 type PendingDialManager struct {

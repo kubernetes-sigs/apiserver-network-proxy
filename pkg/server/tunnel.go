@@ -103,6 +103,11 @@ func (t *Tunnel) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	case <-connection.connected: // Waiting for response before we begin full communication.
 	}
 
+	if connection.connectID == 0 {
+		klog.Errorf("wait for dial response timeout with random %d", random)
+		return
+	}
+
 	defer func() {
 		packet := &client.Packet{
 			Type: client.PacketType_CLOSE_REQ,
