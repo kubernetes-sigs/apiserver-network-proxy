@@ -8,7 +8,7 @@ Learn how to engage with the Kubernetes community on the [community page](http:/
 
 You can reach the maintainers of this project at:
 
-- [Slack channel](https://kubernetes.slack.com/messages/sig-cloud-provider)
+- [Slack channel](https://kubernetes.slack.com/messages/apiserver-network-proxy)
 - [Mailing list](https://groups.google.com/forum/#!forum/kubernetes-sig-cloud-provider)
 
 ### Code of conduct
