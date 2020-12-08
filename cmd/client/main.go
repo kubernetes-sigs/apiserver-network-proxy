@@ -250,6 +250,7 @@ func (c *Client) run(o *GrpcProxyClientOptions) error {
 			time.Sleep(wait)
 		}
 	}
+	client.CloseIdleConnections()
 
 	return nil
 }

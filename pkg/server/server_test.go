@@ -22,6 +22,7 @@ import (
 	"io"
 	"reflect"
 	"testing"
+	"time"
 
 	"github.com/golang/mock/gomock"
 	"google.golang.org/grpc/metadata"
@@ -164,7 +165,7 @@ func TestAgentTokenAuthenticationErrorsToken(t *testing.T) {
 				KubernetesClient:    kcs,
 				AgentNamespace:      tc.wantNamespace,
 				AgentServiceAccount: tc.wantServiceAccount,
-			})
+			}, time.Hour)
 
 			err := p.Connect(conn)
 			if tc.wantError {
@@ -187,7 +188,7 @@ func TestAddRemoveFrontends(t *testing.T) {
 	agent2ConnID2 := new(ProxyClientConnection)
 	agent3ConnID1 := new(ProxyClientConnection)
 
-	p := NewProxyServer("", 1, nil)
+	p := NewProxyServer("", 1, nil, time.Hour)
 	p.addFrontend("agent1", int64(1), agent1ConnID1)
 	p.removeFrontend("agent1", int64(1))
 	expectedFrontends := make(map[string]map[int64]*ProxyClientConnection)
@@ -195,7 +196,7 @@ func TestAddRemoveFrontends(t *testing.T) {
 		t.Errorf("expected %v, got %v", e, a)
 	}
 
-	p = NewProxyServer("", 1, nil)
+	p = NewProxyServer("", 1, nil, time.Hour)
 	p.addFrontend("agent1", int64(1), agent1ConnID1)
 	p.addFrontend("agent1", int64(2), agent1ConnID2)
 	p.addFrontend("agent2", int64(1), agent2ConnID1)

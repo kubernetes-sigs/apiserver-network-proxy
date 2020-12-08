@@ -19,6 +19,7 @@ package server
 import (
 	"reflect"
 	"testing"
+	"time"
 
 	"sigs.k8s.io/apiserver-network-proxy/proto/agent"
 )
@@ -34,7 +35,7 @@ func TestAddRemoveBackends(t *testing.T) {
 	conn22 := new(fakeAgentService_ConnectServer)
 	conn3 := new(fakeAgentService_ConnectServer)
 
-	p := NewDefaultBackendManager()
+	p := NewDefaultBackendManager(time.Hour)
 
 	p.AddBackend("agent1", conn1)
 	p.RemoveBackend("agent1", conn1)
@@ -47,7 +48,7 @@ func TestAddRemoveBackends(t *testing.T) {
 		t.Errorf("expected %v, got %v", e, a)
 	}
 
-	p = NewDefaultBackendManager()
+	p = NewDefaultBackendManager(time.Hour)
 	p.AddBackend("agent1", conn1)
 	p.AddBackend("agent1", conn12)
 	// Adding the same connection again should be a no-op.
@@ -61,8 +62,8 @@ func TestAddRemoveBackends(t *testing.T) {
 	// This is invalid. agent1 doesn't have conn3. This should be a no-op.
 	p.RemoveBackend("agent1", conn3)
 	expectedBackends = map[string][]*backend{
-		"agent1": []*backend{newBackend(conn12)},
-		"agent3": []*backend{newBackend(conn3)},
+		"agent1": []*backend{newBackend(conn12, "agent1")},
+		"agent3": []*backend{newBackend(conn3, "agent3")},
 	}
 	expectedAgentIDs = []string{"agent1", "agent3"}
 	if e, a := expectedBackends, p.backends; !reflect.DeepEqual(e, a) {

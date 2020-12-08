@@ -60,6 +60,10 @@ type singleTimeManager struct {
 	used     map[string]struct{}
 }
 
+func (s *singleTimeManager) TaintBackend(agentID string, err error) {
+	panic("implement me")
+}
+
 func (s *singleTimeManager) AddBackend(agentID string, conn agent.AgentService_ConnectServer) server.Backend {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -80,16 +84,16 @@ func (s *singleTimeManager) RemoveBackend(agentID string, conn agent.AgentServic
 	delete(s.backends, agentID)
 }
 
-func (s *singleTimeManager) Backend(_ context.Context) (server.Backend, error) {
+func (s *singleTimeManager) Backend(_ context.Context) (server.Backend, string, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	for k, v := range s.backends {
 		if _, ok := s.used[k]; !ok {
 			s.used[k] = struct{}{}
-			return v, nil
+			return v, "", nil
 		}
 	}
-	return nil, fmt.Errorf("cannot find backend to a new agent")
+	return nil, "", fmt.Errorf("cannot find backend to a new agent")
 }
 
 func (s *singleTimeManager) GetBackend(agentID string) server.Backend {
@@ -118,7 +122,7 @@ func TestConcurrentClientRequest(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer cleanup()
-	ps.BackendManager = newSingleTimeGetter(server.NewDefaultBackendManager())
+	ps.BackendManager = newSingleTimeGetter(server.NewDefaultBackendManager(time.Hour))
 
 	stopCh := make(chan struct{})
 	defer close(stopCh)
