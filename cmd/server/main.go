@@ -294,10 +294,12 @@ func (o *ProxyRunOptions) Validate() error {
 	}
 
 	// validate the proxy strategies
-	pss := strings.Split(o.proxyStrategies, ",")
-	for _, ps := range pss {
-		if ps != string(server.ProxyStrategyDestHost) {
-			return fmt.Errorf("unknown proxy strategy: %s, available strategy is: destHost", ps)
+	if o.proxyStrategies != "" {
+		pss := strings.Split(o.proxyStrategies, ",")
+		for _, ps := range pss {
+			if ps != string(server.ProxyStrategyDestHost) {
+				return fmt.Errorf("unknown proxy strategy: %s, available strategy is: destHost", ps)
+			}
 		}
 	}
 

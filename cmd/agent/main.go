@@ -18,13 +18,12 @@ package main
 
 import (
 	"crypto/tls"
-	"errors"
 	"flag"
 	"fmt"
 	"net"
 	"net/http"
+	"net/url"
 	"os"
-	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -105,7 +104,7 @@ func (o *GrpcProxyAgentOptions) Flags() *pflag.FlagSet {
 	flags.DurationVar(&o.syncInterval, "sync-interval", o.syncInterval, "The initial interval by which the agent periodically checks if it has connections to all instances of the proxy server.")
 	flags.DurationVar(&o.probeInterval, "probe-interval", o.probeInterval, "The interval by which the agent periodically checks if its connections to the proxy server are ready.")
 	flags.StringVar(&o.serviceAccountTokenPath, "service-account-token-path", o.serviceAccountTokenPath, "If non-empty proxy agent uses this token to prove its identity to the proxy server.")
-	flags.StringVar(&o.agentIdentifiers, "agent-identifiers", o.agentIdentifiers, "Identifiers of the agent that will be used by the server when choosing agent. e.g.,host=localhost,host=node1.mydomain.com,cidr=127.0.0.1/16,ipv4=1.2.3.4,ipv4=5.6.7.8,ipv6=:::::")
+	flags.StringVar(&o.agentIdentifiers, "agent-identifiers", o.agentIdentifiers, "Identifiers of the agent that will be used by the server when choosing agent. N.B. the list of identifiers must be in URL encoded format. e.g.,host=localhost&host=node1.mydomain.com&cidr=127.0.0.1/16&ipv4=1.2.3.4&ipv4=5.6.7.8&ipv6=:::::")
 	return flags
 }
 
@@ -121,7 +120,7 @@ func (o *GrpcProxyAgentOptions) Print() {
 	klog.V(1).Infof("SyncInterval set to %v.\n", o.syncInterval)
 	klog.V(1).Infof("ProbeInterval set to %v.\n", o.probeInterval)
 	klog.V(1).Infof("ServiceAccountTokenPath set to %q.\n", o.serviceAccountTokenPath)
-	klog.V(1).Infof("AgentIdentifiers set to %s.\n", o.agentIdentifiers)
+	klog.V(1).Infof("AgentIdentifiers set to %s.\n", util.PrettyPrintURL(o.agentIdentifiers))
 }
 
 func (o *GrpcProxyAgentOptions) Validate() error {
@@ -168,20 +167,18 @@ func (o *GrpcProxyAgentOptions) Validate() error {
 }
 
 func validateAgentIdentifiers(agentIdentifiers string) error {
-	entries := strings.Split(agentIdentifiers, ",")
-	for _, entry := range entries {
-		kv := strings.Split(entry, "=")
-		if len(kv) != 2 {
-			return errors.New("invalid arguments format, the valid format is " +
-				"<addressType1>=<address1>,<addressType2>=<address2>")
-		}
-		switch agent.IdentifierType(kv[0]) {
+	decoded, err := url.ParseQuery(agentIdentifiers)
+	if err != nil {
+		return err
+	}
+	for idType := range decoded {
+		switch agent.IdentifierType(idType) {
 		case agent.IPv4:
 		case agent.IPv6:
 		case agent.CIDR:
 		case agent.Host:
 		default:
-			return fmt.Errorf("unknown address type: %s", kv[0])
+			return fmt.Errorf("unknown address type: %s", idType)
 		}
 	}
 	return nil

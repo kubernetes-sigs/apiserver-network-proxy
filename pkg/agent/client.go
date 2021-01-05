@@ -22,8 +22,8 @@ import (
 	"io"
 	"io/ioutil"
 	"net"
+	"net/url"
 	"strconv"
-	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -102,34 +102,27 @@ const (
 // GenAgentIdentifiers generates an AgentIdentifiers based on the input string, the
 // input string should be a comma-seprated list with each item in the format
 // of <IdentifierType>=<address>
-func GenAgentIdentifiers(addrs string) AgentIdentifiers {
+func GenAgentIdentifiers(addrs string) (AgentIdentifiers, error) {
 	var agentIDs AgentIdentifiers
-	entries := strings.Split(addrs, ",")
-	for _, entry := range entries {
-		kv := strings.Split(entry, "=")
-		if len(kv) != 2 {
-			klog.V(4).InfoS("Invalid agent address input format",
-				"got", entry, "expect", "<IdentifierType>=<address>")
-			continue
-		}
-		if kv[1] == "" {
-			continue
-		}
-		switch IdentifierType(kv[0]) {
+	decoded, err := url.ParseQuery(addrs)
+	if err != nil {
+		return agentIDs, fmt.Errorf("fail to parse url encoded string: %v", err)
+	}
+	for idType, ids := range decoded {
+		switch IdentifierType(idType) {
 		case IPv4:
-			agentIDs.IPv4 = append(agentIDs.IPv4, kv[1])
+			agentIDs.IPv4 = append(agentIDs.IPv4, ids...)
 		case IPv6:
-			agentIDs.IPv6 = append(agentIDs.IPv6, kv[1])
+			agentIDs.IPv6 = append(agentIDs.IPv6, ids...)
 		case Host:
-			agentIDs.Host = append(agentIDs.Host, kv[1])
+			agentIDs.Host = append(agentIDs.Host, ids...)
 		case CIDR:
-			agentIDs.CIDR = append(agentIDs.CIDR, kv[1])
+			agentIDs.CIDR = append(agentIDs.CIDR, ids...)
 		default:
-			klog.V(5).InfoS("Unknown address type", "Address Type", kv[0])
-			continue
+			return agentIDs, fmt.Errorf("Unknown address type: %s", idType)
 		}
 	}
-	return agentIDs
+	return agentIDs, nil
 }
 
 // AgentClient runs on the node network side. It connects to proxy server and establishes

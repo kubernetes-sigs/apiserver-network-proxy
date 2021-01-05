@@ -168,10 +168,10 @@ func containIdType(idTypes []pkgagent.IdentifierType, idType pkgagent.Identifier
 // AddBackend adds a backend.
 func (s *DefaultBackendStorage) AddBackend(identifier string, idType pkgagent.IdentifierType, conn agent.AgentService_ConnectServer) Backend {
 	if !containIdType(s.idTypes, idType) {
-		klog.ErrorS(&ErrWrongIDType{idType, s.idTypes}, "fail to add backend")
+		klog.V(4).InfoS("fial to add backend", "backend", identifier, "error", &ErrWrongIDType{idType, s.idTypes})
 		return nil
 	}
-	klog.V(2).InfoS("Register backend for agent", "connection", conn, "agentID", agentID)
+	klog.V(2).InfoS("Register backend for agent", "connection", conn, "agentID", identifier)
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	_, ok := s.backends[identifier]
@@ -179,7 +179,7 @@ func (s *DefaultBackendStorage) AddBackend(identifier string, idType pkgagent.Id
 	if ok {
 		for _, v := range s.backends[identifier] {
 			if v.conn == conn {
-				klog.V(1).InfoS("This should not happen. Adding existing backend for agent", "connection", conn, "agentID", agentID)
+				klog.V(1).InfoS("This should not happen. Adding existing backend for agent", "connection", conn, "agentID", identifier)
 				return v
 			}
 		}
