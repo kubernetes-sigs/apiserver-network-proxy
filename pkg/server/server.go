@@ -296,10 +296,12 @@ func NewProxyServer(serverID string, proxyStrategies []ProxyStrategy, serverCoun
 		switch ps {
 		case ProxyStrategyDestHost:
 			bms = append(bms, NewDestHostBackendManager())
+		case ProxyStrategyDefault:
+			bms = append(bms, NewDefaultBackendManager())
 		default:
+			klog.V(4).InfoS("Unknonw proxy strategy", "strategy", ps)
 		}
 	}
-	bms = append(bms, NewDefaultBackendManager())
 
 	return &ProxyServer{
 		frontends:                  make(map[string](map[int64]*ProxyClientConnection)),
@@ -308,9 +310,8 @@ func NewProxyServer(serverID string, proxyStrategies []ProxyStrategy, serverCoun
 		serverCount:                serverCount,
 		BackendManagers:            bms,
 		AgentAuthenticationOptions: agentAuthenticationOptions,
-		// use the last backendmanager, i.e., default backendmanager,
-		// as the Readiness Manager
-		Readiness:       bms[len(bms)-1],
+		// use the first backendmanager as the Readiness Manager
+		Readiness:       bms[0],
 		proxyStrategies: proxyStrategies,
 	}
 }

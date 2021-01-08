@@ -150,7 +150,7 @@ func (o *ProxyRunOptions) Flags() *pflag.FlagSet {
 	flags.StringVar(&o.agentServiceAccount, "agent-service-account", o.agentServiceAccount, "Expected agent's service account during agent authentication (used with agent-namespace, authentication-audience, kubeconfig).")
 	flags.StringVar(&o.kubeconfigPath, "kubeconfig", o.kubeconfigPath, "absolute path to the kubeconfig file (used with agent-namespace, agent-service-account, authentication-audience).")
 	flags.StringVar(&o.authenticationAudience, "authentication-audience", o.authenticationAudience, "Expected agent's token authentication audience (used with agent-namespace, agent-service-account, kubeconfig).")
-	flags.StringVar(&o.proxyStrategies, "proxy-strategies", o.proxyStrategies, "The list of proxy strategies used by the server to pick a backend/tunnel. e.g., \"destHost,\"")
+	flags.StringVar(&o.proxyStrategies, "proxy-strategies", o.proxyStrategies, "The list of proxy strategies used by the server to pick a backend/tunnel, available strategies are: default, destHost.")
 	return flags
 }
 
@@ -297,8 +297,11 @@ func (o *ProxyRunOptions) Validate() error {
 	if o.proxyStrategies != "" {
 		pss := strings.Split(o.proxyStrategies, ",")
 		for _, ps := range pss {
-			if ps != string(server.ProxyStrategyDestHost) {
-				return fmt.Errorf("unknown proxy strategy: %s, available strategy is: destHost", ps)
+			switch ps {
+			case string(server.ProxyStrategyDestHost):
+			case string(server.ProxyStrategyDefault):
+			default:
+				return fmt.Errorf("unknown proxy strategy: %s, available strategy are: default, destHost", ps)
 			}
 		}
 	}
@@ -330,7 +333,7 @@ func newProxyRunOptions() *ProxyRunOptions {
 		agentServiceAccount:       "",
 		kubeconfigPath:            "",
 		authenticationAudience:    "",
-		proxyStrategies:           "",
+		proxyStrategies:           "default",
 	}
 	return &o
 }
@@ -381,7 +384,10 @@ func (p *Proxy) run(o *ProxyRunOptions) error {
 		AuthenticationAudience: o.authenticationAudience,
 	}
 	klog.V(1).Infoln("Starting master server for client connections.")
-	ps := server.GenProxyStrategiesFromStr(o.proxyStrategies)
+	ps, err := server.GenProxyStrategiesFromStr(o.proxyStrategies)
+	if err != nil {
+		return err
+	}
 	server := server.NewProxyServer(o.serverID, ps, int(o.serverCount), authOpt)
 
 	masterStop, err := p.runMasterServer(ctx, o, server)

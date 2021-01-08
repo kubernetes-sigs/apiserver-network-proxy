@@ -33,23 +33,31 @@ import (
 type ProxyStrategy string
 
 const (
+	// With this strategy the Proxy Server will randomly pick a backend from
+	// the current healthy backends to establish the tunnel over which to
+	// forward requests.
+	ProxyStrategyDefault ProxyStrategy = "default"
+	// With this strategy the Proxy Server will pick a backend that has the same
+	// associated host as the request.Host to establish the tunnel.
 	ProxyStrategyDestHost ProxyStrategy = "destHost"
 )
 
 // GenProxyStrategiesFromStr generates the list of proxy strategies from the
 // comma-seperated string, i.e., destHost.
-func GenProxyStrategiesFromStr(proxyStrategies string) []ProxyStrategy {
+func GenProxyStrategiesFromStr(proxyStrategies string) ([]ProxyStrategy, error) {
 	var ps []ProxyStrategy
 	strs := strings.Split(proxyStrategies, ",")
 	for _, s := range strs {
 		switch s {
 		case string(ProxyStrategyDestHost):
 			ps = append(ps, ProxyStrategyDestHost)
+		case string(ProxyStrategyDefault):
+			ps = append(ps, ProxyStrategyDefault)
 		default:
-			klog.V(4).InfoS("Unknown proxy strategy", "strategy", s)
+			return nil, fmt.Errorf("Unknown proxy strategy %s", s)
 		}
 	}
-	return ps
+	return ps, nil
 }
 
 type Backend interface {
@@ -168,7 +176,7 @@ func containIdType(idTypes []pkgagent.IdentifierType, idType pkgagent.Identifier
 // AddBackend adds a backend.
 func (s *DefaultBackendStorage) AddBackend(identifier string, idType pkgagent.IdentifierType, conn agent.AgentService_ConnectServer) Backend {
 	if !containIdType(s.idTypes, idType) {
-		klog.V(4).InfoS("fial to add backend", "backend", identifier, "error", &ErrWrongIDType{idType, s.idTypes})
+		klog.V(4).InfoS("fail to add backend", "backend", identifier, "error", &ErrWrongIDType{idType, s.idTypes})
 		return nil
 	}
 	klog.V(2).InfoS("Register backend for agent", "connection", conn, "agentID", identifier)
