@@ -32,7 +32,9 @@ import (
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/klog/v2"
 	"sigs.k8s.io/apiserver-network-proxy/konnectivity-client/proto/client"
+	pkgagent "sigs.k8s.io/apiserver-network-proxy/pkg/agent"
 	"sigs.k8s.io/apiserver-network-proxy/pkg/server/metrics"
+	"sigs.k8s.io/apiserver-network-proxy/pkg/util"
 	"sigs.k8s.io/apiserver-network-proxy/proto/agent"
 	"sigs.k8s.io/apiserver-network-proxy/proto/header"
 )
@@ -104,8 +106,8 @@ func (pm *PendingDialManager) Remove(random int64) {
 
 // ProxyServer
 type ProxyServer struct {
-	// BackendManager manages the backends.
-	BackendManager BackendManager
+	// BackendManagers contains a list of BackendManagers
+	BackendManagers []BackendManager
 
 	// Readiness reports if the proxy server is ready, i.e., if the proxy
 	// server has connections to proxy agents (backends). Note that the
@@ -126,6 +128,8 @@ type ProxyServer struct {
 
 	// agent authentication
 	AgentAuthenticationOptions *AgentTokenAuthenticationOptions
+
+	proxyStrategies []ProxyStrategy
 }
 
 // AgentTokenAuthenticationOptions contains list of parameters required for agent token based authentication
@@ -140,6 +144,90 @@ type AgentTokenAuthenticationOptions struct {
 var _ agent.AgentServiceServer = &ProxyServer{}
 
 var _ client.ProxyServiceServer = &ProxyServer{}
+
+func genContext(proxyStrategies []ProxyStrategy, reqHost string) context.Context {
+	ctx := context.Background()
+	for _, ps := range proxyStrategies {
+		switch ps {
+		case ProxyStrategyDestHost:
+			addr := util.RemovePortFromHost(reqHost)
+			ctx = context.WithValue(ctx, "destHost", addr)
+		}
+	}
+	return ctx
+}
+
+func (s *ProxyServer) getBackend(reqHost string) (Backend, error) {
+	ctx := genContext(s.proxyStrategies, reqHost)
+	for _, bm := range s.BackendManagers {
+		be, err := bm.Backend(ctx)
+		if err == nil {
+			return be, nil
+		}
+		if ignoreNotFound(err) != nil {
+			// if can't find a backend through current BackendManager, move on
+			// to the next one
+			return nil, err
+		}
+	}
+	return nil, &ErrNotFound{}
+}
+
+func (s *ProxyServer) addBackend(agentID string, conn agent.AgentService_ConnectServer) (backend Backend) {
+	for i := 0; i < len(s.BackendManagers); i++ {
+		switch s.BackendManagers[i].(type) {
+		case *DestHostBackendManager:
+			agentIdentifiers, err := getAgentIdentifiers(conn)
+			if err != nil {
+				klog.ErrorS(err, "fail to get the agent Host", "agentID", agentID)
+				break
+			}
+			for _, ipv4 := range agentIdentifiers.IPv4 {
+				klog.V(5).InfoS("Add the agent to DestHostBackendManager", "agent address", ipv4)
+				s.BackendManagers[i].AddBackend(ipv4, pkgagent.IPv4, conn)
+			}
+			for _, ipv6 := range agentIdentifiers.IPv6 {
+				klog.V(5).InfoS("Add the agent to DestHostBackendManager", "agent address", ipv6)
+				s.BackendManagers[i].AddBackend(ipv6, pkgagent.IPv6, conn)
+			}
+			for _, host := range agentIdentifiers.Host {
+				klog.V(5).InfoS("Add the agent to DestHostBackendManager", "agent address", host)
+				s.BackendManagers[i].AddBackend(host, pkgagent.Host, conn)
+			}
+		default:
+			klog.V(5).InfoS("Add the agent to DefaultBackendManager", "agentID", agentID)
+			backend = s.BackendManagers[i].AddBackend(agentID, pkgagent.UID, conn)
+		}
+	}
+	return
+}
+
+func (s *ProxyServer) removeBackend(agentID string, conn agent.AgentService_ConnectServer) {
+	for _, bm := range s.BackendManagers {
+		switch bm.(type) {
+		case *DestHostBackendManager:
+			agentIdentifiers, err := getAgentIdentifiers(conn)
+			if err != nil {
+				klog.ErrorS(err, "fail to get the agent Host", "agentID", agentID)
+				break
+			}
+			for _, ipv4 := range agentIdentifiers.IPv4 {
+				klog.V(5).InfoS("Remove the agent from the DestHostBackendManager", "agentHost", ipv4)
+				bm.RemoveBackend(ipv4, pkgagent.IPv4, conn)
+			}
+			for _, ipv6 := range agentIdentifiers.IPv6 {
+				klog.V(5).InfoS("Remove the agent from the DestHostBackendManager", "agentHost", ipv6)
+				bm.RemoveBackend(ipv6, pkgagent.IPv6, conn)
+			}
+			for _, host := range agentIdentifiers.Host {
+				klog.V(5).InfoS("Remove the agent from the DestHostBackendManager", "agentHost", host)
+				bm.RemoveBackend(host, pkgagent.Host, conn)
+			}
+		default:
+			bm.RemoveBackend(agentID, pkgagent.UID, conn)
+		}
+	}
+}
 
 func (s *ProxyServer) addFrontend(agentID string, connID int64, p *ProxyClientConnection) {
 	klog.V(2).InfoS("Register frontend for agent", "frontend", p, "agentID", agentID, "connectionID", connID)
@@ -202,16 +290,29 @@ func (s *ProxyServer) getFrontendsForBackendConn(agentID string, backend Backend
 }
 
 // NewProxyServer creates a new ProxyServer instance
-func NewProxyServer(serverID string, serverCount int, agentAuthenticationOptions *AgentTokenAuthenticationOptions) *ProxyServer {
-	bm := NewDefaultBackendManager()
+func NewProxyServer(serverID string, proxyStrategies []ProxyStrategy, serverCount int, agentAuthenticationOptions *AgentTokenAuthenticationOptions) *ProxyServer {
+	var bms []BackendManager
+	for _, ps := range proxyStrategies {
+		switch ps {
+		case ProxyStrategyDestHost:
+			bms = append(bms, NewDestHostBackendManager())
+		case ProxyStrategyDefault:
+			bms = append(bms, NewDefaultBackendManager())
+		default:
+			klog.V(4).InfoS("Unknonw proxy strategy", "strategy", ps)
+		}
+	}
+
 	return &ProxyServer{
 		frontends:                  make(map[string](map[int64]*ProxyClientConnection)),
 		PendingDial:                NewPendingDialManager(),
 		serverID:                   serverID,
 		serverCount:                serverCount,
-		BackendManager:             bm,
+		BackendManagers:            bms,
 		AgentAuthenticationOptions: agentAuthenticationOptions,
-		Readiness:                  bm,
+		// use the first backendmanager as the Readiness Manager
+		Readiness:       bms[0],
+		proxyStrategies: proxyStrategies,
 	}
 }
 
@@ -271,7 +372,7 @@ func (s *ProxyServer) serveRecvFrontend(stream client.ProxyService_ProxyServer, 
 			// the address, then we can send the Dial_REQ to the
 			// same agent. That way we save the agent from creating
 			// a new connection to the address.
-			backend, err = s.BackendManager.Backend(context.TODO())
+			backend, err = s.getBackend(pkt.GetDialRequest().Address)
 			if err != nil {
 				klog.ErrorS(err, "Failed to get a backend")
 				continue
@@ -371,6 +472,27 @@ func agentID(stream agent.AgentService_ConnectServer) (string, error) {
 	return agentIDs[0], nil
 }
 
+func getAgentIdentifiers(stream agent.AgentService_ConnectServer) (pkgagent.AgentIdentifiers, error) {
+	var agentIdentifiers pkgagent.AgentIdentifiers
+	md, ok := metadata.FromIncomingContext(stream.Context())
+	if !ok {
+		return agentIdentifiers, fmt.Errorf("failed to get context")
+	}
+	agentIDs := md.Get(header.AgentIdentifiers)
+	if len(agentIDs) > 1 {
+		return agentIdentifiers, fmt.Errorf("expected at most one agent IP in the context, got %v", agentIDs)
+	}
+	if len(agentIDs) == 0 {
+		return agentIdentifiers, nil
+	}
+
+	agentIdentifiers, err := pkgagent.GenAgentIdentifiers(agentIDs[0])
+	if err != nil {
+		return agentIdentifiers, err
+	}
+	return agentIdentifiers, nil
+}
+
 func (s *ProxyServer) validateAuthToken(token string) error {
 	trReq := &authv1.TokenReview{
 		Spec: authv1.TokenReviewSpec{
@@ -447,9 +569,10 @@ func (s *ProxyServer) Connect(stream agent.AgentService_ConnectServer) error {
 	if err != nil {
 		return err
 	}
+
 	klog.V(2).InfoS("Connect request from agent", "agentID", agentID)
-	backend := s.BackendManager.AddBackend(agentID, stream)
-	defer s.BackendManager.RemoveBackend(agentID, stream)
+	backend := s.addBackend(agentID, stream)
+	defer s.removeBackend(agentID, stream)
 
 	h := metadata.Pairs(header.ServerID, s.serverID, header.ServerCount, strconv.Itoa(s.serverCount))
 	if err := stream.SendHeader(h); err != nil {

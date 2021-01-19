@@ -20,6 +20,7 @@ import (
 	"reflect"
 	"testing"
 
+	pkgagent "sigs.k8s.io/apiserver-network-proxy/pkg/agent"
 	"sigs.k8s.io/apiserver-network-proxy/proto/agent"
 )
 
@@ -36,8 +37,8 @@ func TestAddRemoveBackends(t *testing.T) {
 
 	p := NewDefaultBackendManager()
 
-	p.AddBackend("agent1", conn1)
-	p.RemoveBackend("agent1", conn1)
+	p.AddBackend("agent1", pkgagent.UID, conn1)
+	p.RemoveBackend("agent1", pkgagent.UID, conn1)
 	expectedBackends := make(map[string][]*backend)
 	expectedAgentIDs := []string{}
 	if e, a := expectedBackends, p.backends; !reflect.DeepEqual(e, a) {
@@ -48,21 +49,21 @@ func TestAddRemoveBackends(t *testing.T) {
 	}
 
 	p = NewDefaultBackendManager()
-	p.AddBackend("agent1", conn1)
-	p.AddBackend("agent1", conn12)
+	p.AddBackend("agent1", pkgagent.UID, conn1)
+	p.AddBackend("agent1", pkgagent.UID, conn12)
 	// Adding the same connection again should be a no-op.
-	p.AddBackend("agent1", conn12)
-	p.AddBackend("agent2", conn2)
-	p.AddBackend("agent2", conn22)
-	p.AddBackend("agent3", conn3)
-	p.RemoveBackend("agent2", conn22)
-	p.RemoveBackend("agent2", conn2)
-	p.RemoveBackend("agent1", conn1)
+	p.AddBackend("agent1", pkgagent.UID, conn12)
+	p.AddBackend("agent2", pkgagent.UID, conn2)
+	p.AddBackend("agent2", pkgagent.UID, conn22)
+	p.AddBackend("agent3", pkgagent.UID, conn3)
+	p.RemoveBackend("agent2", pkgagent.UID, conn22)
+	p.RemoveBackend("agent2", pkgagent.UID, conn2)
+	p.RemoveBackend("agent1", pkgagent.UID, conn1)
 	// This is invalid. agent1 doesn't have conn3. This should be a no-op.
-	p.RemoveBackend("agent1", conn3)
+	p.RemoveBackend("agent1", pkgagent.UID, conn3)
 	expectedBackends = map[string][]*backend{
-		"agent1": []*backend{newBackend(conn12)},
-		"agent3": []*backend{newBackend(conn3)},
+		"agent1": {newBackend(conn12)},
+		"agent3": {newBackend(conn3)},
 	}
 	expectedAgentIDs = []string{"agent1", "agent3"}
 	if e, a := expectedBackends, p.backends; !reflect.DeepEqual(e, a) {

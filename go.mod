@@ -3,7 +3,7 @@ module sigs.k8s.io/apiserver-network-proxy
 go 1.12
 
 require (
-	github.com/golang/mock v1.4.0
+	github.com/golang/mock v1.4.4
 	github.com/golang/protobuf v1.4.2
 	github.com/google/uuid v1.1.1
 	github.com/inconshreveable/mousetrap v1.0.0 // indirect
@@ -18,6 +18,7 @@ require (
 	k8s.io/apimachinery v0.17.1
 	k8s.io/client-go v0.17.1
 	k8s.io/klog/v2 v2.0.0
+	rsc.io/quote/v3 v3.1.0 // indirect
 	sigs.k8s.io/apiserver-network-proxy/konnectivity-client v0.0.0
 )
 

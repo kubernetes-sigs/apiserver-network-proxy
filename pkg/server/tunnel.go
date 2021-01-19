@@ -17,7 +17,6 @@ limitations under the License.
 package server
 
 import (
-	"context"
 	"fmt"
 	"io"
 	"math/rand"
@@ -68,8 +67,9 @@ func (t *Tunnel) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			},
 		},
 	}
-	klog.V(4).InfoS("Set pending", "random", random, "value", w)
-	backend, err := t.Server.BackendManager.Backend(context.TODO())
+
+	klog.V(4).Infof("Set pending(rand=%d) to %v", random, w)
+	backend, err := t.Server.getBackend(r.Host)
 	if err != nil {
 		http.Error(w, fmt.Sprintf("currently no tunnels available: %v", err), http.StatusInternalServerError)
 		return
