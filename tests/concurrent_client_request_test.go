@@ -110,7 +110,7 @@ func newSingleTimeGetter(m *server.DefaultBackendManager) *singleTimeManager {
 
 var _ server.BackendManager = &singleTimeManager{}
 
-func (stm *singleTimeManager) Ready() (bool, string) {
+func (s *singleTimeManager) Ready() (bool, string) {
 	return true, ""
 }
 

@@ -162,7 +162,10 @@ func closeNoResponse(w http.ResponseWriter, req *http.Request) {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
-	conn.Close()
+	err = conn.Close()
+	if err != nil {
+		klog.ErrorS(err, "failed to close connection")
+	}
 }
 
 func sleepReturnSuccess(w http.ResponseWriter, req *http.Request) {
@@ -204,6 +207,11 @@ func (p *TestServer) runMasterServer(ctx context.Context, o *TestServerRunOption
 		klog.Warningf("HTTP test server stopped listening\n")
 	}()
 
-	stop := func() { server.Shutdown(ctx) }
+	stop := func() {
+		err := server.Shutdown(ctx)
+		if err != nil {
+			klog.ErrorS(err, "failed to shutdown server")
+		}
+	}
 	return stop, nil
 }

@@ -18,6 +18,9 @@ ALL_ARCH = amd64 arm arm64 ppc64le s390x
 GOPATH ?= $(GOPATH)
 GOOS ?= $(shell go env GOOS)
 GOARCH ?= $(shell go env GOARCH)
+INSTALL_LOCATION:=$(shell go env GOPATH)/bin
+GOLANGCI_LINT_VERSION ?= 1.35.2
+GOSEC_VERSION ?= 2.5.0
 
 REGISTRY ?= gcr.io/$(shell gcloud config get-value project)
 STAGING_REGISTRY := gcr.io/k8s-staging-kas-network-proxy
@@ -76,6 +79,10 @@ bin/proxy-server: proto/agent/agent.pb.go konnectivity-client/proto/client/clien
 ## Linting
 ## --------------------------------------
 
+.PHONY: lint
+lint:
+	curl -sSfL https://raw.githubusercontent.com/golangci/golangci-lint/master/install.sh | sh -s -- -b $(INSTALL_LOCATION) v$(GOLANGCI_LINT_VERSION)
+	$(INSTALL_LOCATION)/golangci-lint run --no-config --disable-all --enable=gofmt,golint,gosec --fix --verbose --timeout 3m
 
 ## --------------------------------------
 ## Proto

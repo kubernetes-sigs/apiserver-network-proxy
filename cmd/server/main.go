@@ -28,6 +28,7 @@ import (
 	"net/http/pprof"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"runtime"
 	"strings"
 	"sync"
@@ -61,7 +62,10 @@ func main() {
 	flags.AddFlagSet(o.Flags())
 	local := flag.NewFlagSet(os.Args[0], flag.ExitOnError)
 	klog.InitFlags(local)
-	local.Set("v", "4")
+	err := local.Set("v", "4")
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "error setting klog flags: %v", err)
+	}
 	local.VisitAll(func(fl *flag.Flag) {
 		fl.Name = util.Normalize(fl.Name)
 		flags.AddGoFlag(fl)
@@ -482,14 +486,18 @@ func (p *Proxy) runUDSMasterServer(ctx context.Context, o *ProxyRunOptions, s *s
 				Server: s,
 			},
 		}
-		stop = func() { server.Shutdown(ctx) }
+		stop = func() {
+			err := server.Shutdown(ctx)
+			klog.ErrorS(err, "error shutting down server")
+		}
 		go func() {
 			udsListener, err := getUDSListener(ctx, o.udsName)
 			if err != nil {
 				klog.ErrorS(err, "failed to get uds listener")
 			}
 			defer func() {
-				udsListener.Close()
+				err := udsListener.Close()
+				klog.ErrorS(err, "failed to close uds listener")
 			}()
 			err = server.Serve(udsListener)
 			if err != nil {
@@ -508,11 +516,11 @@ func (p *Proxy) getTLSConfig(caFile, certFile, keyFile string) (*tls.Config, err
 	}
 
 	if caFile == "" {
-		return &tls.Config{Certificates: []tls.Certificate{cert}}, nil
+		return &tls.Config{Certificates: []tls.Certificate{cert}, MinVersion: tls.VersionTLS12}, nil
 	}
 
 	certPool := x509.NewCertPool()
-	caCert, err := ioutil.ReadFile(caFile)
+	caCert, err := ioutil.ReadFile(filepath.Clean(caFile))
 	if err != nil {
 		return nil, fmt.Errorf("failed to read cluster CA cert %s: %v", caFile, err)
 	}
@@ -524,6 +532,7 @@ func (p *Proxy) getTLSConfig(caFile, certFile, keyFile string) (*tls.Config, err
 		ClientAuth:   tls.RequireAndVerifyClientCert,
 		Certificates: []tls.Certificate{cert},
 		ClientCAs:    certPool,
+		MinVersion:   tls.VersionTLS12,
 	}
 
 	return tlsConfig, nil
@@ -560,7 +569,12 @@ func (p *Proxy) runMTLSMasterServer(ctx context.Context, o *ProxyRunOptions, s *
 			},
 			TLSNextProto: make(map[string]func(*http.Server, *tls.Conn, http.Handler)),
 		}
-		stop = func() { server.Shutdown(ctx) }
+		stop = func() {
+			err := server.Shutdown(ctx)
+			if err != nil {
+				klog.ErrorS(err, "failed to shutdown server")
+			}
+		}
 		go func() {
 			err := server.ListenAndServeTLS("", "") // empty files defaults to tlsConfig
 			if err != nil {

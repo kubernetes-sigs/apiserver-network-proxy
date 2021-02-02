@@ -38,7 +38,7 @@ func (lb *tcpLB) handleConnection(in net.Conn, backend string) {
 }
 
 func (lb *tcpLB) serve(stopCh chan struct{}) {
-	ln, err := net.Listen("tcp", ":8000")
+	ln, err := net.Listen("tcp", "127.0.0.1:8000")
 	if err != nil {
 		log.Fatalf("failed to bind: %s", err)
 	}
@@ -79,7 +79,7 @@ func (lb *tcpLB) removeBackend(backend string) {
 func (lb *tcpLB) randomBackend() string {
 	lb.mu.RLock()
 	defer lb.mu.RUnlock()
-	i := rand.Intn(len(lb.backends))
+	i := rand.Intn(len(lb.backends)) /* #nosec G404 */
 	return lb.backends[i]
 }
 

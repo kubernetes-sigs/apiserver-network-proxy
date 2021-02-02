@@ -21,12 +21,13 @@ import (
 	"crypto/x509"
 	"fmt"
 	"io/ioutil"
+	"path/filepath"
 )
 
 // getCACertPool loads CA certificates to pool
 func getCACertPool(caFile string) (*x509.CertPool, error) {
 	certPool := x509.NewCertPool()
-	caCert, err := ioutil.ReadFile(caFile)
+	caCert, err := ioutil.ReadFile(filepath.Clean(caFile))
 	if err != nil {
 		return nil, fmt.Errorf("failed to read CA cert %s: %v", caFile, err)
 	}
@@ -47,7 +48,8 @@ func GetClientTLSConfig(caFile, certFile, keyFile, serverName string) (*tls.Conf
 	if certFile == "" && keyFile == "" {
 		// return TLS config based on CA only
 		tlsConfig := &tls.Config{
-			RootCAs: certPool,
+			RootCAs:    certPool,
+			MinVersion: tls.VersionTLS12,
 		}
 		return tlsConfig, nil
 	}
@@ -61,6 +63,7 @@ func GetClientTLSConfig(caFile, certFile, keyFile, serverName string) (*tls.Conf
 		ServerName:   serverName,
 		Certificates: []tls.Certificate{cert},
 		RootCAs:      certPool,
+		MinVersion:   tls.VersionTLS12,
 	}
 	return tlsConfig, nil
 }

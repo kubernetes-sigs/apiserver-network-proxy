@@ -80,9 +80,9 @@ func newConnectionManager() *connectionManager {
 	}
 }
 
-// AgentIdentifiers stores identifiers that will be used by the server when
+// Identifiers stores agent identifiers that will be used by the server when
 // choosing agents
-type AgentIdentifiers struct {
+type Identifiers struct {
 	IPv4 []string
 	IPv6 []string
 	Host []string
@@ -99,11 +99,11 @@ const (
 	UID  IdentifierType = "uid"
 )
 
-// GenAgentIdentifiers generates an AgentIdentifiers based on the input string, the
+// GenAgentIdentifiers generates an Identifiers based on the input string, the
 // input string should be a comma-seprated list with each item in the format
 // of <IdentifierType>=<address>
-func GenAgentIdentifiers(addrs string) (AgentIdentifiers, error) {
-	var agentIDs AgentIdentifiers
+func GenAgentIdentifiers(addrs string) (Identifiers, error) {
+	var agentIDs Identifiers
 	decoded, err := url.ParseQuery(addrs)
 	if err != nil {
 		return agentIDs, fmt.Errorf("fail to parse url encoded string: %v", err)
@@ -125,9 +125,9 @@ func GenAgentIdentifiers(addrs string) (AgentIdentifiers, error) {
 	return agentIDs, nil
 }
 
-// AgentClient runs on the node network side. It connects to proxy server and establishes
+// Client runs on the node network side. It connects to proxy server and establishes
 // a stream connection from which it sends and receives network traffic.
-type AgentClient struct {
+type Client struct {
 	nextConnID int64
 
 	connManager *connectionManager
@@ -154,8 +154,8 @@ type AgentClient struct {
 	serviceAccountTokenPath string
 }
 
-func newAgentClient(address, agentID, agentIdentifiers string, cs *ClientSet, opts ...grpc.DialOption) (*AgentClient, int, error) {
-	a := &AgentClient{
+func newAgentClient(address, agentID, agentIdentifiers string, cs *ClientSet, opts ...grpc.DialOption) (*Client, int, error) {
+	a := &Client{
 		cs:                      cs,
 		address:                 address,
 		agentID:                 agentID,
@@ -175,7 +175,7 @@ func newAgentClient(address, agentID, agentIdentifiers string, cs *ClientSet, op
 
 // Connect makes the grpc dial to the proxy server. It returns the serverID
 // it connects to.
-func (a *AgentClient) Connect() (int, error) {
+func (a *Client) Connect() (int, error) {
 	conn, err := grpc.Dial(a.address, a.opts...)
 	if err != nil {
 		return 0, err
@@ -185,23 +185,26 @@ func (a *AgentClient) Connect() (int, error) {
 		header.AgentIdentifiers, a.agentIdentifiers)
 	if a.serviceAccountTokenPath != "" {
 		if ctx, err = a.initializeAuthContext(ctx); err != nil {
-			conn.Close()
+			err := conn.Close()
+			if err != nil {
+				klog.ErrorS(err, "failed to close connection")
+			}
 			return 0, err
 		}
 	}
 	stream, err := agent.NewAgentServiceClient(conn).Connect(ctx)
 	if err != nil {
-		conn.Close()
+		conn.Close() /* #nosec G104 */
 		return 0, err
 	}
 	serverID, err := serverID(stream)
 	if err != nil {
-		conn.Close()
+		conn.Close() /* #nosec G104 */
 		return 0, err
 	}
 	serverCount, err := serverCount(stream)
 	if err != nil {
-		conn.Close()
+		conn.Close() /* #nosec G104 */
 		return 0, err
 	}
 	a.conn = conn
@@ -212,15 +215,18 @@ func (a *AgentClient) Connect() (int, error) {
 }
 
 // Close closes the underlying connection.
-func (a *AgentClient) Close() {
+func (a *Client) Close() {
 	if a.conn == nil {
 		klog.Errorln("Unexpected empty AgentClient.conn")
 	}
-	a.conn.Close()
+	err := a.conn.Close()
+	if err != nil {
+		klog.ErrorS(err, "failed to close underlying connection")
+	}
 	close(a.stopCh)
 }
 
-func (a *AgentClient) Send(pkt *client.Packet) error {
+func (a *Client) Send(pkt *client.Packet) error {
 	a.sendLock.Lock()
 	defer a.sendLock.Unlock()
 
@@ -232,7 +238,7 @@ func (a *AgentClient) Send(pkt *client.Packet) error {
 	return err
 }
 
-func (a *AgentClient) Recv() (*client.Packet, error) {
+func (a *Client) Recv() (*client.Packet, error) {
 	a.recvLock.Lock()
 	defer a.recvLock.Unlock()
 
@@ -270,7 +276,7 @@ func serverID(stream agent.AgentService_ConnectClient) (string, error) {
 	return sids[0], nil
 }
 
-func (a *AgentClient) initializeAuthContext(ctx context.Context) (context.Context, error) {
+func (a *Client) initializeAuthContext(ctx context.Context) (context.Context, error) {
 	var err error
 	var b []byte
 
@@ -297,7 +303,7 @@ func (a *AgentClient) initializeAuthContext(ctx context.Context) (context.Contex
 // gRPC stream. Successful Connect is required before Serve. The
 // The requests include things like opening a connection to a server,
 // streaming data and close the connection.
-func (a *AgentClient) Serve() {
+func (a *Client) Serve() {
 	klog.V(2).InfoS("Start serving", "serverID", a.serverID)
 	go a.probe()
 	for {
@@ -421,7 +427,7 @@ func (a *AgentClient) Serve() {
 	}
 }
 
-func (a *AgentClient) remoteToProxy(connID int64, ctx *connContext) {
+func (a *Client) remoteToProxy(connID int64, ctx *connContext) {
 	defer ctx.cleanup()
 
 	var buf [1 << 12]byte
@@ -452,7 +458,7 @@ func (a *AgentClient) remoteToProxy(connID int64, ctx *connContext) {
 	}
 }
 
-func (a *AgentClient) proxyToRemote(connID int64, ctx *connContext) {
+func (a *Client) proxyToRemote(connID int64, ctx *connContext) {
 	defer ctx.cleanup()
 
 	for d := range ctx.dataCh {
@@ -473,7 +479,7 @@ func (a *AgentClient) proxyToRemote(connID int64, ctx *connContext) {
 	}
 }
 
-func (a *AgentClient) probe() {
+func (a *Client) probe() {
 	for {
 		select {
 		case <-a.stopCh:

@@ -205,10 +205,10 @@ func TestAddRemoveFrontends(t *testing.T) {
 	p.removeFrontend("agent2", int64(2))
 	p.removeFrontend("agent1", int64(1))
 	expectedFrontends = map[string]map[int64]*ProxyClientConnection{
-		"agent1": map[int64]*ProxyClientConnection{
+		"agent1": {
 			int64(2): agent1ConnID2,
 		},
-		"agent3": map[int64]*ProxyClientConnection{
+		"agent3": {
 			int64(1): agent3ConnID1,
 		},
 	}

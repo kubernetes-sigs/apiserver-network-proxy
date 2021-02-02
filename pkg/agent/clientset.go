@@ -29,8 +29,8 @@ import (
 
 // ClientSet consists of clients connected to each instance of an HA proxy server.
 type ClientSet struct {
-	mu      sync.Mutex              //protects the clients.
-	clients map[string]*AgentClient // map between serverID and the client
+	mu      sync.Mutex         //protects the clients.
+	clients map[string]*Client // map between serverID and the client
 	// connects to this server.
 
 	agentID     string // ID of this agent
@@ -83,7 +83,7 @@ func (cs *ClientSet) HasID(serverID string) bool {
 	return cs.hasIDLocked(serverID)
 }
 
-func (cs *ClientSet) addClientLocked(serverID string, c *AgentClient) error {
+func (cs *ClientSet) addClientLocked(serverID string, c *Client) error {
 	if cs.hasIDLocked(serverID) {
 		return fmt.Errorf("client for proxy server %s already exists", serverID)
 	}
@@ -92,7 +92,7 @@ func (cs *ClientSet) addClientLocked(serverID string, c *AgentClient) error {
 
 }
 
-func (cs *ClientSet) AddClient(serverID string, c *AgentClient) error {
+func (cs *ClientSet) AddClient(serverID string, c *Client) error {
 	cs.mu.Lock()
 	defer cs.mu.Unlock()
 	return cs.addClientLocked(serverID, c)
@@ -120,7 +120,7 @@ type ClientSetConfig struct {
 
 func (cc *ClientSetConfig) NewAgentClientSet(stopCh <-chan struct{}) *ClientSet {
 	return &ClientSet{
-		clients:                 make(map[string]*AgentClient),
+		clients:                 make(map[string]*Client),
 		agentID:                 cc.AgentID,
 		agentIdentifiers:        cc.AgentIdentifiers,
 		address:                 cc.Address,
@@ -132,7 +132,7 @@ func (cc *ClientSetConfig) NewAgentClientSet(stopCh <-chan struct{}) *ClientSet 
 	}
 }
 
-func (cs *ClientSet) newAgentClient() (*AgentClient, int, error) {
+func (cs *ClientSet) newAgentClient() (*Client, int, error) {
 	return newAgentClient(cs.address, cs.agentID, cs.agentIdentifiers, cs, cs.dialOptions...)
 }
 

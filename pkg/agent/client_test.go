@@ -19,7 +19,7 @@ func TestServeData_HTTP(t *testing.T) {
 	var err error
 	var stream agent.AgentService_ConnectClient
 	stopCh := make(chan struct{})
-	testClient := &AgentClient{
+	testClient := &Client{
 		connManager: newConnectionManager(),
 		stopCh:      stopCh,
 	}
@@ -36,14 +36,14 @@ func TestServeData_HTTP(t *testing.T) {
 	}))
 	defer ts.Close()
 
-	// Stimulate sending KAS DIAL_REQ to AgentClient
+	// Stimulate sending KAS DIAL_REQ to (Agent) Client
 	dialPacket := newDialPacket("tcp", ts.URL[len("http://"):], 111)
 	err = stream.Send(dialPacket)
 	if err != nil {
 		t.Fatal(err.Error())
 	}
 
-	// Expect receiving DIAL_RSP packet from AgentClient
+	// Expect receiving DIAL_RSP packet from (Agent) Client
 	pkg, err := stream.Recv()
 	if err != nil {
 		t.Fatal(err.Error())
@@ -60,14 +60,14 @@ func TestServeData_HTTP(t *testing.T) {
 		t.Errorf("expect random=111; got %v", dialRsp.DialResponse.Random)
 	}
 
-	// Send Data (HTTP Request) via AgentClient to the test http server
+	// Send Data (HTTP Request) via (Agent) Client to the test http server
 	dataPacket := newDataPacket(connID, []byte("GET / HTTP/1.1\r\nHost: localhost\r\n\r\n"))
 	err = stream.Send(dataPacket)
 	if err != nil {
 		t.Error(err.Error())
 	}
 
-	// Expect receiving http response via AgentClient
+	// Expect receiving http response via (Agent) Client
 	pkg, _ = stream.Recv()
 	if pkg == nil {
 		t.Fatal("unexpected nil packet")
@@ -115,7 +115,7 @@ func TestServeData_HTTP(t *testing.T) {
 func TestClose_Client(t *testing.T) {
 	var stream agent.AgentService_ConnectClient
 	stopCh := make(chan struct{})
-	testClient := &AgentClient{
+	testClient := &Client{
 		connManager: newConnectionManager(),
 		stopCh:      stopCh,
 	}
@@ -131,14 +131,14 @@ func TestClose_Client(t *testing.T) {
 	}))
 	defer ts.Close()
 
-	// Stimulate sending KAS DIAL_REQ to AgentClient
+	// Stimulate sending KAS DIAL_REQ to (Agent) Client
 	dialPacket := newDialPacket("tcp", ts.URL[len("http://"):], 111)
 	err := stream.Send(dialPacket)
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	// Expect receiving DIAL_RSP packet from AgentClient
+	// Expect receiving DIAL_RSP packet from (Agent) Client
 	pkg, _ := stream.Recv()
 	if pkg == nil {
 		t.Fatal("unexpected nil packet")
@@ -157,7 +157,7 @@ func TestClose_Client(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// Expect receiving close response via AgentClient
+	// Expect receiving close response via (Agent) Client
 	pkg, _ = stream.Recv()
 	if pkg == nil {
 		t.Error("unexpected nil packet")
@@ -180,7 +180,7 @@ func TestClose_Client(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// Expect receiving close response via AgentClient
+	// Expect receiving close response via (Agent) Client
 	pkg, _ = stream.Recv()
 	if pkg == nil {
 		t.Error("unexpected nil packet")

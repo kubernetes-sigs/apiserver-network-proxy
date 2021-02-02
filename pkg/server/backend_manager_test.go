@@ -24,16 +24,16 @@ import (
 	"sigs.k8s.io/apiserver-network-proxy/proto/agent"
 )
 
-type fakeAgentService_ConnectServer struct {
+type fakeAgentServiceConnectServer struct {
 	agent.AgentService_ConnectServer
 }
 
 func TestAddRemoveBackends(t *testing.T) {
-	conn1 := new(fakeAgentService_ConnectServer)
-	conn12 := new(fakeAgentService_ConnectServer)
-	conn2 := new(fakeAgentService_ConnectServer)
-	conn22 := new(fakeAgentService_ConnectServer)
-	conn3 := new(fakeAgentService_ConnectServer)
+	conn1 := new(fakeAgentServiceConnectServer)
+	conn12 := new(fakeAgentServiceConnectServer)
+	conn2 := new(fakeAgentServiceConnectServer)
+	conn22 := new(fakeAgentServiceConnectServer)
+	conn3 := new(fakeAgentServiceConnectServer)
 
 	p := NewDefaultBackendManager()
 
