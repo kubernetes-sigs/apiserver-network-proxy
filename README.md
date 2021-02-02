@@ -82,10 +82,10 @@ client =HTTP over GRPC=> (:8090) proxy (:8091) <=GRPC= agent =HTTP=> http-test-s
 ./bin/proxy-test-client --ca-cert=certs/master/issued/ca.crt --client-cert=certs/master/issued/proxy-client.crt --client-key=certs/master/private/proxy-client.key
 ```
 
-### GRPC+UDP Client using Proxy with dial back Agent
+### GRPC+UDS Client using Proxy with dial back Agent
 
 ```
-client =HTTP over GRPC+UDP=> (/tmp/uds-proxy) proxy (:8091) <=GRPC= agent =HTTP=> SimpleHTTPServer(:8000)
+client =HTTP over GRPC+UDS=> (/tmp/uds-proxy) proxy (:8091) <=GRPC= agent =HTTP=> SimpleHTTPServer(:8000)
   |                                                    ^
   |                          Tunnel                    |
   +----------------------------------------------------+

@@ -375,7 +375,14 @@ func (s *ProxyServer) serveRecvFrontend(stream client.ProxyService_ProxyServer, 
 			backend, err = s.getBackend(pkt.GetDialRequest().Address)
 			if err != nil {
 				klog.ErrorS(err, "Failed to get a backend")
-				continue
+
+				resp := &client.Packet{
+					Type:    client.PacketType_DIAL_RSP,
+					Payload: &client.Packet_DialResponse{DialResponse: &client.DialResponse{Error: err.Error()}},
+				}
+				stream.Send(resp)
+				// The Dial is failing; no reason to keep this goroutine.
+				return
 			}
 			s.PendingDial.Add(
 				pkt.GetDialRequest().Random,
