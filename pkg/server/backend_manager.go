@@ -161,10 +161,10 @@ func NewDefaultBackendStorage(idTypes []pkgagent.IdentifierType) *DefaultBackend
 		backends: make(map[string][]*backend),
 		random:   rand.New(rand.NewSource(time.Now().UnixNano())),
 		idTypes:  idTypes,
-	}
+	} /* #nosec G404 */
 }
 
-func containIdType(idTypes []pkgagent.IdentifierType, idType pkgagent.IdentifierType) bool {
+func containIDType(idTypes []pkgagent.IdentifierType, idType pkgagent.IdentifierType) bool {
 	for _, it := range idTypes {
 		if it == idType {
 			return true
@@ -175,7 +175,7 @@ func containIdType(idTypes []pkgagent.IdentifierType, idType pkgagent.Identifier
 
 // AddBackend adds a backend.
 func (s *DefaultBackendStorage) AddBackend(identifier string, idType pkgagent.IdentifierType, conn agent.AgentService_ConnectServer) Backend {
-	if !containIdType(s.idTypes, idType) {
+	if !containIDType(s.idTypes, idType) {
 		klog.V(4).InfoS("fail to add backend", "backend", identifier, "error", &ErrWrongIDType{idType, s.idTypes})
 		return nil
 	}
@@ -201,7 +201,7 @@ func (s *DefaultBackendStorage) AddBackend(identifier string, idType pkgagent.Id
 
 // RemoveBackend removes a backend.
 func (s *DefaultBackendStorage) RemoveBackend(identifier string, idType pkgagent.IdentifierType, conn agent.AgentService_ConnectServer) {
-	if !containIdType(s.idTypes, idType) {
+	if !containIDType(s.idTypes, idType) {
 		klog.ErrorS(&ErrWrongIDType{idType, s.idTypes}, "fail to add backend")
 		return
 	}

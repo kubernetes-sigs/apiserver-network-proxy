@@ -39,7 +39,8 @@ import (
 	"sigs.k8s.io/apiserver-network-proxy/proto/header"
 )
 
-// ProxyClientConnection...
+type key int
+
 type ProxyClientConnection struct {
 	Mode      string
 	Grpc      client.ProxyService_ProxyServer
@@ -50,6 +51,10 @@ type ProxyClientConnection struct {
 	start     time.Time
 	backend   Backend
 }
+
+const (
+	destHost key = iota
+)
 
 func (c *ProxyClientConnection) send(pkt *client.Packet) error {
 	if c.Mode == "grpc" {
@@ -151,7 +156,7 @@ func genContext(proxyStrategies []ProxyStrategy, reqHost string) context.Context
 		switch ps {
 		case ProxyStrategyDestHost:
 			addr := util.RemovePortFromHost(reqHost)
-			ctx = context.WithValue(ctx, "destHost", addr)
+			ctx = context.WithValue(ctx, destHost, addr)
 		}
 	}
 	return ctx
@@ -479,8 +484,8 @@ func agentID(stream agent.AgentService_ConnectServer) (string, error) {
 	return agentIDs[0], nil
 }
 
-func getAgentIdentifiers(stream agent.AgentService_ConnectServer) (pkgagent.AgentIdentifiers, error) {
-	var agentIdentifiers pkgagent.AgentIdentifiers
+func getAgentIdentifiers(stream agent.AgentService_ConnectServer) (pkgagent.Identifiers, error) {
+	var agentIdentifiers pkgagent.Identifiers
 	md, ok := metadata.FromIncomingContext(stream.Context())
 	if !ok {
 		return agentIdentifiers, fmt.Errorf("failed to get context")

@@ -56,7 +56,7 @@ func (t *Tunnel) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	random := rand.Int63()
+	random := rand.Int63() /* #nosec G404 */
 	dialRequest := &client.Packet{
 		Type: client.PacketType_DIAL_REQ,
 		Payload: &client.Packet_DialRequest{
