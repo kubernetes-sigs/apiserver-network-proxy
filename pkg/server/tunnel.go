@@ -102,7 +102,21 @@ func (t *Tunnel) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	case <-connection.connected: // Waiting for response before we begin full communication.
 	}
 
-	defer conn.Close()
+	defer func() {
+		packet := &client.Packet{
+			Type: client.PacketType_CLOSE_REQ,
+			Payload: &client.Packet_CloseRequest{
+				CloseRequest: &client.CloseRequest{
+					ConnectID: connection.connectID,
+				},
+			},
+		}
+
+		if err = backend.Send(packet); err != nil {
+			klog.V(2).InfoS("failed to send close request packet", "host", r.Host, "agentID", connection.agentID, "connID", connection.connectID)
+		}
+		conn.Close()
+	}()
 
 	klog.V(3).InfoS("Starting proxy to host", "host", r.Host)
 	pkt := make([]byte, 1<<12)
