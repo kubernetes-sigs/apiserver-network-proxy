@@ -74,6 +74,16 @@ func (cm *connectionManager) Delete(connID int64) {
 	delete(cm.connections, connID)
 }
 
+func (cm *connectionManager) List() []*connContext {
+	cm.mu.RLock()
+	defer cm.mu.RUnlock()
+	connContexts := make([]*connContext, 0, len(cm.connections))
+	for _, connCtx := range cm.connections {
+		connContexts = append(connContexts, connCtx)
+	}
+	return connContexts
+}
+
 func newConnectionManager() *connectionManager {
 	return &connectionManager{
 		connections: make(map[int64]*connContext),
@@ -304,6 +314,14 @@ func (a *Client) initializeAuthContext(ctx context.Context) (context.Context, er
 // The requests include things like opening a connection to a server,
 // streaming data and close the connection.
 func (a *Client) Serve() {
+	defer func() {
+		// close all of conns with remote when Client exits
+		for _, connCtx := range a.connManager.List() {
+			connCtx.cleanup()
+		}
+		klog.V(2).InfoS("cleanup all of conn contexts when client exits", "agentID", a.agentID)
+	}()
+
 	klog.V(2).InfoS("Start serving", "serverID", a.serverID)
 	go a.probe()
 	for {
