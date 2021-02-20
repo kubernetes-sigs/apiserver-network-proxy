@@ -1,0 +1,44 @@
+
+udsName: false
+
+connectMode: http-connect
+
+imagePullSecrets: []
+
+agent:
+  enabled: true
+  debug: true
+  image:
+    repository: gcr.io/apiserver-network-proxy/proxy-agent-amd64
+    tag: v0.0.15
+    pullPolicy: IfNotPresent
+
+server:
+  enabled: true
+  debug: true
+  authAgent: false
+  image:
+    repository: gcr.io/apiserver-network-proxy/proxy-server-amd64
+    tag: v0.0.15
+    pullPolicy: IfNotPresent
+
+testclient:
+  enabled: true
+  image:
+    repository: gcr.io/apiserver-network-proxy/proxy-test-client-amd64
+    tag: v0.0.15
+    pullPolicy: IfNotPresent
+
+testserver:
+  enabled: true
+  image:
+    repository: gcr.io/apiserver-network-proxy/http-test-server-amd64
+    tag: v0.0.15
+    pullPolicy: IfNotPresent
+
+kubia:
+  enabled: true
+  image:
+    repository: luksa/kubia
+    tag: latest
+    pullPolicy: IfNotPresent

@@ -1,0 +1,47 @@
+{{- if and .Values.kubia.enabled }}
+
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: konnectivity-kubia
+  labels:
+    app: konnectivity-kubia
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: konnectivity-kubia
+  template:
+    metadata:
+      labels:
+        app: konnectivity-kubia
+    spec:
+    {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+{{- toYaml . | nindent 8 }}
+    {{- end }}
+{{- if .Values.udsName }}
+      hostNetwork: true
+{{- end }}
+      containers:
+        - name: konnectivity-kubia
+          image: "{{ .Values.kubia.image.repository }}:{{ .Values.kubia.image.tag }}"
+          imagePullPolicy: {{ .Values.kubia.image.pullPolicy }}
+          ports:
+          - containerPort: 8080
+            protocol: TCP
+
+---
+
+apiVersion: v1
+kind: Service
+metadata:
+  name: kubia
+spec:
+  ports:
+  - port: 80
+    targetPort: 8080
+  selector:
+    app: konnectivity-kubia
+
+{{- end }}

@@ -1,0 +1,115 @@
+{{- if and .Values.server.enabled }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: konnectivity-server
+  labels:
+    app: konnectivity-server
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: konnectivity-server
+  template:
+    metadata:
+      labels:
+        app: konnectivity-server
+    spec:
+    {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+{{- toYaml . | nindent 8 }}
+    {{- end }}
+{{- if .Values.udsName }}
+      hostNetwork: true
+{{- end }}
+      containers:
+        - name: konnectivity-server-container
+          image: "{{ .Values.server.image.repository }}:{{ .Values.server.image.tag }}"
+          imagePullPolicy: {{ .Values.server.image.pullPolicy }}
+          resources:
+            requests:
+              cpu: 1m
+          command: [ "/proxy-server"]
+          env:
+{{- if and .Values.server.debug }}
+            - name: GRPC_VERBOSITY
+              value: debug
+            - name: GRPC_TRACE
+              value: all
+            - name: GODEBUG
+              value: http2debug=2
+{{- end }}
+          args: [
+            "--logtostderr=true",
+            {{- if .Values.udsName -}}
+            "--uds-name=/etc/srv/kubernetes/konnectivity-server/konnectivity-server.socket",
+            {{- end -}}
+            {{- if not .Values.udsName -}}
+            "--server-ca-cert=/opt/pki/proxyca/tls.crt",
+            "--server-cert=/opt/pki/proxyserver/tls.crt",
+            "--server-key=/opt/pki/proxyserver/tls.key",
+            "--server-port=8090",
+            {{- end -}}
+            "--cluster-ca-cert=/opt/pki/agentca/tls.crt",
+            "--cluster-cert=/opt/pki/agentserver/tls.crt",
+            "--cluster-key=/opt/pki/agentserver/tls.key",
+            "--agent-port=8091",
+            "--health-port=8092",
+            "--admin-port=8093",
+            "--keepalive-time=1h",
+            "--mode={{ .Values.connectMode}}",
+            {{- if .Values.server.authAgent -}}
+            "--agent-namespace=kube-system",
+            "--agent-service-account=konnectivity-server",
+            "--kubeconfig=/etc/srv/kubernetes/konnectivity-server/kubeconfig",
+            "--authentication-audience=system:konnectivity-server",
+            {{- end -}}
+          ]
+          livenessProbe:
+            httpGet:
+              scheme: HTTP
+              host: 127.0.0.1
+              port: 8092
+              path: /healthz
+            initialDelaySeconds: 10
+            timeoutSeconds: 60
+          ports:
+            - name: serverport
+              containerPort: 8090
+              hostPort: 8090
+            - name: agentport
+              containerPort: 8091
+              hostPort: 8091
+            - name: healthport
+              containerPort: 8092
+              hostPort: 8092
+            - name: adminport
+              containerPort: 8093
+              hostPort: 8093
+          volumeMounts:
+            - name: agentserver
+              mountPath: /opt/pki/agentserver
+              readOnly: true
+            - name: proxyserver
+              mountPath: /opt/pki/proxyserver
+              readOnly: true
+            - name: proxyca
+              mountPath: /opt/pki/proxyca
+              readOnly: true
+            - name: agentca
+              mountPath: /opt/pki/agentca
+              readOnly: true
+      volumes:
+        - name: agentserver
+          secret:
+            secretName: konnectivity-agentserver
+        - name: proxyca
+          secret:
+            secretName: konnectivity-proxyca
+        - name: proxyserver
+          secret:
+            secretName: konnectivity-proxyserver
+        - name: agentca
+          secret:
+            secretName: konnectivity-agentca
+{{- end }}
