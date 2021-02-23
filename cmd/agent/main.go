@@ -78,6 +78,7 @@ type GrpcProxyAgentOptions struct {
 	agentIdentifiers string
 	syncInterval     time.Duration
 	probeInterval    time.Duration
+	syncIntervalCap  time.Duration
 
 	// file contains service account authorization token for enabling proxy-server token based authorization
 	serviceAccountTokenPath string
@@ -90,6 +91,7 @@ func (o *GrpcProxyAgentOptions) ClientSetConfig(dialOptions ...grpc.DialOption) 
 		AgentIdentifiers:        o.agentIdentifiers,
 		SyncInterval:            o.syncInterval,
 		ProbeInterval:           o.probeInterval,
+		SyncIntervalCap:         o.syncIntervalCap,
 		DialOptions:             dialOptions,
 		ServiceAccountTokenPath: o.serviceAccountTokenPath,
 	}
@@ -107,6 +109,7 @@ func (o *GrpcProxyAgentOptions) Flags() *pflag.FlagSet {
 	flags.StringVar(&o.agentID, "agent-id", o.agentID, "The unique ID of this agent. Default to a generated uuid if not set.")
 	flags.DurationVar(&o.syncInterval, "sync-interval", o.syncInterval, "The initial interval by which the agent periodically checks if it has connections to all instances of the proxy server.")
 	flags.DurationVar(&o.probeInterval, "probe-interval", o.probeInterval, "The interval by which the agent periodically checks if its connections to the proxy server are ready.")
+	flags.DurationVar(&o.syncIntervalCap, "sync-interval-cap", o.syncIntervalCap, "The maximum interval for the syncInterval to back off to when unable to connect to the proxy server")
 	flags.StringVar(&o.serviceAccountTokenPath, "service-account-token-path", o.serviceAccountTokenPath, "If non-empty proxy agent uses this token to prove its identity to the proxy server.")
 	flags.StringVar(&o.agentIdentifiers, "agent-identifiers", o.agentIdentifiers, "Identifiers of the agent that will be used by the server when choosing agent. N.B. the list of identifiers must be in URL encoded format. e.g.,host=localhost&host=node1.mydomain.com&cidr=127.0.0.1/16&ipv4=1.2.3.4&ipv4=5.6.7.8&ipv6=:::::")
 	return flags
@@ -123,6 +126,7 @@ func (o *GrpcProxyAgentOptions) Print() {
 	klog.V(1).Infof("AgentID set to %s.\n", o.agentID)
 	klog.V(1).Infof("SyncInterval set to %v.\n", o.syncInterval)
 	klog.V(1).Infof("ProbeInterval set to %v.\n", o.probeInterval)
+	klog.V(1).Infof("SyncIntervalCap set to %v.\n", o.syncIntervalCap)
 	klog.V(1).Infof("ServiceAccountTokenPath set to %q.\n", o.serviceAccountTokenPath)
 	klog.V(1).Infof("AgentIdentifiers set to %s.\n", util.PrettyPrintURL(o.agentIdentifiers))
 }
@@ -158,7 +162,9 @@ func (o *GrpcProxyAgentOptions) Validate() error {
 	if o.adminServerPort <= 0 {
 		return fmt.Errorf("admin server port %d must be greater than 0", o.adminServerPort)
 	}
-
+	if o.syncInterval > o.syncIntervalCap {
+		return fmt.Errorf("sync interval %v must be less than sync interval cap %v", o.syncInterval, o.syncIntervalCap)
+	}
 	if o.serviceAccountTokenPath != "" {
 		if _, err := os.Stat(o.serviceAccountTokenPath); os.IsNotExist(err) {
 			return fmt.Errorf("error checking service account token path %s, got %v", o.serviceAccountTokenPath, err)
@@ -201,6 +207,7 @@ func newGrpcProxyAgentOptions() *GrpcProxyAgentOptions {
 		agentIdentifiers:        "",
 		syncInterval:            1 * time.Second,
 		probeInterval:           1 * time.Second,
+		syncIntervalCap:         10 * time.Second,
 		serviceAccountTokenPath: "",
 	}
 	return &o
