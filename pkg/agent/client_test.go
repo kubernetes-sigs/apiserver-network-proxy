@@ -3,8 +3,10 @@ package agent
 import (
 	"errors"
 	"fmt"
+	"net"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -14,6 +16,167 @@ import (
 	"sigs.k8s.io/apiserver-network-proxy/konnectivity-client/proto/client"
 	"sigs.k8s.io/apiserver-network-proxy/proto/agent"
 )
+
+func TestServeData_NodeToMaster(t *testing.T) {
+	var err error
+	var stream agent.AgentService_ConnectClient
+	stopCh := make(chan struct{})
+	testClient := &Client{
+		connManager: newConnectionManager(),
+		stopCh:      stopCh,
+	}
+	testClient.stream, stream = pipe()
+
+	// Start agent
+	go testClient.ServeBiDirectional()
+	defer close(stopCh)
+
+	agentConn, clientConn := net.Pipe()
+	go testClient.handleConnection("tcp", "localhost:6443", agentConn)
+
+	// Expect DIAL_REQ on the server side
+	pkg, err := stream.Recv()
+	if err != nil {
+		t.Fatal(err.Error())
+	}
+	if pkg == nil {
+		t.Fatal("unexpected nil packet")
+	}
+	if pkg.Type != client.PacketType_DIAL_REQ {
+		t.Errorf("expect PacketType_DIAL_REQ; got %v", pkg.Type)
+	}
+
+	dialReq := pkg.Payload.(*client.Packet_DialRequest)
+	if a, e := *dialReq.DialRequest, (client.DialRequest{Address: "localhost:6443", Protocol: "tcp", Random: dialReq.DialRequest.Random}); !reflect.DeepEqual(a, e) {
+		t.Errorf("expect dial request %v; got %v", e, a)
+	}
+
+	// Stimulate sending KAS DIAL_RSP to (Agent) Client
+	var connID int64 = 1
+	dialRsp := newDialRsp(connID, "", dialReq.DialRequest.Random)
+	err = stream.Send(dialRsp)
+	if err != nil {
+		t.Fatal(err.Error())
+	}
+
+	// Simulate data sent from a client to the agent
+	_, err = clientConn.Write([]byte("hello"))
+	if err != nil {
+		t.Errorf("error occurred while writing data")
+	}
+
+	// Expect DATA packet arriving at the server side
+	pkg, err = stream.Recv()
+	if err != nil {
+		t.Fatal(err.Error())
+	}
+	if pkg == nil {
+		t.Fatal("unexpected nil packet")
+	}
+	if pkg.Type != client.PacketType_DATA {
+		t.Fatalf("expect PacketType_DIAL_REQ; got %v", pkg.Type)
+	}
+	data := pkg.Payload.(*client.Packet_Data)
+	if a, e := data.Data.Data, []byte("hello"); !reflect.DeepEqual(a, e) {
+		t.Errorf("expect data=%v; got %v", a, e)
+	}
+
+	// Simulate sending KAS DIAL_RSP to (Agent) Client
+	dialPacket := newDataPacket(connID, []byte("world"))
+	err = stream.Send(dialPacket)
+	if err != nil {
+		t.Fatal(err.Error())
+	}
+
+	// Simulate data at the agent side
+	b := make([]byte, 5)
+	_, err = clientConn.Read(b)
+	if err != nil {
+		t.Errorf("error occurred while reading data: %v", err)
+	}
+	if a, e := b, []byte("world"); !reflect.DeepEqual(a, e) {
+		t.Errorf("expect data=%v; got %v", a, e)
+	}
+
+	// Simulate client closing connection
+	if err := clientConn.Close(); err != nil {
+		t.Errorf("error occurred while reading data: %v", err)
+	}
+	// Expect CLOSE_REQ on the server side
+	pkg, err = stream.Recv()
+	if err != nil {
+		t.Fatal(err.Error())
+	}
+	if pkg == nil {
+		t.Fatal("unexpected nil packet")
+	}
+	if pkg.Type != client.PacketType_CLOSE_REQ || pkg.GetCloseRequest().ConnectID != connID {
+		t.Fatalf("expect PacketType_CLOSE_REQ; got %v", pkg.Type)
+	}
+	if a, e := pkg.GetCloseRequest().ConnectID, connID; a != e {
+		t.Errorf("expect ConnectID %d; got %d", e, a)
+	}
+
+	// Simulate sending CLOSE_RSP to (Agent) Client
+	closeRsp := newCloseRsp(connID, "")
+	err = stream.Send(closeRsp)
+	if err != nil {
+		t.Fatal(err.Error())
+	}
+
+	// Verify internal state is consistent
+	if _, ok := testClient.connManager.Get(connID); ok {
+		t.Error("client.connContext not released")
+	}
+}
+
+func TestServeData_NodeToMasterConnectionFailure(t *testing.T) {
+	var err error
+	var stream agent.AgentService_ConnectClient
+	stopCh := make(chan struct{})
+	testClient := &Client{
+		connManager: newConnectionManager(),
+		stopCh:      stopCh,
+	}
+	testClient.stream, stream = pipe()
+
+	// Start agent
+	go testClient.ServeBiDirectional()
+	defer close(stopCh)
+
+	agentConn, _ := net.Pipe()
+	go testClient.handleConnection("tcp", "localhost:6443", agentConn)
+
+	// Expect DIAL_REQ on the server side
+	pkg, err := stream.Recv()
+	if err != nil {
+		t.Fatal(err.Error())
+	}
+	if pkg == nil {
+		t.Fatal("unexpected nil packet")
+	}
+	if pkg.Type != client.PacketType_DIAL_REQ {
+		t.Errorf("expect PacketType_DIAL_REQ; got %v", pkg.Type)
+	}
+
+	dialReq := pkg.Payload.(*client.Packet_DialRequest)
+	if a, e := *dialReq.DialRequest, (client.DialRequest{Address: "localhost:6443", Protocol: "tcp", Random: dialReq.DialRequest.Random}); !reflect.DeepEqual(a, e) {
+		t.Errorf("expect dial request %v; got %v", e, a)
+	}
+
+	// Stimulate sending KAS DIAL_RSP to (Agent) Client
+	var connID int64 = 1
+	dialRsp := newDialRsp(connID, "destination is not allowed", dialReq.DialRequest.Random)
+	err = stream.Send(dialRsp)
+	if err != nil {
+		t.Fatal(err.Error())
+	}
+
+	// Verify internal state is consistent
+	if _, ok := testClient.connManager.Get(connID); ok {
+		t.Error("client.connContext not released")
+	}
+}
 
 func TestServeData_HTTP(t *testing.T) {
 	var err error
@@ -152,7 +315,7 @@ func TestClose_Client(t *testing.T) {
 		t.Errorf("expect random=111; got %v", dialRsp.DialResponse.Random)
 	}
 
-	closePacket := newClosePacket(connID)
+	closePacket := newCloseReq(connID)
 	if err := stream.Send(closePacket); err != nil {
 		t.Fatal(err)
 	}
@@ -239,6 +402,19 @@ func newDialPacket(protocol, address string, random int64) *client.Packet {
 	}
 }
 
+func newDialRsp(connID int64, errorMsg string, random int64) *client.Packet {
+	return &client.Packet{
+		Type: client.PacketType_DIAL_RSP,
+		Payload: &client.Packet_DialResponse{
+			DialResponse: &client.DialResponse{
+				ConnectID: connID,
+				Error:     errorMsg,
+				Random:    random,
+			},
+		},
+	}
+}
+
 func newDataPacket(connID int64, data []byte) *client.Packet {
 	return &client.Packet{
 		Type: client.PacketType_DATA,
@@ -251,12 +427,24 @@ func newDataPacket(connID int64, data []byte) *client.Packet {
 	}
 }
 
-func newClosePacket(connID int64) *client.Packet {
+func newCloseReq(connID int64) *client.Packet {
 	return &client.Packet{
 		Type: client.PacketType_CLOSE_REQ,
 		Payload: &client.Packet_CloseRequest{
 			CloseRequest: &client.CloseRequest{
 				ConnectID: connID,
+			},
+		},
+	}
+}
+
+func newCloseRsp(connID int64, err string) *client.Packet {
+	return &client.Packet{
+		Type: client.PacketType_CLOSE_RSP,
+		Payload: &client.Packet_CloseResponse{
+			CloseResponse: &client.CloseResponse{
+				ConnectID: connID,
+				Error:     err,
 			},
 		},
 	}
