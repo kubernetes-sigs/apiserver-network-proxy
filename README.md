@@ -2,7 +2,7 @@
 
 Created due to https://github.com/kubernetes/org/issues/715.
 
-See [The KEP proposal for architecture and details](https://github.com/kubernetes/enhancements/tree/master/keps/sig-api-machinery/1281-network-proxy#proposal).
+See [the KEP proposal for architecture and details](https://github.com/kubernetes/enhancements/tree/master/keps/sig-api-machinery/1281-network-proxy#proposal).
 
 ## Community, discussion, contribution, and support
 
