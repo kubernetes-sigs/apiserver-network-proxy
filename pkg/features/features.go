@@ -22,10 +22,10 @@ import (
 )
 
 const (
-	// ClusterToMasterTraffic enables the traffic initiated in the agents side
+	// NodeToMasterTraffic enables the traffic initiated in the agents side
 	// to flow to the server side e.g. Kubelet to KAS and pods to KAS traffic
 	// (KEP-2025).
-	ClusterToMasterTraffic featuregate.Feature = "ClusterToMasterTraffic"
+	NodeToMasterTraffic featuregate.Feature = "NodeToMasterTraffic"
 )
 
 var (
@@ -38,5 +38,5 @@ func init() {
 }
 
 var defaultFeatureGates = map[featuregate.Feature]featuregate.FeatureSpec{
-	ClusterToMasterTraffic: {Default: false, PreRelease: featuregate.Alpha},
+	NodeToMasterTraffic: {Default: false, PreRelease: featuregate.Alpha},
 }
