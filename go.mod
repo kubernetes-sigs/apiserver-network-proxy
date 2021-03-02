@@ -10,12 +10,13 @@ require (
 	github.com/prometheus/client_golang v1.7.1
 	github.com/spf13/cobra v0.0.3
 	github.com/spf13/pflag v1.0.5
+	golang.org/x/net v0.0.0-20191004110552-13f9640d40b9
 	google.golang.org/grpc v1.27.0
 	k8s.io/api v0.17.1
 	k8s.io/apimachinery v0.17.1
 	k8s.io/client-go v0.17.1
+	k8s.io/component-base v0.17.1
 	k8s.io/klog/v2 v2.0.0
-	rsc.io/quote/v3 v3.1.0 // indirect
 	sigs.k8s.io/apiserver-network-proxy/konnectivity-client v0.0.0
 )
 
