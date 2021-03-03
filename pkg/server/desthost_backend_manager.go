@@ -42,7 +42,7 @@ func (dibm *DestHostBackendManager) Backend(ctx context.Context) (Backend, error
 	if len(dibm.backends) == 0 {
 		return nil, &ErrNotFound{}
 	}
-	destHost := ctx.Value("destHost").(string)
+	destHost := ctx.Value(destHost).(string)
 	if destHost != "" {
 		bes, exist := dibm.backends[destHost]
 		if exist && len(bes) > 0 {
