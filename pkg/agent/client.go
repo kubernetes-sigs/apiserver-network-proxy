@@ -358,62 +358,65 @@ func (a *Client) Serve() {
 
 		switch pkt.Type {
 		case client.PacketType_DIAL_REQ:
-			klog.V(4).Infoln("received DIAL_REQ")
-			resp := &client.Packet{
-				Type:    client.PacketType_DIAL_RSP,
-				Payload: &client.Packet_DialResponse{DialResponse: &client.DialResponse{}},
-			}
-
-			dialReq := pkt.GetDialRequest()
-			resp.GetDialResponse().Random = dialReq.Random
-
-			start := time.Now()
-			conn, err := net.Dial(dialReq.Protocol, dialReq.Address)
-			if err != nil {
-				resp.GetDialResponse().Error = err.Error()
-				if err := a.Send(resp); err != nil {
-					klog.ErrorS(err, "could not send stream")
+			go func() {
+				klog.V(4).Infoln("received DIAL_REQ")
+				resp := &client.Packet{
+					Type:    client.PacketType_DIAL_RSP,
+					Payload: &client.Packet_DialResponse{DialResponse: &client.DialResponse{}},
 				}
-				continue
-			}
-			metrics.Metrics.ObserveDialLatency(time.Since(start))
 
-			connID := atomic.AddInt64(&a.nextConnID, 1)
-			dataCh := make(chan []byte, 5)
-			ctx := &connContext{
-				conn:   conn,
-				dataCh: dataCh,
-				cleanFunc: func() {
-					klog.V(4).InfoS("close connection", "connectionID", connID)
-					resp := &client.Packet{
-						Type:    client.PacketType_CLOSE_RSP,
-						Payload: &client.Packet_CloseResponse{CloseResponse: &client.CloseResponse{}},
-					}
-					resp.GetCloseResponse().ConnectID = connID
+				dialReq := pkt.GetDialRequest()
+				resp.GetDialResponse().Random = dialReq.Random
 
-					err := conn.Close()
-					if err != nil {
-						resp.GetCloseResponse().Error = err.Error()
-					}
-
+				start := time.Now()
+				conn, err := net.DialTimeout(dialReq.Protocol, dialReq.Address, 5 * time.Second)
+				if err != nil {
+					resp.GetDialResponse().Error = err.Error()
 					if err := a.Send(resp); err != nil {
-						klog.ErrorS(err, "close response failure")
+						klog.ErrorS(err, "could not send stream")
 					}
+					return
+				}
+				metrics.Metrics.ObserveDialLatency(time.Since(start))
 
-					close(dataCh)
-					a.connManager.Delete(connID)
-				},
-			}
-			a.connManager.Add(connID, ctx)
+				connID := atomic.AddInt64(&a.nextConnID, 1)
+				dataCh := make(chan []byte, 5)
+				ctx := &connContext{
+					conn:   conn,
+					dataCh: dataCh,
+					cleanFunc: func() {
+						klog.V(4).InfoS("close connection", "connectionID", connID)
+						resp := &client.Packet{
+							Type:    client.PacketType_CLOSE_RSP,
+							Payload: &client.Packet_CloseResponse{CloseResponse: &client.CloseResponse{}},
+						}
+						resp.GetCloseResponse().ConnectID = connID
 
-			resp.GetDialResponse().ConnectID = connID
-			if err := a.Send(resp); err != nil {
-				klog.ErrorS(err, "stream send failure")
-				continue
-			}
+						err := conn.Close()
+						if err != nil {
+							resp.GetCloseResponse().Error = err.Error()
+						}
 
-			go a.remoteToProxy(connID, ctx)
-			go a.proxyToRemote(connID, ctx)
+						if err := a.Send(resp); err != nil {
+							klog.ErrorS(err, "close response failure")
+						}
+
+						close(dataCh)
+						a.connManager.Delete(connID)
+					},
+				}
+				a.connManager.Add(connID, ctx)
+
+				resp.GetDialResponse().ConnectID = connID
+				if err := a.Send(resp); err != nil {
+					klog.ErrorS(err, "stream send failure")
+					return
+				}
+
+				go a.remoteToProxy(connID, ctx)
+				go a.proxyToRemote(connID, ctx)
+
+			}()
 
 		case client.PacketType_DATA:
 			data := pkt.GetData()
