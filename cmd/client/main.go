@@ -23,6 +23,8 @@ import (
 	"flag"
 	"fmt"
 	"io/ioutil"
+	utilflag "k8s.io/component-base/cli/flag"
+	"k8s.io/component-base/logs"
 	"net"
 	"net/http"
 	"os"
@@ -51,10 +53,13 @@ func main() {
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "error setting klog flags: %v", err)
 	}
-	local.VisitAll(func(fl *flag.Flag) {
-		fl.Name = util.Normalize(fl.Name)
-		flags.AddGoFlag(fl)
-	})
+
+	flags.SetNormalizeFunc(utilflag.WordSepNormalizeFunc)
+	flags.AddGoFlagSet(local)
+
+	logs.InitLogs()
+	defer logs.FlushLogs()
+
 	if err := command.Execute(); err != nil {
 		klog.Errorf("error: %v\n", err)
 		klog.Flush()
