@@ -113,13 +113,13 @@ easy-rsa-master: easy-rsa.tar.gz
 
 cfssl:
 	@if ! command -v cfssl &> /dev/null; then \
-		curl --retry 10 -L -o cfssl https://pkg.cfssl.org/R1.2/cfssl_$(GOOS)-$(GOARCH); \
+		curl --retry 10 -L -o cfssl https://github.com/cloudflare/cfssl/releases/download/v1.5.0/cfssl_1.5.0_$(GOOS)_$(GOARCH); \
 		chmod +x cfssl; \
 	fi
 
 cfssljson:
 	@if ! command -v cfssljson &> /dev/null; then \
-		curl --retry 10 -L -o cfssljson https://pkg.cfssl.org/R1.2/cfssljson_$(GOOS)-$(GOARCH); \
+		curl --retry 10 -L -o cfssljson https://github.com/cloudflare/cfssl/releases/download/v1.5.0/cfssljson_1.5.0_$(GOOS)_$(GOARCH); \
 		chmod +x cfssljson; \
 	fi
 
