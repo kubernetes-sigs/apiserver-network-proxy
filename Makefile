@@ -85,20 +85,30 @@ lint:
 	$(INSTALL_LOCATION)/golangci-lint run --no-config --disable-all --enable=gofmt,golint,gosec --fix --verbose --timeout 3m
 
 ## --------------------------------------
+## Go
+## --------------------------------------
+
+.PHONY: mod-download
+mod-download:
+	go mod download
+
+## --------------------------------------
 ## Proto
 ## --------------------------------------
 
 .PHONY: gen
-gen: proto/agent/agent.pb.go konnectivity-client/proto/client/client.pb.go mock_gen
+gen: mod-download proto/agent/agent.pb.go konnectivity-client/proto/client/client.pb.go mock_gen
 
 konnectivity-client/proto/client/client.pb.go: konnectivity-client/proto/client/client.proto
+	mkdir -p ${GOPATH}/src
 	protoc -I . konnectivity-client/proto/client/client.proto --go_out=plugins=grpc:${GOPATH}/src
-	cat hack/go-license-header.txt konnectivity-client/proto/client/client.pb.go > konnectivity-client/proto/client/client.licensed.go
+	cat hack/go-license-header.txt ${GOPATH}/src/sigs.k8s.io/apiserver-network-proxy/konnectivity-client/proto/client/client.pb.go > konnectivity-client/proto/client/client.licensed.go
 	mv konnectivity-client/proto/client/client.licensed.go konnectivity-client/proto/client/client.pb.go
 
 proto/agent/agent.pb.go: proto/agent/agent.proto
+	mkdir -p ${GOPATH}/src
 	protoc -I . proto/agent/agent.proto --go_out=plugins=grpc:${GOPATH}/src
-	cat hack/go-license-header.txt proto/agent/agent.pb.go > proto/agent/agent.licensed.go
+	cat hack/go-license-header.txt ${GOPATH}/src/sigs.k8s.io/apiserver-network-proxy/proto/agent/agent.pb.go > proto/agent/agent.licensed.go
 	mv proto/agent/agent.licensed.go proto/agent/agent.pb.go
 
 ## --------------------------------------

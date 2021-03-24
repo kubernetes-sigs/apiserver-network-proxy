@@ -25,6 +25,10 @@ For image builds these determine the location of your image.
 For GCE the registry should be gcr.io and PROJECT_ID should be the project you
 want to use the images in.
 
+### Mockgen
+
+The [```mockgen```](https://github.com/golang/mock) tool must be installed on your system.
+
 ### Protoc
 
 Proto definitions are compiled with `protoc`. Please ensure you have protoc installed ([Instructions](https://grpc.io/docs/protoc-installation/)) and the `proto-gen-go` library at the appropriate version.
