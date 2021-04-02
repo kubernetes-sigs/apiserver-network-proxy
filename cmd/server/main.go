@@ -121,6 +121,10 @@ type ProxyRunOptions struct {
 	authenticationAudience string
 	// Path to kubeconfig (used by kubernetes client)
 	kubeconfigPath string
+	// Client maximum QPS.
+	kubeconfigQPS float32
+	// Client maximum burst for throttle.
+	kubeconfigBurst int
 
 	// Proxy strategies used by the server.
 	// NOTE the order of the strategies matters. e.g., for list
@@ -154,6 +158,8 @@ func (o *ProxyRunOptions) Flags() *pflag.FlagSet {
 	flags.StringVar(&o.agentNamespace, "agent-namespace", o.agentNamespace, "Expected agent's namespace during agent authentication (used with agent-service-account, authentication-audience, kubeconfig).")
 	flags.StringVar(&o.agentServiceAccount, "agent-service-account", o.agentServiceAccount, "Expected agent's service account during agent authentication (used with agent-namespace, authentication-audience, kubeconfig).")
 	flags.StringVar(&o.kubeconfigPath, "kubeconfig", o.kubeconfigPath, "absolute path to the kubeconfig file (used with agent-namespace, agent-service-account, authentication-audience).")
+	flags.Float32Var(&o.kubeconfigQPS, "kubeconfig-qps", o.kubeconfigQPS, "Maximum client QPS (proxy server uses this client to authenticate agent tokens).")
+	flags.IntVar(&o.kubeconfigBurst, "kubeconfig-burst", o.kubeconfigBurst, "Maximum client burst (proxy server uses this client to authenticate agent tokens).")
 	flags.StringVar(&o.authenticationAudience, "authentication-audience", o.authenticationAudience, "Expected agent's token authentication audience (used with agent-namespace, agent-service-account, kubeconfig).")
 	flags.StringVar(&o.proxyStrategies, "proxy-strategies", o.proxyStrategies, "The list of proxy strategies used by the server to pick a backend/tunnel, available strategies are: default, destHost.")
 	return flags
@@ -182,6 +188,8 @@ func (o *ProxyRunOptions) Print() {
 	klog.V(1).Infof("AgentServiceAccount set to %q.\n", o.agentServiceAccount)
 	klog.V(1).Infof("AuthenticationAudience set to %q.\n", o.authenticationAudience)
 	klog.V(1).Infof("KubeconfigPath set to %q.\n", o.kubeconfigPath)
+	klog.V(1).Infof("KubeconfigQPS set to %f.\n", o.kubeconfigQPS)
+	klog.V(1).Infof("KubeconfigBurst set to %d.\n", o.kubeconfigBurst)
 	klog.V(1).Infof("ProxyStrategies set to %q.\n", o.proxyStrategies)
 }
 
@@ -277,7 +285,7 @@ func (o *ProxyRunOptions) Validate() error {
 	}
 
 	// validate agent authentication params
-	// all 4 parametes must be empty or must have value (except kubeconfigPath that might be empty)
+	// all 4 parameters must be empty or must have value (except kubeconfigPath that might be empty)
 	if o.agentNamespace != "" || o.agentServiceAccount != "" || o.authenticationAudience != "" || o.kubeconfigPath != "" {
 		if o.clusterCaCert != "" {
 			return fmt.Errorf("clusterCaCert can not be used when service account authentication is enabled")
@@ -337,6 +345,8 @@ func newProxyRunOptions() *ProxyRunOptions {
 		agentNamespace:            "",
 		agentServiceAccount:       "",
 		kubeconfigPath:            "",
+		kubeconfigQPS:             0,
+		kubeconfigBurst:           0,
 		authenticationAudience:    "",
 		proxyStrategies:           "default",
 	}
@@ -375,6 +385,14 @@ func (p *Proxy) run(o *ProxyRunOptions) error {
 			return fmt.Errorf("failed to load kubernetes client config: %v", err)
 		}
 
+		if o.kubeconfigQPS != 0 {
+			klog.V(1).Infof("Setting k8s client QPS: %v", o.kubeconfigQPS)
+			config.QPS = o.kubeconfigQPS
+		}
+		if o.kubeconfigBurst != 0 {
+			klog.V(1).Infof("Setting k8s client Burst: %v", o.kubeconfigBurst)
+			config.Burst = o.kubeconfigBurst
+		}
 		k8sClient, err = kubernetes.NewForConfig(config)
 		if err != nil {
 			return fmt.Errorf("failed to create kubernetes clientset: %v", err)
