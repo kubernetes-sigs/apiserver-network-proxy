@@ -85,6 +85,7 @@ func (t *Tunnel) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	t.Server.PendingDial.Add(random, connection)
 	if err := backend.Send(dialRequest); err != nil {
 		klog.ErrorS(err, "failed to tunnel dial request")
+		t.Server.PendingDial.Remove(random)
 		return
 	}
 	ctxt := backend.Context()
