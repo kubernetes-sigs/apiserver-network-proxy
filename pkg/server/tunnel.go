@@ -17,7 +17,6 @@ limitations under the License.
 package server
 
 import (
-	"fmt"
 	"io"
 	"math/rand"
 	"net/http"
@@ -55,6 +54,7 @@ func (t *Tunnel) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
+	defer conn.Close()
 
 	random := rand.Int63() /* #nosec G404 */
 	dialRequest := &client.Packet{
@@ -71,7 +71,7 @@ func (t *Tunnel) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	klog.V(4).Infof("Set pending(rand=%d) to %v", random, w)
 	backend, err := t.Server.getBackend(r.Host)
 	if err != nil {
-		http.Error(w, fmt.Sprintf("currently no tunnels available: %v", err), http.StatusInternalServerError)
+		klog.ErrorS(err, "currently no tunnels available")
 		return
 	}
 	connected := make(chan struct{})
@@ -115,7 +115,6 @@ func (t *Tunnel) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		if err = backend.Send(packet); err != nil {
 			klog.V(2).InfoS("failed to send close request packet", "host", r.Host, "agentID", connection.agentID, "connID", connection.connectID)
 		}
-		conn.Close()
 	}()
 
 	klog.V(3).InfoS("Starting proxy to host", "host", r.Host)
