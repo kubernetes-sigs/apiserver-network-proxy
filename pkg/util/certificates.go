@@ -39,7 +39,7 @@ func getCACertPool(caFile string) (*x509.CertPool, error) {
 }
 
 // GetClientTLSConfig returns tlsConfig based on x509 certs
-func GetClientTLSConfig(caFile, certFile, keyFile, serverName string) (*tls.Config, error) {
+func GetClientTLSConfig(caFile, certFile, keyFile, serverName string, protos []string) (*tls.Config, error) {
 	certPool, err := getCACertPool(caFile)
 	if err != nil {
 		return nil, err
@@ -50,6 +50,7 @@ func GetClientTLSConfig(caFile, certFile, keyFile, serverName string) (*tls.Conf
 		tlsConfig := &tls.Config{
 			RootCAs:    certPool,
 			MinVersion: tls.VersionTLS12,
+			NextProtos: protos,
 		}
 		return tlsConfig, nil
 	}
@@ -64,6 +65,7 @@ func GetClientTLSConfig(caFile, certFile, keyFile, serverName string) (*tls.Conf
 		Certificates: []tls.Certificate{cert},
 		RootCAs:      certPool,
 		MinVersion:   tls.VersionTLS12,
+		NextProtos:   protos,
 	}
 	return tlsConfig, nil
 }
