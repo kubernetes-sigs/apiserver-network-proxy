@@ -37,26 +37,33 @@ func (lb *tcpLB) handleConnection(in net.Conn, backend string) {
 	go copy(in, out)
 }
 
-func (lb *tcpLB) serve(stopCh chan struct{}) {
-	ln, err := net.Listen("tcp", "127.0.0.1:8000")
+func (lb *tcpLB) serve(stopCh chan struct{}) string {
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
 		log.Fatalf("failed to bind: %s", err)
 	}
-	for {
-		select {
-		case <-stopCh:
-			return
-		default:
+	go func() {
+		for {
+			select {
+			case <-stopCh:
+				return
+			default:
+			}
+			conn, err := ln.Accept()
+			if err != nil {
+				log.Printf("failed to accept: %s", err)
+				continue
+			}
+			// go lb.handleConnection(conn, lb.randomBackend())
+			if lb.backendCount() == 0 {
+				conn.Close()
+				break
+			}
+			back := lb.randomBackend()
+			go lb.handleConnection(conn, back)
 		}
-		conn, err := ln.Accept()
-		if err != nil {
-			log.Printf("failed to accept: %s", err)
-			continue
-		}
-		// go lb.handleConnection(conn, lb.randomBackend())
-		back := lb.randomBackend()
-		go lb.handleConnection(conn, back)
-	}
+	}()
+	return ln.Addr().String()
 }
 
 func (lb *tcpLB) addBackend(backend string) {
@@ -81,6 +88,12 @@ func (lb *tcpLB) randomBackend() string {
 	defer lb.mu.RUnlock()
 	i := rand.Intn(len(lb.backends)) /* #nosec G404 */
 	return lb.backends[i]
+}
+
+func (lb *tcpLB) backendCount() int {
+	lb.mu.RLock()
+	defer lb.mu.RUnlock()
+	return len(lb.backends)
 }
 
 const haServerCount = 3
@@ -120,9 +133,9 @@ func TestBasicHAProxyServer_GRPC(t *testing.T) {
 		},
 		t: t,
 	}
-	go lb.serve(stopCh)
+	lbAddr := lb.serve(stopCh)
 
-	clientset := runAgent(":8000", stopCh)
+	clientset := runAgent(lbAddr, stopCh)
 
 	var ready bool
 	var hc, cc int

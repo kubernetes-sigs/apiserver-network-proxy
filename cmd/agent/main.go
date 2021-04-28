@@ -34,6 +34,8 @@ import (
 	"github.com/spf13/pflag"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials"
+	"k8s.io/client-go/kubernetes"
+	"k8s.io/client-go/tools/clientcmd"
 	"k8s.io/klog/v2"
 	"sigs.k8s.io/apiserver-network-proxy/pkg/agent"
 	"sigs.k8s.io/apiserver-network-proxy/pkg/util"
@@ -90,6 +92,14 @@ type GrpcProxyAgentOptions struct {
 
 	// file contains service account authorization token for enabling proxy-server token based authorization
 	serviceAccountTokenPath string
+
+	kubeconfigPath  string
+	kubeconfigQPS   float32
+	kubeconfigBurst int
+
+	enablePodCondition bool
+	podNamespace       string
+	podName            string
 }
 
 func (o *GrpcProxyAgentOptions) ClientSetConfig(dialOptions ...grpc.DialOption) *agent.ClientSetConfig {
@@ -102,6 +112,9 @@ func (o *GrpcProxyAgentOptions) ClientSetConfig(dialOptions ...grpc.DialOption) 
 		SyncIntervalCap:         o.syncIntervalCap,
 		DialOptions:             dialOptions,
 		ServiceAccountTokenPath: o.serviceAccountTokenPath,
+		EnablePodCondition:      o.enablePodCondition,
+		PodNamespace:            o.podNamespace,
+		PodName:                 o.podName,
 	}
 }
 
@@ -123,6 +136,10 @@ func (o *GrpcProxyAgentOptions) Flags() *pflag.FlagSet {
 	flags.DurationVar(&o.syncIntervalCap, "sync-interval-cap", o.syncIntervalCap, "The maximum interval for the syncInterval to back off to when unable to connect to the proxy server")
 	flags.StringVar(&o.serviceAccountTokenPath, "service-account-token-path", o.serviceAccountTokenPath, "If non-empty proxy agent uses this token to prove its identity to the proxy server.")
 	flags.StringVar(&o.agentIdentifiers, "agent-identifiers", o.agentIdentifiers, "Identifiers of the agent that will be used by the server when choosing agent. N.B. the list of identifiers must be in URL encoded format. e.g.,host=localhost&host=node1.mydomain.com&cidr=127.0.0.1/16&ipv4=1.2.3.4&ipv4=5.6.7.8&ipv6=:::::")
+	flags.StringVar(&o.kubeconfigPath, "kubeconfig", o.kubeconfigPath, "Absolute path to the kubeconfig file. Only required when --update-pod-status is set.")
+	flags.Float32Var(&o.kubeconfigQPS, "kubeconfig-qps", o.kubeconfigQPS, "Maximum client QPS")
+	flags.IntVar(&o.kubeconfigBurst, "kubeconfig-burst", o.kubeconfigBurst, "Maximum client burst")
+	flags.BoolVar(&o.enablePodCondition, "enable-pod-condition", o.enablePodCondition, "When set, manage a condition to represent connection status in the pod specified by POD_NAME and POD_NAMESPACE")
 	return flags
 }
 
@@ -143,6 +160,12 @@ func (o *GrpcProxyAgentOptions) Print() {
 	klog.V(1).Infof("SyncIntervalCap set to %v.\n", o.syncIntervalCap)
 	klog.V(1).Infof("ServiceAccountTokenPath set to %q.\n", o.serviceAccountTokenPath)
 	klog.V(1).Infof("AgentIdentifiers set to %s.\n", util.PrettyPrintURL(o.agentIdentifiers))
+	klog.V(1).Infof("KubeconfigPath set to %v.\n", o.kubeconfigPath)
+	klog.V(1).Infof("KubeconfigQPS set to %v.\n", o.kubeconfigQPS)
+	klog.V(1).Infof("KubeconfigBurst set to %v.\n", o.kubeconfigBurst)
+	klog.V(1).Infof("EnablePodCondition set to %v.\n", o.enablePodCondition)
+	klog.V(1).Infof("PodNamespace set to %v.\n", o.podNamespace)
+	klog.V(1).Infof("PodName set to %v.\n", o.podName)
 }
 
 func (o *GrpcProxyAgentOptions) Validate() error {
@@ -228,6 +251,9 @@ func newGrpcProxyAgentOptions() *GrpcProxyAgentOptions {
 		probeInterval:             1 * time.Second,
 		syncIntervalCap:           10 * time.Second,
 		serviceAccountTokenPath:   "",
+		enablePodCondition:        false,
+		podNamespace:              os.Getenv("POD_NAMESPACE"),
+		podName:                   os.Getenv("POD_NAME"),
 	}
 	return &o
 }
@@ -253,8 +279,28 @@ func (a *Agent) run(o *GrpcProxyAgentOptions) error {
 		return fmt.Errorf("failed to validate agent options with %v", err)
 	}
 
+	var k8sClient *kubernetes.Clientset
+	if o.kubeconfigPath != "" || o.enablePodCondition {
+		config, err := clientcmd.BuildConfigFromFlags("", o.kubeconfigPath)
+		if err != nil {
+			return fmt.Errorf("failed to load kubernetes client config: %v", err)
+		}
+
+		if o.kubeconfigQPS != 0 {
+			config.QPS = o.kubeconfigQPS
+		}
+		if o.kubeconfigBurst != 0 {
+			config.Burst = o.kubeconfigBurst
+		}
+
+		k8sClient, err = kubernetes.NewForConfig(config)
+		if err != nil {
+			return fmt.Errorf("failed to create kubernetes clientset: %v", err)
+		}
+	}
+
 	stopCh := make(chan struct{})
-	if err := a.runProxyConnection(o, stopCh); err != nil {
+	if err := a.runProxyConnection(o, stopCh, k8sClient); err != nil {
 		return fmt.Errorf("failed to run proxy connection with %v", err)
 	}
 
@@ -271,7 +317,7 @@ func (a *Agent) run(o *GrpcProxyAgentOptions) error {
 	return nil
 }
 
-func (a *Agent) runProxyConnection(o *GrpcProxyAgentOptions, stopCh <-chan struct{}) error {
+func (a *Agent) runProxyConnection(o *GrpcProxyAgentOptions, stopCh <-chan struct{}, k8sClient kubernetes.Interface) error {
 	var tlsConfig *tls.Config
 	var err error
 	if tlsConfig, err = util.GetClientTLSConfig(o.caCert, o.agentCert, o.agentKey, o.proxyServerHost, o.alpnProtos); err != nil {
@@ -279,7 +325,7 @@ func (a *Agent) runProxyConnection(o *GrpcProxyAgentOptions, stopCh <-chan struc
 	}
 	dialOption := grpc.WithTransportCredentials(credentials.NewTLS(tlsConfig))
 	cc := o.ClientSetConfig(dialOption)
-	cs := cc.NewAgentClientSet(stopCh)
+	cs := cc.NewAgentClientSet(stopCh, k8sClient)
 	cs.Serve()
 
 	return nil
