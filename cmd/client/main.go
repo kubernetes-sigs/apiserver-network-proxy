@@ -358,9 +358,7 @@ func (c *Client) getUDSDialer(o *GrpcProxyClientOptions) (func(ctx context.Conte
 }
 
 func (c *Client) getMTLSDialer(o *GrpcProxyClientOptions) (func(ctx context.Context, network, addr string) (net.Conn, error), error) {
-	var tlsConfig *tls.Config
-	var err error
-	tlsConfig, err = util.GetClientTLSConfig(o.caCert, o.clientCert, o.clientKey, o.proxyHost)
+	tlsConfig, err := util.GetClientTLSConfig(o.caCert, o.clientCert, o.clientKey, o.proxyHost, nil)
 	if err != nil {
 		return nil, err
 	}
