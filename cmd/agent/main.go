@@ -139,7 +139,9 @@ func (o *GrpcProxyAgentOptions) Flags() *pflag.FlagSet {
 	flags.StringVar(&o.kubeconfigPath, "kubeconfig", o.kubeconfigPath, "Absolute path to the kubeconfig file. Only required when --update-pod-status is set.")
 	flags.Float32Var(&o.kubeconfigQPS, "kubeconfig-qps", o.kubeconfigQPS, "Maximum client QPS")
 	flags.IntVar(&o.kubeconfigBurst, "kubeconfig-burst", o.kubeconfigBurst, "Maximum client burst")
-	flags.BoolVar(&o.enablePodCondition, "enable-pod-condition", o.enablePodCondition, "When set, manage a condition to represent connection status in the pod specified by POD_NAME and POD_NAMESPACE")
+	flags.BoolVar(&o.enablePodCondition, "enable-pod-condition", o.enablePodCondition, "When set, manage a condition to represent connection status in the pod specified by --pod-name and --pod-namespace ")
+	flags.StringVar(&o.podName, "pod-name", o.podName, "Name of the pod containing this process. Only required when --enable-pod-condition is set. Defaults to POD_NAME")
+	flags.StringVar(&o.podNamespace, "pod-namespace", o.podNamespace, "Namespace of the pod containing this process. Only required when --enable-pod-condition is set. Defaults to POD_NAMESPACE")
 	return flags
 }
 
