@@ -210,6 +210,12 @@ func (o *GrpcProxyAgentOptions) Validate() error {
 			return fmt.Errorf("error checking service account token path %s, got %v", o.serviceAccountTokenPath, err)
 		}
 	}
+	if o.enablePodCondition && o.podName == "" {
+		return fmt.Errorf("pod name must be provided when pod condition is enabled")
+	}
+	if o.enablePodCondition && o.podNamespace == "" {
+		return fmt.Errorf("pod namespace must be provided when pod condition is enabled")
+	}
 	if err := validateAgentIdentifiers(o.agentIdentifiers); err != nil {
 		return fmt.Errorf("agent address is invalid: %v", err)
 	}
