@@ -455,7 +455,7 @@ func (a *Client) remoteToProxy(connID int64, ctx *connContext) {
 
 	for {
 		n, err := ctx.conn.Read(buf[:])
-		klog.V(4).InfoS("received data from remote", "bytes", n, "connID", connID)
+		klog.V(5).InfoS("received data from remote", "bytes", n, "connID", connID)
 
 		if err == io.EOF {
 			klog.V(2).Infoln("connection EOF")
