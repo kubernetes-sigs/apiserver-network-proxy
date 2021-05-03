@@ -185,11 +185,11 @@ var getPodConditionTests = []struct {
 		Reason:  connectedPodConditionReason,
 	},
 	{
-		Name:    "ha-partition",
+		Name:    "ha-partial",
 		Current: 2,
 		Desired: 3,
 		Status:  corev1.ConditionFalse,
-		Reason:  partitionPodConditionReason,
+		Reason:  partiallyConnectedPodConditionReason,
 	},
 	{
 		Name:    "ha-disconnected",

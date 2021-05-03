@@ -32,10 +32,10 @@ import (
 )
 
 const (
-	connectedPodConditionType      = "k8s.io/apiserver-network-proxy-connected"
-	connectedPodConditionReason    = "Connected"
-	disconnectedPodConditionReason = "Disconnected"
-	partitionPodConditionReason    = "Partition"
+	connectedPodConditionType            = "k8s.io/apiserver-network-proxy-connected"
+	connectedPodConditionReason          = "Connected"
+	partiallyConnectedPodConditionReason = "PartiallyConnected"
+	disconnectedPodConditionReason       = "Disconnected"
 )
 
 // ClientSet consists of clients connected to each instance of an HA proxy server.
@@ -296,7 +296,7 @@ func getPodCondition(current, desired int) *corev1.PodCondition {
 
 	if current < desired {
 		condition.Status = corev1.ConditionFalse
-		condition.Reason = partitionPodConditionReason
+		condition.Reason = partiallyConnectedPodConditionReason
 		condition.Message = fmt.Sprintf("connected to %d of %d servers", current, desired)
 		return condition
 	}

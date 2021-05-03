@@ -79,7 +79,7 @@ func TestPodConditionUpdate(t *testing.T) {
 	// Connected to 2 servers
 	lb.removeBackend(proxy[0].agent)
 	cleanups[0]()
-	waitForTransition(corev1.ConditionFalse, "Partition")
+	waitForTransition(corev1.ConditionFalse, "PartiallyConnected")
 
 	// Connected to 0 servers
 	lb.removeBackend(proxy[1].agent)
