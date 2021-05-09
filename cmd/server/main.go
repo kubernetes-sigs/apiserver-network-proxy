@@ -627,18 +627,11 @@ func (p *Proxy) runAgentServer(o *ProxyRunOptions, server *server.ProxyServer) e
 	return nil
 }
 
-// redirectTo redirects request to a certain destination.
-func redirectTo(to string) func(http.ResponseWriter, *http.Request) {
-	return func(rw http.ResponseWriter, req *http.Request) {
-		http.Redirect(rw, req, to, http.StatusMovedPermanently)
-	}
-}
-
 func (p *Proxy) runAdminServer(o *ProxyRunOptions, server *server.ProxyServer) error {
 	muxHandler := http.NewServeMux()
 	muxHandler.Handle("/metrics", promhttp.Handler())
 	if o.enableProfiling {
-		muxHandler.HandleFunc("/debug/pprof", redirectTo("/debug/pprof/"))
+		muxHandler.HandleFunc("/debug/pprof", util.RedirectTo("/debug/pprof/"))
 		muxHandler.HandleFunc("/debug/pprof/", pprof.Index)
 		if o.enableContentionProfiling {
 			runtime.SetBlockProfileRate(1)
