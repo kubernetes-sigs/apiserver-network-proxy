@@ -22,8 +22,10 @@ import (
 	"fmt"
 	"net"
 	"net/http"
+	"net/http/pprof"
 	"net/url"
 	"os"
+	"runtime"
 	"time"
 
 	"github.com/google/uuid"
@@ -74,6 +76,11 @@ type GrpcProxyAgentOptions struct {
 	// Ports for the health and admin server
 	healthServerPort int
 	adminServerPort  int
+	// Enables pprof at host:adminPort/debug/pprof.
+	enableProfiling bool
+	// If enableProfiling is true, this enables the lock contention
+	// profiling at host:adminPort/debug/pprof/block.
+	enableContentionProfiling bool
 
 	agentID          string
 	agentIdentifiers string
@@ -108,6 +115,8 @@ func (o *GrpcProxyAgentOptions) Flags() *pflag.FlagSet {
 	flags.StringSliceVar(&o.alpnProtos, "alpn-proto", o.alpnProtos, "Additional ALPN protocols to be presented when connecting to the server. Useful to distinguish between network proxy and apiserver connections that share the same destination address.")
 	flags.IntVar(&o.healthServerPort, "health-server-port", o.healthServerPort, "The port the health server is listening on.")
 	flags.IntVar(&o.adminServerPort, "admin-server-port", o.adminServerPort, "The port the admin server is listening on.")
+	flags.BoolVar(&o.enableProfiling, "enable-profiling", o.enableProfiling, "enable pprof at host:admin-port/debug/pprof")
+	flags.BoolVar(&o.enableContentionProfiling, "enable-contention-profiling", o.enableContentionProfiling, "enable contention profiling at host:admin-port/debug/pprof/block. \"--enable-profiling\" must also be set.")
 	flags.StringVar(&o.agentID, "agent-id", o.agentID, "The unique ID of this agent. Default to a generated uuid if not set.")
 	flags.DurationVar(&o.syncInterval, "sync-interval", o.syncInterval, "The initial interval by which the agent periodically checks if it has connections to all instances of the proxy server.")
 	flags.DurationVar(&o.probeInterval, "probe-interval", o.probeInterval, "The interval by which the agent periodically checks if its connections to the proxy server are ready.")
@@ -126,6 +135,8 @@ func (o *GrpcProxyAgentOptions) Print() {
 	klog.V(1).Infof("ALPNProtos set to %+s.\n", o.alpnProtos)
 	klog.V(1).Infof("HealthServerPort set to %d.\n", o.healthServerPort)
 	klog.V(1).Infof("AdminServerPort set to %d.\n", o.adminServerPort)
+	klog.V(1).Infof("EnableProfiling set to %v.\n", o.enableProfiling)
+	klog.V(1).Infof("EnableContentionProfiling set to %v.\n", o.enableContentionProfiling)
 	klog.V(1).Infof("AgentID set to %s.\n", o.agentID)
 	klog.V(1).Infof("SyncInterval set to %v.\n", o.syncInterval)
 	klog.V(1).Infof("ProbeInterval set to %v.\n", o.probeInterval)
@@ -165,6 +176,9 @@ func (o *GrpcProxyAgentOptions) Validate() error {
 	if o.adminServerPort <= 0 {
 		return fmt.Errorf("admin server port %d must be greater than 0", o.adminServerPort)
 	}
+	if o.enableContentionProfiling && !o.enableProfiling {
+		return fmt.Errorf("if --enable-contention-profiling is set, --enable-profiling must also be set")
+	}
 	if o.syncInterval > o.syncIntervalCap {
 		return fmt.Errorf("sync interval %v must be less than sync interval cap %v", o.syncInterval, o.syncIntervalCap)
 	}
@@ -199,19 +213,21 @@ func validateAgentIdentifiers(agentIdentifiers string) error {
 
 func newGrpcProxyAgentOptions() *GrpcProxyAgentOptions {
 	o := GrpcProxyAgentOptions{
-		agentCert:               "",
-		agentKey:                "",
-		caCert:                  "",
-		proxyServerHost:         "127.0.0.1",
-		proxyServerPort:         8091,
-		healthServerPort:        8093,
-		adminServerPort:         8094,
-		agentID:                 uuid.New().String(),
-		agentIdentifiers:        "",
-		syncInterval:            1 * time.Second,
-		probeInterval:           1 * time.Second,
-		syncIntervalCap:         10 * time.Second,
-		serviceAccountTokenPath: "",
+		agentCert:                 "",
+		agentKey:                  "",
+		caCert:                    "",
+		proxyServerHost:           "127.0.0.1",
+		proxyServerPort:           8091,
+		healthServerPort:          8093,
+		adminServerPort:           8094,
+		enableProfiling:           false,
+		enableContentionProfiling: false,
+		agentID:                   uuid.New().String(),
+		agentIdentifiers:          "",
+		syncInterval:              1 * time.Second,
+		probeInterval:             1 * time.Second,
+		syncIntervalCap:           10 * time.Second,
+		serviceAccountTokenPath:   "",
 	}
 	return &o
 }
@@ -309,6 +325,13 @@ func (a *Agent) runAdminServer(o *GrpcProxyAgentOptions) error {
 		}
 		http.Redirect(w, r, fmt.Sprintf("%s:%d%s", host, o.healthServerPort, r.URL.Path), http.StatusMovedPermanently)
 	}))
+	if o.enableProfiling {
+		muxHandler.HandleFunc("/debug/pprof", util.RedirectTo("/debug/pprof/"))
+		muxHandler.HandleFunc("/debug/pprof/", pprof.Index)
+		if o.enableContentionProfiling {
+			runtime.SetBlockProfileRate(1)
+		}
+	}
 
 	adminServer := &http.Server{
 		Addr:           fmt.Sprintf("127.0.0.1:%d", o.adminServerPort),
