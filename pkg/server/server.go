@@ -323,6 +323,9 @@ func NewProxyServer(serverID string, proxyStrategies []ProxyStrategy, serverCoun
 
 // Proxy handles incoming streams from gRPC frontend.
 func (s *ProxyServer) Proxy(stream client.ProxyService_ProxyServer) error {
+	metrics.Metrics.ConnectionInc(metrics.Proxy)
+	defer metrics.Metrics.ConnectionDec(metrics.Proxy)
+
 	md, ok := metadata.FromIncomingContext(stream.Context())
 	if !ok {
 		return fmt.Errorf("failed to get context")
@@ -577,6 +580,9 @@ func (s *ProxyServer) authenticateAgentViaToken(ctx context.Context) error {
 
 // Connect is for agent to connect to ProxyServer as next hop
 func (s *ProxyServer) Connect(stream agent.AgentService_ConnectServer) error {
+	metrics.Metrics.ConnectionInc(metrics.Connect)
+	defer metrics.Metrics.ConnectionDec(metrics.Connect)
+
 	agentID, err := agentID(stream)
 	if err != nil {
 		return err
