@@ -38,12 +38,15 @@ import (
 	"sigs.k8s.io/apiserver-network-proxy/proto/header"
 )
 
+const dialTimeout = 5 * time.Second
+
 // connContext tracks a connection from agent to node network.
 type connContext struct {
 	conn      net.Conn
 	cleanFunc func()
 	dataCh    chan []byte
 	cleanOnce sync.Once
+	dialDone  chan struct{}
 }
 
 func (c *connContext) cleanup() {
@@ -368,9 +371,42 @@ func (a *Client) Serve() {
 				dialReq := pkt.GetDialRequest()
 				resp.GetDialResponse().Random = dialReq.Random
 
+				connID := atomic.AddInt64(&a.nextConnID, 1)
+				dataCh := make(chan []byte, 5)
+				dialDone := make(chan struct{})
+				ctx := &connContext{
+					dataCh: dataCh,
+					dialDone: dialDone,
+				}
+				ctx.cleanFunc = func() {
+					<- dialDone
+					if ctx.conn != nil {
+						klog.V(4).InfoS("close connection", "connectionID", connID)
+						resp := &client.Packet{
+							Type:    client.PacketType_CLOSE_RSP,
+							Payload: &client.Packet_CloseResponse{CloseResponse: &client.CloseResponse{}},
+						}
+						resp.GetCloseResponse().ConnectID = connID
+
+						err := ctx.conn.Close()
+						if err != nil {
+							resp.GetCloseResponse().Error = err.Error()
+						}
+
+						if err := a.Send(resp); err != nil {
+							klog.ErrorS(err, "close response failure")
+						}
+					}
+
+					close(dataCh)
+					a.connManager.Delete(connID)
+				}
+				a.connManager.Add(connID, ctx)
+
 				start := time.Now()
-				conn, err := net.DialTimeout(dialReq.Protocol, dialReq.Address, 5 * time.Second)
+				conn, err := net.DialTimeout(dialReq.Protocol, dialReq.Address, dialTimeout)
 				if err != nil {
+					a.connManager.Delete(connID)
 					resp.GetDialResponse().Error = err.Error()
 					if err := a.Send(resp); err != nil {
 						klog.ErrorS(err, "could not send stream")
@@ -379,33 +415,8 @@ func (a *Client) Serve() {
 				}
 				metrics.Metrics.ObserveDialLatency(time.Since(start))
 
-				connID := atomic.AddInt64(&a.nextConnID, 1)
-				dataCh := make(chan []byte, 5)
-				ctx := &connContext{
-					conn:   conn,
-					dataCh: dataCh,
-					cleanFunc: func() {
-						klog.V(4).InfoS("close connection", "connectionID", connID)
-						resp := &client.Packet{
-							Type:    client.PacketType_CLOSE_RSP,
-							Payload: &client.Packet_CloseResponse{CloseResponse: &client.CloseResponse{}},
-						}
-						resp.GetCloseResponse().ConnectID = connID
-
-						err := conn.Close()
-						if err != nil {
-							resp.GetCloseResponse().Error = err.Error()
-						}
-
-						if err := a.Send(resp); err != nil {
-							klog.ErrorS(err, "close response failure")
-						}
-
-						close(dataCh)
-						a.connManager.Delete(connID)
-					},
-				}
-				a.connManager.Add(connID, ctx)
+				ctx.conn = conn
+				close(dialDone)
 
 				resp.GetDialResponse().ConnectID = connID
 				if err := a.Send(resp); err != nil {
