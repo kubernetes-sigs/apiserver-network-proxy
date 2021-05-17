@@ -255,7 +255,6 @@ func (a *Client) Recv() (*client.Packet, error) {
 	pkt, err := a.stream.Recv()
 	if err != nil && err != io.EOF {
 		metrics.Metrics.ObserveFailure(metrics.DirectionFromServer)
-		a.cs.RemoveClient(a.serverID)
 	}
 	return pkt, err
 }
@@ -314,6 +313,7 @@ func (a *Client) initializeAuthContext(ctx context.Context) (context.Context, er
 // The requests include things like opening a connection to a server,
 // streaming data and close the connection.
 func (a *Client) Serve() {
+	defer a.cs.RemoveClient(a.serverID)
 	defer func() {
 		// close all of conns with remote when Client exits
 		for _, connCtx := range a.connManager.List() {
