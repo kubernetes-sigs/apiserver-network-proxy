@@ -243,6 +243,7 @@ func (a *Client) Send(pkt *client.Packet) error {
 	err := a.stream.Send(pkt)
 	if err != nil && err != io.EOF {
 		metrics.Metrics.ObserveFailure(metrics.DirectionToServer)
+		a.cs.RemoveClient(a.serverID)
 	}
 	return err
 }
