@@ -234,7 +234,7 @@ func (s *DefaultBackendStorage) RemoveBackend(identifier string, idType pkgagent
 		}
 	}
 	if !found {
-		klog.V(1).InfoS("Cannot find connection for agent in backends", "connection", conn, "agentID", agentID)
+		klog.V(1).InfoS("Cannot find connection for agent in backends", "connection", conn, "identifier", identifier)
 	}
 }
 
