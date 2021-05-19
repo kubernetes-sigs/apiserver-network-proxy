@@ -29,6 +29,7 @@ import (
 
 	"google.golang.org/grpc/metadata"
 	authv1 "k8s.io/api/authentication/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/klog/v2"
 	"sigs.k8s.io/apiserver-network-proxy/konnectivity-client/proto/client"
@@ -508,14 +509,14 @@ func getAgentIdentifiers(stream agent.AgentService_ConnectServer) (pkgagent.Iden
 	return agentIdentifiers, nil
 }
 
-func (s *ProxyServer) validateAuthToken(token string) error {
+func (s *ProxyServer) validateAuthToken(ctx context.Context, token string) error {
 	trReq := &authv1.TokenReview{
 		Spec: authv1.TokenReviewSpec{
 			Token:     token,
 			Audiences: []string{s.AgentAuthenticationOptions.AuthenticationAudience},
 		},
 	}
-	r, err := s.AgentAuthenticationOptions.KubernetesClient.AuthenticationV1().TokenReviews().Create(trReq)
+	r, err := s.AgentAuthenticationOptions.KubernetesClient.AuthenticationV1().TokenReviews().Create(ctx, trReq, metav1.CreateOptions{})
 	if err != nil {
 		return fmt.Errorf("Failed to authenticate request. err:%v", err)
 	}
@@ -570,7 +571,7 @@ func (s *ProxyServer) authenticateAgentViaToken(ctx context.Context) error {
 		return fmt.Errorf("received token does not have %q prefix", header.AuthenticationTokenContextSchemePrefix)
 	}
 
-	if err := s.validateAuthToken(strings.TrimPrefix(authContext[0], header.AuthenticationTokenContextSchemePrefix)); err != nil {
+	if err := s.validateAuthToken(ctx, strings.TrimPrefix(authContext[0], header.AuthenticationTokenContextSchemePrefix)); err != nil {
 		return fmt.Errorf("Failed to validate authentication token, err:%v", err)
 	}
 
