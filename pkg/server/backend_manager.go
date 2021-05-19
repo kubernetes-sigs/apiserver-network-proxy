@@ -202,7 +202,7 @@ func (s *DefaultBackendStorage) AddBackend(identifier string, idType pkgagent.Id
 // RemoveBackend removes a backend.
 func (s *DefaultBackendStorage) RemoveBackend(identifier string, idType pkgagent.IdentifierType, conn agent.AgentService_ConnectServer) {
 	if !containIDType(s.idTypes, idType) {
-		klog.ErrorS(&ErrWrongIDType{idType, s.idTypes}, "fail to add remove")
+		klog.ErrorS(&ErrWrongIDType{idType, s.idTypes}, "fail to remove backend")
 		return
 	}
 	klog.V(2).InfoS("Remove connection for agent", "connection", conn, "identifier", identifier)
