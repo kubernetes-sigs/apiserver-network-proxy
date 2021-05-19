@@ -27,6 +27,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"sync"
 	"time"
 
 	"github.com/spf13/cobra"
@@ -64,20 +65,22 @@ func main() {
 }
 
 type GrpcProxyClientOptions struct {
-	clientCert   string
-	clientKey    string
-	caCert       string
-	requestProto string
-	requestPath  string
-	requestHost  string
-	requestPort  int
-	proxyHost    string
-	proxyPort    int
-	proxyUdsName string
-	mode         string
-	userAgent    string
-	testRequests int
-	testDelaySec int
+	clientCert    string
+	clientKey     string
+	caCert        string
+	requestProto  string
+	requestPath   string
+	requestHost   string
+	requestPort   int
+	proxyHost     string
+	proxyPort     int
+	proxyUdsName  string
+	mode          string
+	userAgent     string
+	testRequests  int
+	testDelaySec  int
+	afterDelaySec int
+	closeIdleConn bool
 }
 
 func (o *GrpcProxyClientOptions) Flags() *pflag.FlagSet {
@@ -96,6 +99,8 @@ func (o *GrpcProxyClientOptions) Flags() *pflag.FlagSet {
 	flags.StringVar(&o.userAgent, "user-agent", o.userAgent, "User agent to pass to the proxy server")
 	flags.IntVar(&o.testRequests, "test-requests", o.testRequests, "The number of times to send the request.")
 	flags.IntVar(&o.testDelaySec, "test-delay", o.testDelaySec, "The delay in seconds between sending requests.")
+	flags.IntVar(&o.afterDelaySec, "after-delay", o.afterDelaySec, "The delay in seconds after sending requests.")
+	flags.BoolVar(&o.closeIdleConn, "close-idle-conn", o.closeIdleConn, "Controls if the client calls closeIdleConnections.")
 
 	return flags
 }
@@ -113,6 +118,8 @@ func (o *GrpcProxyClientOptions) Print() {
 	klog.V(1).Infof("ProxyUdsName set to %q.\n", o.proxyUdsName)
 	klog.V(1).Infof("TestRequests set to %q.\n", o.testRequests)
 	klog.V(1).Infof("TestDelaySec set to %d.\n", o.testDelaySec)
+	klog.V(1).Infof("AfterDelaySec set to %d.\n", o.afterDelaySec)
+	klog.V(1).Infof("CloseIdleConn set to %t.\n", o.closeIdleConn)
 }
 
 func (o *GrpcProxyClientOptions) Validate() error {
@@ -170,25 +177,30 @@ func (o *GrpcProxyClientOptions) Validate() error {
 	if o.testDelaySec < 0 {
 		return fmt.Errorf("please do not ask for less than a 0 second delay(%d)", o.testDelaySec)
 	}
+	if o.afterDelaySec < 0 {
+		return fmt.Errorf("please do not ask for less than a 0 second delay(%d)", o.afterDelaySec)
+	}
 	return nil
 }
 
 func newGrpcProxyClientOptions() *GrpcProxyClientOptions {
 	o := GrpcProxyClientOptions{
-		clientCert:   "",
-		clientKey:    "",
-		caCert:       "",
-		requestProto: "http",
-		requestPath:  "success",
-		requestHost:  "localhost",
-		requestPort:  8000,
-		proxyHost:    "localhost",
-		proxyPort:    8090,
-		proxyUdsName: "",
-		mode:         "grpc",
-		userAgent:    "test-client",
-		testRequests: 1,
-		testDelaySec: 0,
+		clientCert:    "",
+		clientKey:     "",
+		caCert:        "",
+		requestProto:  "http",
+		requestPath:   "success",
+		requestHost:   "localhost",
+		requestPort:   8000,
+		proxyHost:     "localhost",
+		proxyPort:     8090,
+		proxyUdsName:  "",
+		mode:          "grpc",
+		userAgent:     "test-client",
+		testRequests:  1,
+		testDelaySec:  0,
+		afterDelaySec: 0,
+		closeIdleConn: true,
 	}
 	return &o
 }
@@ -217,17 +229,6 @@ func (c *Client) run(o *GrpcProxyClientOptions) error {
 	// Run remote simple http service on server side as
 	// "python -m SimpleHTTPServer"
 
-	dialer, err := c.getDialer(o)
-	if err != nil {
-		return fmt.Errorf("failed to get dialer for client, got %v", err)
-	}
-	transport := &http.Transport{
-		DialContext: dialer,
-	}
-	client := &http.Client{
-		Transport: transport,
-	}
-
 	// The apiserver network proxy does not support reusing the same dialer for multiple connections.
 	// With HTTP 1.1 Connection reuse, network proxy should support subsequent requests with the original connection
 	// as long as the connection has not been closed. This means that this connection/client cannot be shared.
@@ -241,17 +242,43 @@ func (c *Client) run(o *GrpcProxyClientOptions) error {
 	// So to prevent leaking too many tunnel connections,
 	// we explicitly close the tunnel on the first CLOSE_RSP we obtain from the inner TCP connection
 	// (https://github.com/kubernetes-sigs/apiserver-network-proxy/blob/master/konnectivity-client/pkg/client/client.go#L137).
-	for i := 1; i <= o.testRequests; i++ {
-		err = c.makeRequest(o, client)
-		if err != nil {
-			return err
-		}
+	var wg sync.WaitGroup
 
-		if i != o.testRequests {
-			klog.V(1).InfoS("Waiting for next connection test.", "seconds", o.testDelaySec)
-			wait := time.Duration(o.testDelaySec) * time.Second
-			time.Sleep(wait)
-		}
+	for i := 1; i <= o.testRequests; i++ {
+		wg.Add(1)
+		go func() error {
+			defer wg.Done()
+			dialer, err := c.getDialer(o)
+			if err != nil {
+				return fmt.Errorf("failed to get dialer for client, got %v", err)
+			}
+			transport := &http.Transport{
+				DialContext: dialer,
+			}
+			client := &http.Client{
+				Transport: transport,
+			}
+			if o.closeIdleConn {
+				defer client.CloseIdleConnections()
+			}
+
+			err = c.makeRequest(o, client)
+			if err != nil {
+				return err
+			}
+
+			if i != o.testRequests {
+				klog.V(1).InfoS("Waiting for next connection test.", "seconds", o.testDelaySec)
+				wait := time.Duration(o.testDelaySec) * time.Second
+				time.Sleep(wait)
+			}
+			return nil
+		}()
+	}
+	wg.Wait()
+	if o.afterDelaySec > 0 {
+		wait := time.Duration(o.afterDelaySec) * time.Second
+		time.Sleep(wait)
 	}
 
 	return nil
@@ -267,7 +294,12 @@ func (c *Client) makeRequest(o *GrpcProxyClientOptions, client *http.Client) err
 	if err != nil {
 		return fmt.Errorf("failed to send request to client, got %v", err)
 	}
-	defer response.Body.Close() // TODO: proxy server should handle the case where Body isn't closed.
+	defer func() {
+		err := response.Body.Close()
+		if err != nil {
+			klog.Errorf("Failed to close connection, got %v", err)
+		}
+	}() // TODO: proxy server should handle the case where Body isn't closed.
 
 	data, err := ioutil.ReadAll(response.Body)
 	if err != nil {
@@ -371,8 +403,10 @@ func (c *Client) getMTLSDialer(o *GrpcProxyClientOptions) (func(ctx context.Cont
 
 	go func() {
 		<-ch
-		err := proxyConn.Close()
-		klog.ErrorS(err, "connection closed")
+		if proxyConn != nil {
+			err := proxyConn.Close()
+			klog.ErrorS(err, "connection closed")
+		}
 	}()
 
 	switch o.mode {
