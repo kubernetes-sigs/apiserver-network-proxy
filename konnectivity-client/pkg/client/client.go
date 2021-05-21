@@ -93,6 +93,11 @@ func CreateSingleUseGrpcTunnel(address string, opts ...grpc.DialOption) (Tunnel,
 
 func (t *grpcTunnel) serve(c clientConn) {
 	defer c.Close()
+	defer func() {
+		if err := recover(); err != nil {
+			klog.V(1).InfoS("error in konnectivity serve", "err", err)
+		}
+	}()
 
 	for {
 		pkt, err := t.stream.Recv()
