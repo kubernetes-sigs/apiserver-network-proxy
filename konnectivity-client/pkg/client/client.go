@@ -139,9 +139,11 @@ func (t *grpcTunnel) serve(c clientConn) {
 			t.connsLock.RUnlock()
 
 			if ok {
+				timer := time.NewTimer((time.Duration)(t.readTimeoutSeconds) * time.Second)
 				select {
 				case conn.readCh <- resp.Data:
-				case <-time.After((time.Duration)(t.readTimeoutSeconds) * time.Second):
+					timer.Stop()
+				case <-timer.C:
 					klog.ErrorS(fmt.Errorf("timeout"), "readTimeout has been reached, the grpc connection to the proxy server will be closed", "connectionID", conn.connID, "readTimeoutSeconds", t.readTimeoutSeconds)
 					return
 				}
