@@ -116,14 +116,17 @@ func (t *grpcTunnel) serve(c clientConn) {
 			if !ok {
 				klog.V(1).Infoln("DialResp not recognized; dropped")
 			} else {
-				ch <- dialResult{
+				result := dialResult{
 					err:    resp.Error,
 					connid: resp.ConnectID,
 				}
-				// We should only get DialResp once. If we get the DialResp
-				// twice, we will get an exception trying to write to a closed
-				// channel.
-				close(ch)
+				select  {
+				case ch <- result:
+				default:
+					klog.ErrorS(fmt.Errorf("blocked pending channel"), "Received second dial response for connection request", "connectionID", resp.ConnectID, "dialID", resp.Random)
+					// On multiple dial responses, avoid leaking serve goroutine.
+					return
+				}
 			}
 
 			if resp.Error != "" {
