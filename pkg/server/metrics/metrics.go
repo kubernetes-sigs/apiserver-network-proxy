@@ -45,6 +45,8 @@ var (
 type ServerMetrics struct {
 	latencies *prometheus.HistogramVec
 	connections *prometheus.GaugeVec
+	healthSuccess *prometheus.CounterVec
+	healthFailure *prometheus.CounterVec
 }
 
 // newServerMetrics create a new ServerMetrics, configured with default metric names.
@@ -70,10 +72,26 @@ func newServerMetrics() *ServerMetrics {
 			"service_method",
 		},
 	)
+	healthSuccess := prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Namespace: namespace,
+			Subsystem: subsystem,
+			Name:      "health_success",
+			Help:      "The total number of successful health checks",
+		})
+	healthFailure := prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Namespace: namespace,
+			Subsystem: subsystem,
+			Name:      "health_failure",
+			Help:      "The total number of failed health checks",
+		})
 	
 	prometheus.MustRegister(latencies)
 	prometheus.MustRegister(connections)
-	return &ServerMetrics{latencies: latencies, connections: connections}
+	prometheus.MustRegister(healthSuccess)
+	prometheus.MustRegister(healthFailure)
+	return &ServerMetrics{latencies: latencies, connections: connections, healthSuccess: healthSuccess, healthFailure: healthFailure}
 }
 
 // Reset resets the metrics.
@@ -94,4 +112,14 @@ func (a *ServerMetrics) ConnectionInc(service_method string) {
 // ConnectionDec decrements a finished grpc client connection.
 func (a *ServerMetrics) ConnectionDec(service_method string) {
 	a.connections.With(prometheus.Labels{"service_method": service_method}).Dec()
+}
+
+// SuccessInc increments a successful server health check.
+func (a *ServerMetrics) SuccessInc() {
+	a.healthSuccess.Inc()
+}
+
+// FailureInc increments a failed server health check.
+func (a *ServerMetrics) FailureInc() {
+	a.healthFailure.Inc()
 }

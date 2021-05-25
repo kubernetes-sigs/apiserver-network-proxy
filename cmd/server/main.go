@@ -46,6 +46,7 @@ import (
 	"k8s.io/client-go/tools/clientcmd"
 	"k8s.io/klog/v2"
 	"sigs.k8s.io/apiserver-network-proxy/konnectivity-client/proto/client"
+	"sigs.k8s.io/apiserver-network-proxy/pkg/agent/metrics"
 	"sigs.k8s.io/apiserver-network-proxy/pkg/server"
 	"sigs.k8s.io/apiserver-network-proxy/pkg/util"
 	"sigs.k8s.io/apiserver-network-proxy/proto/agent"
@@ -663,8 +664,10 @@ func (p *Proxy) runHealthServer(o *ProxyRunOptions, server *server.ProxyServer) 
 		if ready {
 			w.WriteHeader(200)
 			fmt.Fprintf(w, "ok")
+			metrics.Metrics.SuccessInc()
 			return
 		}
+		metric.Metrics.FailureInc()
 		w.WriteHeader(500)
 		fmt.Fprintf(w, msg)
 	})
