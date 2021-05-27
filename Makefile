@@ -72,7 +72,7 @@ bin/proxy-test-client: konnectivity-client/proto/client/client.pb.go bin cmd/cli
 bin/http-test-server: bin cmd/test-server/main.go
 	GO111MODULE=on go build -o bin/http-test-server cmd/test-server/main.go
 
-bin/proxy-server: proto/agent/agent.pb.go konnectivity-client/proto/client/client.pb.go bin cmd/server/main.go
+bin/proxy-server: proto/agent/agent.pb.go konnectivity-client/proto/client/client.pb.go bin cmd/server/main.go pkg/server/server.go pkg/server/metrics/metrics.go
 	GO111MODULE=on go build -o bin/proxy-server cmd/server/main.go
 
 ## --------------------------------------

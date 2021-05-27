@@ -34,8 +34,8 @@ const (
 )
 
 var (
-	// Use buckets ranging from 5 ms to 12.5 seconds.
-	latencyBuckets = []float64{0.005, 0.025, 0.1, 0.5, 2.5, 12.5}
+	// Use buckets ranging from 10 ns to 12.5 seconds.
+	latencyBuckets = []float64{0.000001, 0.00001, 0.0001, 0.005, 0.025, 0.1, 0.5, 2.5, 12.5}
 
 	// Metrics provides access to all dial metrics.
 	Metrics = newServerMetrics()
@@ -43,9 +43,10 @@ var (
 
 // ServerMetrics includes all the metrics of the proxy server.
 type ServerMetrics struct {
-	latencies   *prometheus.HistogramVec
-	connections *prometheus.GaugeVec
-	backend     *prometheus.GaugeVec
+	latencies         *prometheus.HistogramVec
+	frontendLatencies *prometheus.HistogramVec
+	connections       *prometheus.GaugeVec
+	backend           *prometheus.GaugeVec
 }
 
 // newServerMetrics create a new ServerMetrics, configured with default metric names.
@@ -56,6 +57,16 @@ func newServerMetrics() *ServerMetrics {
 			Subsystem: subsystem,
 			Name:      "dial_duration_seconds",
 			Help:      "Latency of dial to the remote endpoint in seconds",
+			Buckets:   latencyBuckets,
+		},
+		[]string{},
+	)
+	frontendLatencies := prometheus.NewHistogramVec(
+		prometheus.HistogramOpts{
+			Namespace: namespace,
+			Subsystem: subsystem,
+			Name:      "frontend_write_duration_seconds",
+			Help:      "Latency of write to the frontend in seconds",
 			Buckets:   latencyBuckets,
 		},
 		[]string{},
@@ -82,23 +93,31 @@ func newServerMetrics() *ServerMetrics {
 	)
 
 	prometheus.MustRegister(latencies)
+	prometheus.MustRegister(frontendLatencies)
 	prometheus.MustRegister(connections)
 	prometheus.MustRegister(backend)
 	return &ServerMetrics{
-		latencies:   latencies,
-		connections: connections,
-		backend:     backend,
+		latencies:         latencies,
+		frontendLatencies: frontendLatencies,
+		connections:       connections,
+		backend:           backend,
 	}
 }
 
 // Reset resets the metrics.
 func (a *ServerMetrics) Reset() {
 	a.latencies.Reset()
+	a.frontendLatencies.Reset()
 }
 
 // ObserveDialLatency records the latency of dial to the remote endpoint.
 func (a *ServerMetrics) ObserveDialLatency(elapsed time.Duration) {
 	a.latencies.WithLabelValues().Observe(elapsed.Seconds())
+}
+
+// ObserveFrontendWriteLatency records the latency of dial to the remote endpoint.
+func (a *ServerMetrics) ObserveFrontendWriteLatency(elapsed time.Duration) {
+	a.frontendLatencies.WithLabelValues().Observe(elapsed.Seconds())
 }
 
 // ConnectionInc increments a new grpc client connection.
