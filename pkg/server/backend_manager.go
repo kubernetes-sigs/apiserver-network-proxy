@@ -27,6 +27,7 @@ import (
 	"k8s.io/klog/v2"
 	client "sigs.k8s.io/apiserver-network-proxy/konnectivity-client/proto/client"
 	pkgagent "sigs.k8s.io/apiserver-network-proxy/pkg/agent"
+	"sigs.k8s.io/apiserver-network-proxy/pkg/server/metrics"
 	"sigs.k8s.io/apiserver-network-proxy/proto/agent"
 )
 
@@ -194,6 +195,7 @@ func (s *DefaultBackendStorage) AddBackend(identifier string, idType pkgagent.Id
 		s.backends[identifier] = append(s.backends[identifier], addedBackend)
 		return addedBackend
 	}
+	metrics.Metrics.BackendInc()
 	s.backends[identifier] = []*backend{addedBackend}
 	s.agentIDs = append(s.agentIDs, identifier)
 	return addedBackend
@@ -225,6 +227,7 @@ func (s *DefaultBackendStorage) RemoveBackend(identifier string, idType pkgagent
 	}
 	if len(s.backends[identifier]) == 0 {
 		delete(s.backends, identifier)
+		metrics.Metrics.BackendDec()
 		for i := range s.agentIDs {
 			if s.agentIDs[i] == identifier {
 				s.agentIDs[i] = s.agentIDs[len(s.agentIDs)-1]
