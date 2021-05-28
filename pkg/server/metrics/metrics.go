@@ -83,7 +83,11 @@ func newServerMetrics() *ServerMetrics {
 	prometheus.MustRegister(latencies)
 	prometheus.MustRegister(connections)
 	prometheus.MustRegister(backend)
-	return &ServerMetrics{latencies: latencies, connections: connections, backend: backend}
+	return &ServerMetrics{
+		latencies: latencies,
+		connections: connections,
+		backend: backend,
+	}
 }
 
 // Reset resets the metrics.
@@ -106,12 +110,7 @@ func (a *ServerMetrics) ConnectionDec(service_method string) {
 	a.connections.With(prometheus.Labels{"service_method": service_method}).Dec()
 }
 
-// BackendInc increments the number of backend connection.
-func (a *ServerMetrics) BackendInc() {
-	a.backend.With(prometheus.Labels{}).Inc()
-}
-
-// BackendDec decrements the number of backend connection.
-func (a *ServerMetrics) BackendDec() {
-	a.backend.With(prometheus.Labels{}).Dec()
+// SetBackendCount sets the number of backend connection.
+func (a *ServerMetrics) SetBackendCount(count int) {
+	a.backend.With().Set(count)
 }

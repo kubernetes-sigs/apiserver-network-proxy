@@ -195,8 +195,8 @@ func (s *DefaultBackendStorage) AddBackend(identifier string, idType pkgagent.Id
 		s.backends[identifier] = append(s.backends[identifier], addedBackend)
 		return addedBackend
 	}
-	metrics.Metrics.BackendInc()
 	s.backends[identifier] = []*backend{addedBackend}
+	metrics.Metrics.SetBackendCount(len(s.backends))
 	s.agentIDs = append(s.agentIDs, identifier)
 	return addedBackend
 }
@@ -227,7 +227,6 @@ func (s *DefaultBackendStorage) RemoveBackend(identifier string, idType pkgagent
 	}
 	if len(s.backends[identifier]) == 0 {
 		delete(s.backends, identifier)
-		metrics.Metrics.BackendDec()
 		for i := range s.agentIDs {
 			if s.agentIDs[i] == identifier {
 				s.agentIDs[i] = s.agentIDs[len(s.agentIDs)-1]
@@ -239,6 +238,7 @@ func (s *DefaultBackendStorage) RemoveBackend(identifier string, idType pkgagent
 	if !found {
 		klog.V(1).InfoS("Could not find connection matching identifier to remove", "connection", conn, "identifier", identifier)
 	}
+	metrics.Metrics.SetBackendCount(len(s.backends))
 }
 
 // NumBackends resturns the number of available backends
