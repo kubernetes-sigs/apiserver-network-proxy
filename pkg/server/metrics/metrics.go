@@ -43,7 +43,7 @@ var (
 
 // ServerMetrics includes all the metrics of the proxy server.
 type ServerMetrics struct {
-	latencies *prometheus.HistogramVec
+	latencies   *prometheus.HistogramVec
 	connections *prometheus.GaugeVec
 }
 
@@ -70,7 +70,7 @@ func newServerMetrics() *ServerMetrics {
 			"service_method",
 		},
 	)
-	
+
 	prometheus.MustRegister(latencies)
 	prometheus.MustRegister(connections)
 	return &ServerMetrics{latencies: latencies, connections: connections}
@@ -87,11 +87,11 @@ func (a *ServerMetrics) ObserveDialLatency(elapsed time.Duration) {
 }
 
 // ConnectionInc increments a new grpc client connection.
-func (a *ServerMetrics) ConnectionInc(service_method string) {
-	a.connections.With(prometheus.Labels{"service_method": service_method}).Inc()
+func (a *ServerMetrics) ConnectionInc(serviceMethod string) {
+	a.connections.With(prometheus.Labels{"service_method": serviceMethod}).Inc()
 }
 
 // ConnectionDec decrements a finished grpc client connection.
-func (a *ServerMetrics) ConnectionDec(service_method string) {
-	a.connections.With(prometheus.Labels{"service_method": service_method}).Dec()
+func (a *ServerMetrics) ConnectionDec(serviceMethod string) {
+	a.connections.With(prometheus.Labels{"service_method": serviceMethod}).Dec()
 }
