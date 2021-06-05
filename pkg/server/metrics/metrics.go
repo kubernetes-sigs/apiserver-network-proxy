@@ -75,7 +75,8 @@ func newServerMetrics() *ServerMetrics {
 		prometheus.GaugeOpts{
 			Namespace: namespace,
 			Subsystem: subsystem,
-			Name:      "Number of konnectivity agent connected to the proxy server",
+			Name:      "ready_backend_connections",
+			Help:      "Number of konnectivity agent connected to the proxy server",
 		},
 		[]string{},
 	)
