@@ -112,5 +112,5 @@ func (a *ServerMetrics) ConnectionDec(serviceMethod string) {
 
 // SetBackendCount sets the number of backend connection.
 func (a *ServerMetrics) SetBackendCount(count int) {
-	a.backend.With(prometheus.Labels{}).Set(float64(count))
+	a.backend.WithLabelValues().Set(float64(count))
 }
