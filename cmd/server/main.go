@@ -23,6 +23,8 @@ import (
 	"flag"
 	"fmt"
 	"io/ioutil"
+	utilflag "k8s.io/component-base/cli/flag"
+	"k8s.io/component-base/logs"
 	"net"
 	"net/http"
 	"net/http/pprof"
@@ -47,7 +49,6 @@ import (
 	"k8s.io/klog/v2"
 	"sigs.k8s.io/apiserver-network-proxy/konnectivity-client/proto/client"
 	"sigs.k8s.io/apiserver-network-proxy/pkg/server"
-	"sigs.k8s.io/apiserver-network-proxy/pkg/util"
 	"sigs.k8s.io/apiserver-network-proxy/proto/agent"
 )
 
@@ -66,10 +67,12 @@ func main() {
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "error setting klog flags: %v", err)
 	}
-	local.VisitAll(func(fl *flag.Flag) {
-		fl.Name = util.Normalize(fl.Name)
-		flags.AddGoFlag(fl)
-	})
+	flags.SetNormalizeFunc(utilflag.WordSepNormalizeFunc)
+	flags.AddGoFlagSet(local)
+
+	logs.InitLogs()
+	defer logs.FlushLogs()
+
 	if err := command.Execute(); err != nil {
 		klog.Errorf("error: %v\n", err)
 		klog.Flush()
