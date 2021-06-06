@@ -82,7 +82,9 @@ func (a *Agent) runHealthServer(o *options.GrpcProxyAgentOptions) error {
 	muxHandler := http.NewServeMux()
 	muxHandler.Handle("/metrics", promhttp.Handler())
 	muxHandler.HandleFunc("/healthz", livenessHandler)
+	// "/ready" is deprecated but being maintained for backward compatibility
 	muxHandler.HandleFunc("/ready", readinessHandler)
+	muxHandler.HandleFunc("/readyz", readinessHandler)
 	healthServer := &http.Server{
 		Addr:           fmt.Sprintf(":%d", o.HealthServerPort),
 		Handler:        muxHandler,
