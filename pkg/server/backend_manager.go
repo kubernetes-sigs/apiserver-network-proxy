@@ -27,6 +27,7 @@ import (
 	"k8s.io/klog/v2"
 	client "sigs.k8s.io/apiserver-network-proxy/konnectivity-client/proto/client"
 	pkgagent "sigs.k8s.io/apiserver-network-proxy/pkg/agent"
+	"sigs.k8s.io/apiserver-network-proxy/pkg/server/metrics"
 	"sigs.k8s.io/apiserver-network-proxy/proto/agent"
 )
 
@@ -195,6 +196,7 @@ func (s *DefaultBackendStorage) AddBackend(identifier string, idType pkgagent.Id
 		return addedBackend
 	}
 	s.backends[identifier] = []*backend{addedBackend}
+	metrics.Metrics.SetBackendCount(len(s.backends))
 	s.agentIDs = append(s.agentIDs, identifier)
 	return addedBackend
 }
@@ -236,6 +238,7 @@ func (s *DefaultBackendStorage) RemoveBackend(identifier string, idType pkgagent
 	if !found {
 		klog.V(1).InfoS("Could not find connection matching identifier to remove", "connection", conn, "identifier", identifier)
 	}
+	metrics.Metrics.SetBackendCount(len(s.backends))
 }
 
 // NumBackends resturns the number of available backends

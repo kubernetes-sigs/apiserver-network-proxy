@@ -45,6 +45,7 @@ var (
 type ServerMetrics struct {
 	latencies   *prometheus.HistogramVec
 	connections *prometheus.GaugeVec
+	backend *prometheus.GaugeVec
 }
 
 // newServerMetrics create a new ServerMetrics, configured with default metric names.
@@ -70,10 +71,24 @@ func newServerMetrics() *ServerMetrics {
 			"service_method",
 		},
 	)
-
+	backend := prometheus.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Namespace: namespace,
+			Subsystem: subsystem,
+			Name:      "ready_backend_connections",
+			Help:      "Number of konnectivity agent connected to the proxy server",
+		},
+		[]string{},
+	)
+	
 	prometheus.MustRegister(latencies)
 	prometheus.MustRegister(connections)
-	return &ServerMetrics{latencies: latencies, connections: connections}
+	prometheus.MustRegister(backend)
+	return &ServerMetrics{
+		latencies: latencies,
+		connections: connections,
+		backend: backend,
+	}
 }
 
 // Reset resets the metrics.
@@ -94,4 +109,9 @@ func (a *ServerMetrics) ConnectionInc(serviceMethod string) {
 // ConnectionDec decrements a finished grpc client connection.
 func (a *ServerMetrics) ConnectionDec(serviceMethod string) {
 	a.connections.With(prometheus.Labels{"service_method": serviceMethod}).Dec()
+}
+
+// SetBackendCount sets the number of backend connection.
+func (a *ServerMetrics) SetBackendCount(count int) {
+	a.backend.WithLabelValues().Set(float64(count))
 }
