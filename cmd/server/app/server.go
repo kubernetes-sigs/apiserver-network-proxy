@@ -352,7 +352,9 @@ func (p *Proxy) runHealthServer(o *options.ProxyRunOptions, server *server.Proxy
 
 	muxHandler := http.NewServeMux()
 	muxHandler.HandleFunc("/healthz", livenessHandler)
+	// "/ready" is deprecated but being maintained for backward compatibility
 	muxHandler.HandleFunc("/ready", readinessHandler)
+	muxHandler.HandleFunc("/readyz", readinessHandler)
 	healthServer := &http.Server{
 		Addr:           fmt.Sprintf(":%d", o.HealthPort),
 		Handler:        muxHandler,
