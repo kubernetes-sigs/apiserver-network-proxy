@@ -62,10 +62,10 @@ requests on the other.
 ### GRPC Client using mTLS Proxy with dial back Agent
 
 ```
-client =HTTP over GRPC=> (:8090) proxy (:8091) <=GRPC= agent =HTTP=> http-test-server(:8000)
-  |                                                    ^
-  |                          Tunnel                    |
-  +----------------------------------------------------+
+Frontend client =HTTP over GRPC=> (:8090) proxy (:8091) <=GRPC= agent =HTTP=> http-test-server(:8000)
+  |                                                               ^
+  |                               Tunnel                          |
+  +---------------------------------------------------------------+
 ```
 
 - Start Simple test HTTP Server (Sample destination)
@@ -75,7 +75,7 @@ client =HTTP over GRPC=> (:8090) proxy (:8091) <=GRPC= agent =HTTP=> http-test-s
 
 - Start proxy service
 ```console
-./bin/proxy-server --server-ca-cert=certs/master/issued/ca.crt --server-cert=certs/master/issued/proxy-master.crt --server-key=certs/master/private/proxy-master.key --cluster-ca-cert=certs/agent/issued/ca.crt --cluster-cert=certs/agent/issued/proxy-master.crt --cluster-key=certs/agent/private/proxy-master.key
+./bin/proxy-server --server-ca-cert=certs/frontend/issued/ca.crt --server-cert=certs/frontend/issued/proxy-frontend.crt --server-key=certs/frontend/private/proxy-frontend.key --cluster-ca-cert=certs/agent/issued/ca.crt --cluster-cert=certs/agent/issued/proxy-frontend.crt --cluster-key=certs/agent/private/proxy-frontend.key
 ```
 
 - Start agent service
@@ -85,16 +85,16 @@ client =HTTP over GRPC=> (:8090) proxy (:8091) <=GRPC= agent =HTTP=> http-test-s
 
 - Run client (mTLS enabled sample client)
 ```console
-./bin/proxy-test-client --ca-cert=certs/master/issued/ca.crt --client-cert=certs/master/issued/proxy-client.crt --client-key=certs/master/private/proxy-client.key
+./bin/proxy-test-client --ca-cert=certs/frontend/issued/ca.crt --client-cert=certs/frontend/issued/proxy-client.crt --client-key=certs/frontend/private/proxy-client.key
 ```
 
 ### GRPC+UDS Client using Proxy with dial back Agent
 
 ```
-client =HTTP over GRPC+UDS=> (/tmp/uds-proxy) proxy (:8091) <=GRPC= agent =HTTP=> SimpleHTTPServer(:8000)
-  |                                                    ^
-  |                          Tunnel                    |
-  +----------------------------------------------------+
+Frontend client =HTTP over GRPC+UDS=> (/tmp/uds-proxy) proxy (:8091) <=GRPC= agent =HTTP=> SimpleHTTPServer(:8000)
+  |                                                                            ^
+  |                                     Tunnel                                 |
+  +----------------------------------------------------------------------------+
 ```
 
 - Start Simple test HTTP Server (Sample destination)
@@ -104,7 +104,7 @@ client =HTTP over GRPC+UDS=> (/tmp/uds-proxy) proxy (:8091) <=GRPC= agent =HTTP=
 
 - Start proxy service
 ```console
-./bin/proxy-server --server-port=0 --uds-name=/tmp/uds-proxy --cluster-ca-cert=certs/agent/issued/ca.crt --cluster-cert=certs/agent/issued/proxy-master.crt --cluster-key=certs/agent/private/proxy-master.key
+./bin/proxy-server --server-port=0 --uds-name=/tmp/uds-proxy --cluster-ca-cert=certs/agent/issued/ca.crt --cluster-cert=certs/agent/issued/proxy-frontend.crt --cluster-key=certs/agent/private/proxy-frontend.key
 ```
 
 - Start agent service
@@ -121,10 +121,10 @@ client =HTTP over GRPC+UDS=> (/tmp/uds-proxy) proxy (:8091) <=GRPC= agent =HTTP=
 ### HTTP-Connect Client using mTLS Proxy with dial back Agent (Either curl OR test client)
 
 ```
-client =HTTP-CONNECT=> (:8090) proxy (:8091) <=GRPC= agent =HTTP=> SimpleHTTPServer(:8000)
-  |                                                    ^
-  |                          Tunnel                    |
-  +----------------------------------------------------+
+Frontend client =HTTP-CONNECT=> (:8090) proxy (:8091) <=GRPC= agent =HTTP=> SimpleHTTPServer(:8000)
+  |                                                             ^
+  |                              Tunnel                         |
+  +-------------------------------------------------------------+
 ```
 
 - Start SimpleHTTPServer (Sample destination)
@@ -134,7 +134,7 @@ client =HTTP-CONNECT=> (:8090) proxy (:8091) <=GRPC= agent =HTTP=> SimpleHTTPSer
 
 - Start proxy service
 ```console
-./bin/proxy-server --mode=http-connect --server-ca-cert=certs/master/issued/ca.crt --server-cert=certs/master/issued/proxy-master.crt --server-key=certs/master/private/proxy-master.key --cluster-ca-cert=certs/agent/issued/ca.crt --cluster-cert=certs/agent/issued/proxy-master.crt --cluster-key=certs/agent/private/proxy-master.key
+./bin/proxy-server --mode=http-connect --server-ca-cert=certs/frontend/issued/ca.crt --server-cert=certs/frontend/issued/proxy-frontend.crt --server-key=certs/frontend/private/proxy-frontend.key --cluster-ca-cert=certs/agent/issued/ca.crt --cluster-cert=certs/agent/issued/proxy-frontend.crt --cluster-key=certs/agent/private/proxy-frontend.key
 ```
 
 - Start agent service
@@ -144,12 +144,12 @@ client =HTTP-CONNECT=> (:8090) proxy (:8091) <=GRPC= agent =HTTP=> SimpleHTTPSer
 
 - Run client (mTLS & http-connect enabled sample client)
 ```console
-./bin/proxy-test-client --mode=http-connect  --proxy-host=127.0.0.1 --ca-cert=certs/master/issued/ca.crt --client-cert=certs/master/issued/proxy-client.crt --client-key=certs/master/private/proxy-client.key
+./bin/proxy-test-client --mode=http-connect  --proxy-host=127.0.0.1 --ca-cert=certs/frontend/issued/ca.crt --client-cert=certs/frontend/issued/proxy-client.crt --client-key=certs/frontend/private/proxy-client.key
 ```
 
 - Run curl client (curl using a mTLS http-connect proxy)
 ```console
-curl -v -p --proxy-key certs/master/private/proxy-client.key --proxy-cert certs/master/issued/proxy-client.crt --proxy-cacert certs/master/issued/ca.crt --proxy-cert-type PEM -x https://127.0.0.1:8090  http://localhost:8000```
+curl -v -p --proxy-key certs/frontend/private/proxy-client.key --proxy-cert certs/frontend/issued/proxy-client.crt --proxy-cacert certs/frontend/issued/ca.crt --proxy-cert-type PEM -x https://127.0.0.1:8090  http://localhost:8000```
 ```
 
 ### Running on kubernetes
