@@ -45,7 +45,7 @@ var (
 type ServerMetrics struct {
 	latencies   *prometheus.HistogramVec
 	connections *prometheus.GaugeVec
-	backend *prometheus.GaugeVec
+	backend     *prometheus.GaugeVec
 }
 
 // newServerMetrics create a new ServerMetrics, configured with default metric names.
@@ -80,14 +80,14 @@ func newServerMetrics() *ServerMetrics {
 		},
 		[]string{},
 	)
-	
+
 	prometheus.MustRegister(latencies)
 	prometheus.MustRegister(connections)
 	prometheus.MustRegister(backend)
 	return &ServerMetrics{
-		latencies: latencies,
+		latencies:   latencies,
 		connections: connections,
-		backend: backend,
+		backend:     backend,
 	}
 }
 

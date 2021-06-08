@@ -111,17 +111,17 @@ func (p *TestServer) run(o *TestServerRunOptions) error {
 	defer cancel()
 
 	klog.Info("Starting test http server for client requests.")
-	masterStop, err := p.runMasterServer(ctx, o)
+	testStop, err := p.runTestServer(ctx, o)
 	if err != nil {
-		return fmt.Errorf("failed to run the master server: %v", err)
+		return fmt.Errorf("failed to run the test server: %v", err)
 	}
 
 	stopCh := SetupSignalHandler()
 	<-stopCh
 	klog.Info("Shutting down server.")
 
-	if masterStop != nil {
-		masterStop()
+	if testStop != nil {
+		testStop()
 	}
 
 	return nil
@@ -187,7 +187,7 @@ func sleepReturnSuccess(w http.ResponseWriter, req *http.Request) {
 	returnSuccess(w, req)
 }
 
-func (p *TestServer) runMasterServer(ctx context.Context, o *TestServerRunOptions) (StopFunc, error) {
+func (p *TestServer) runTestServer(ctx context.Context, o *TestServerRunOptions) (StopFunc, error) {
 	muxHandler := http.NewServeMux()
 	muxHandler.HandleFunc("/success", returnSuccess)
 	muxHandler.HandleFunc("/sleep", sleepReturnSuccess)

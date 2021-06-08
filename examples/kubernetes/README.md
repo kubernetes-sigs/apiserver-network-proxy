@@ -32,7 +32,7 @@ CLUSTER_KEY=/etc/srv/kubernetes/pki/apiserver.key
 ```
 
 # Register SERVER_TOKEN in [static-token-file](https://kubernetes.io/docs/reference/access-authn-authz/authentication/#static-token-file)
-Append the output of the following line to the [static-token-file](https://kubernetes.io/docs/reference/access-authn-authz/authentication/#static-token-file) and restart **kube-apiserver** on the master
+Append the output of the following line to the [static-token-file](https://kubernetes.io/docs/reference/access-authn-authz/authentication/#static-token-file) and restart **kube-apiserver** on the control plane.
 ```bash
 echo "${SERVER_TOKEN},system:konnectivity-server,uid:system:konnectivity-server"
 ```
@@ -46,7 +46,7 @@ K8S_API_PID=$(sudo crictl ps | grep kube-apiserver | awk '{ print $1; }')
 sudo crictl stop ${K8S_API_PID}
 ```
 
-# Save following config at /etc/srv/kubernetes/konnectivity-server/kubeconfig on master VM
+# Save following config at /etc/srv/kubernetes/konnectivity-server/kubeconfig on control plane VM
 ```bash
 SERVER_TOKEN=${SERVER_TOKEN} envsubst < examples/kubernetes/kubeconfig
 ```
