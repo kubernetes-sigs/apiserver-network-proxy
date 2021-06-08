@@ -38,7 +38,8 @@ type ProxyRunOptions struct {
 	HealthPort uint
 	// After a duration of this time if the server doesn't see any activity it
 	// pings the client to see if the transport is still alive.
-	KeepaliveTime time.Duration
+	KeepaliveTime       time.Duration
+	FrontendKeepaliveTime time.Duration
 	// Enables pprof at host:AdminPort/debug/pprof.
 	EnableProfiling bool
 	// If EnableProfiling is true, this enables the lock contention
@@ -86,7 +87,8 @@ func (o *ProxyRunOptions) Flags() *pflag.FlagSet {
 	flags.UintVar(&o.AgentPort, "agent-port", o.AgentPort, "Port we listen for agent connections on.")
 	flags.UintVar(&o.AdminPort, "admin-port", o.AdminPort, "Port we listen for admin connections on.")
 	flags.UintVar(&o.HealthPort, "health-port", o.HealthPort, "Port we listen for health connections on.")
-	flags.DurationVar(&o.KeepaliveTime, "keepalive-time", o.KeepaliveTime, "Time for gRPC server keepalive.")
+	flags.DurationVar(&o.KeepaliveTime, "keepalive-time", o.KeepaliveTime, "Time for gRPC agent server keepalive.")
+	flags.DurationVar(&o.FrontendKeepaliveTime, "frontend-keepalive-time", o.FrontendKeepaliveTime, "Time for gRPC frontend server keepalive.")
 	flags.BoolVar(&o.EnableProfiling, "enable-profiling", o.EnableProfiling, "enable pprof at host:admin-port/debug/pprof")
 	flags.BoolVar(&o.EnableContentionProfiling, "enable-contention-profiling", o.EnableContentionProfiling, "enable contention profiling at host:admin-port/debug/pprof/block. \"--enable-profiling\" must also be set.")
 	flags.StringVar(&o.ServerID, "server-id", o.ServerID, "The unique ID of this server.")
@@ -116,6 +118,7 @@ func (o *ProxyRunOptions) Print() {
 	klog.V(1).Infof("Admin port set to %d.\n", o.AdminPort)
 	klog.V(1).Infof("Health port set to %d.\n", o.HealthPort)
 	klog.V(1).Infof("Keepalive time set to %v.\n", o.KeepaliveTime)
+	klog.V(1).Infof("Frontend keepalive time set to %v.\n", o.FrontendKeepaliveTime)
 	klog.V(1).Infof("EnableProfiling set to %v.\n", o.EnableProfiling)
 	klog.V(1).Infof("EnableContentionProfiling set to %v.\n", o.EnableContentionProfiling)
 	klog.V(1).Infof("ServerID set to %s.\n", o.ServerID)
@@ -274,6 +277,7 @@ func NewProxyRunOptions() *ProxyRunOptions {
 		HealthPort:                8092,
 		AdminPort:                 8095,
 		KeepaliveTime:             1 * time.Hour,
+		FrontendKeepaliveTime:     1 * time.Hour,
 		EnableProfiling:           false,
 		EnableContentionProfiling: false,
 		ServerID:                  uuid.New().String(),
