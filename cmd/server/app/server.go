@@ -371,4 +371,3 @@ func (p *Proxy) runHealthServer(o *options.ProxyRunOptions, server *server.Proxy
 
 	return nil
 }
-

@@ -73,3 +73,54 @@ func TestAddRemoveBackends(t *testing.T) {
 		t.Errorf("expected %v, got %v", e, a)
 	}
 }
+
+func TestAddRemoveBackendsWithDefaultRoute(t *testing.T) {
+	conn1 := new(fakeAgentServiceConnectServer)
+	conn12 := new(fakeAgentServiceConnectServer)
+	conn2 := new(fakeAgentServiceConnectServer)
+	conn22 := new(fakeAgentServiceConnectServer)
+	conn3 := new(fakeAgentServiceConnectServer)
+
+	p := NewDefaultRouteBackendManager()
+
+	p.AddBackend("agent1", pkgagent.DefaultRoute, conn1)
+	p.RemoveBackend("agent1", pkgagent.DefaultRoute, conn1)
+	expectedBackends := make(map[string][]*backend)
+	expectedAgentIDs := []string{}
+	if e, a := expectedBackends, p.backends; !reflect.DeepEqual(e, a) {
+		t.Errorf("expected %v, got %v", e, a)
+	}
+	if e, a := expectedAgentIDs, p.agentIDs; !reflect.DeepEqual(e, a) {
+		t.Errorf("expected %v, got %v", e, a)
+	}
+	if e, a := expectedAgentIDs, p.defaultRouteAgentIDs; !reflect.DeepEqual(e, a) {
+		t.Errorf("expected %v, got %v", e, a)
+	}
+
+	p = NewDefaultRouteBackendManager()
+	p.AddBackend("agent1", pkgagent.DefaultRoute, conn1)
+	p.AddBackend("agent1", pkgagent.DefaultRoute, conn12)
+	// Adding the same connection again should be a no-op.
+	p.AddBackend("agent1", pkgagent.DefaultRoute, conn12)
+	p.AddBackend("agent2", pkgagent.DefaultRoute, conn2)
+	p.AddBackend("agent2", pkgagent.DefaultRoute, conn22)
+	p.AddBackend("agent3", pkgagent.DefaultRoute, conn3)
+	p.RemoveBackend("agent2", pkgagent.DefaultRoute, conn22)
+	p.RemoveBackend("agent2", pkgagent.DefaultRoute, conn2)
+	p.RemoveBackend("agent1", pkgagent.DefaultRoute, conn1)
+	// This is invalid. agent1 doesn't have conn3. This should be a no-op.
+	p.RemoveBackend("agent1", pkgagent.DefaultRoute, conn3)
+
+	expectedBackends = map[string][]*backend{
+		"agent1": {newBackend(conn12)},
+		"agent3": {newBackend(conn3)},
+	}
+	expectedDefaultRouteAgentIDs := []string{"agent1", "agent3"}
+
+	if e, a := expectedBackends, p.backends; !reflect.DeepEqual(e, a) {
+		t.Errorf("expected %v, got %v", e, a)
+	}
+	if e, a := expectedDefaultRouteAgentIDs, p.defaultRouteAgentIDs; !reflect.DeepEqual(e, a) {
+		t.Errorf("expected %v, got %v", e, a)
+	}
+}
