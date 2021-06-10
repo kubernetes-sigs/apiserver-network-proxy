@@ -25,6 +25,7 @@ const (
 	// NodeToMasterTraffic enables the traffic initiated in the agents side
 	// to flow to the server side e.g. Kubelet to KAS and pods to KAS traffic
 	// (KEP-2025).
+	// TODO (#issues/232) Determine how to safely fix the feature gate name.
 	NodeToMasterTraffic featuregate.Feature = "NodeToMasterTraffic"
 )
 

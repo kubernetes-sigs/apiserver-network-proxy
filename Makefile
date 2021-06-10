@@ -118,9 +118,9 @@ proto/agent/agent.pb.go: proto/agent/agent.proto
 easy-rsa.tar.gz:
 	curl -L -o easy-rsa.tar.gz --connect-timeout 20 --retry 6 --retry-delay 2 https://github.com/OpenVPN/easy-rsa/archive/refs/tags/v3.0.8.tar.gz
 
-easy-rsa-master: easy-rsa.tar.gz
+easy-rsa: easy-rsa.tar.gz
 	tar xvf easy-rsa.tar.gz
-	mv easy-rsa-3.0.8 easy-rsa-master
+	mv easy-rsa-3.0.8 easy-rsa
 
 cfssl:
 	@if ! command -v cfssl &> /dev/null; then \
@@ -136,34 +136,34 @@ cfssljson:
 
 .PHONY: certs
 certs: export PATH := $(shell pwd):$(PATH)
-certs: easy-rsa-master cfssl cfssljson
+certs: easy-rsa cfssl cfssljson
 	# set up easy-rsa
-	cp -rf easy-rsa-master/easyrsa3 easy-rsa-master/master
-	cp -rf easy-rsa-master/easyrsa3 easy-rsa-master/agent
+	cp -rf easy-rsa/easyrsa3 easy-rsa/frontend
+	cp -rf easy-rsa/easyrsa3 easy-rsa/agent
 	# create the client <-> server-proxy connection certs
-	cd easy-rsa-master/master; \
+	cd easy-rsa/frontend; \
 	./easyrsa init-pki; \
 	./easyrsa --batch "--req-cn=127.0.0.1@$(date +%s)" build-ca nopass; \
-	./easyrsa --subject-alt-name="DNS:kubernetes,DNS:localhost,IP:127.0.0.1" build-server-full "proxy-master" nopass; \
+	./easyrsa --subject-alt-name="DNS:kubernetes,DNS:localhost,IP:127.0.0.1" build-server-full "proxy-frontend" nopass; \
 	./easyrsa build-client-full proxy-client nopass; \
 	echo '{"signing":{"default":{"expiry":"43800h","usages":["signing","key encipherment","client auth"]}}}' > "ca-config.json"; \
 	echo '{"CN":"proxy","names":[{"O":"system:nodes"}],"hosts":[""],"key":{"algo":"rsa","size":2048}}' | cfssl gencert -ca=pki/ca.crt -ca-key=pki/private/ca.key -config=ca-config.json - | cfssljson -bare proxy
-	mkdir -p certs/master
-	cp -r easy-rsa-master/master/pki/private certs/master
-	cp -r easy-rsa-master/master/pki/issued certs/master
-	cp easy-rsa-master/master/pki/ca.crt certs/master/issued
+	mkdir -p certs/frontend
+	cp -r easy-rsa/frontend/pki/private certs/frontend
+	cp -r easy-rsa/frontend/pki/issued certs/frontend
+	cp easy-rsa/frontend/pki/ca.crt certs/frontend/issued
 	# create the agent <-> server-proxy connection certs
-	cd easy-rsa-master/agent; \
+	cd easy-rsa/agent; \
 	./easyrsa init-pki; \
 	./easyrsa --batch "--req-cn=$(PROXY_SERVER_IP)@$(date +%s)" build-ca nopass; \
-	./easyrsa --subject-alt-name="DNS:kubernetes,DNS:localhost,IP:$(PROXY_SERVER_IP)" build-server-full "proxy-master" nopass; \
+	./easyrsa --subject-alt-name="DNS:kubernetes,DNS:localhost,IP:$(PROXY_SERVER_IP)" build-server-full "proxy-frontend" nopass; \
 	./easyrsa build-client-full proxy-agent nopass; \
 	echo '{"signing":{"default":{"expiry":"43800h","usages":["signing","key encipherment","agent auth"]}}}' > "ca-config.json"; \
 	echo '{"CN":"proxy","names":[{"O":"system:nodes"}],"hosts":[""],"key":{"algo":"rsa","size":2048}}' | cfssl gencert -ca=pki/ca.crt -ca-key=pki/private/ca.key -config=ca-config.json - | cfssljson -bare proxy
 	mkdir -p certs/agent
-	cp -r easy-rsa-master/agent/pki/private certs/agent
-	cp -r easy-rsa-master/agent/pki/issued certs/agent
-	cp easy-rsa-master/agent/pki/ca.crt certs/agent/issued
+	cp -r easy-rsa/agent/pki/private certs/agent
+	cp -r easy-rsa/agent/pki/issued certs/agent
+	cp easy-rsa/agent/pki/ca.crt certs/agent/issued
 
 ## --------------------------------------
 ## Docker
@@ -308,4 +308,4 @@ release-alias-tag: # Adds the tag to the last build tag. BASE_REF comes from the
 .PHONY: clean
 clean:
 	go clean -testcache
-	rm -rf proto/agent/agent.pb.go konnectivity-client/proto/client/client.pb.go easy-rsa.tar.gz easy-rsa-master cfssl cfssljson certs bin proto/agent/mocks
+	rm -rf proto/agent/agent.pb.go konnectivity-client/proto/client/client.pb.go easy-rsa.tar.gz easy-rsa cfssl cfssljson certs bin proto/agent/mocks

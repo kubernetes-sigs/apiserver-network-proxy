@@ -87,16 +87,16 @@ func (p *Proxy) run(o *options.ProxyRunOptions) error {
 		KubernetesClient:       k8sClient,
 		AuthenticationAudience: o.AuthenticationAudience,
 	}
-	klog.V(1).Infoln("Starting master server for client connections.")
+	klog.V(1).Infoln("Starting frontend server for client connections.")
 	ps, err := server.GenProxyStrategiesFromStr(o.ProxyStrategies)
 	if err != nil {
 		return err
 	}
 	server := server.NewProxyServer(o.ServerID, ps, int(o.ServerCount), authOpt)
 
-	masterStop, err := p.runMasterServer(ctx, o, server)
+	frontendStop, err := p.runFrontendServer(ctx, o, server)
 	if err != nil {
-		return fmt.Errorf("failed to run the master server: %v", err)
+		return fmt.Errorf("failed to run the frontend server: %v", err)
 	}
 
 	klog.V(1).Infoln("Starting agent server for tunnel connections.")
@@ -119,8 +119,8 @@ func (p *Proxy) run(o *options.ProxyRunOptions) error {
 	<-stopCh
 	klog.V(1).Infoln("Shutting down server.")
 
-	if masterStop != nil {
-		masterStop()
+	if frontendStop != nil {
+		frontendStop()
 	}
 
 	return nil
@@ -155,14 +155,14 @@ func getUDSListener(ctx context.Context, udsName string) (net.Listener, error) {
 	return lis, nil
 }
 
-func (p *Proxy) runMasterServer(ctx context.Context, o *options.ProxyRunOptions, server *server.ProxyServer) (StopFunc, error) {
+func (p *Proxy) runFrontendServer(ctx context.Context, o *options.ProxyRunOptions, server *server.ProxyServer) (StopFunc, error) {
 	if o.UdsName != "" {
-		return p.runUDSMasterServer(ctx, o, server)
+		return p.runUDSFrontendServer(ctx, o, server)
 	}
-	return p.runMTLSMasterServer(ctx, o, server)
+	return p.runMTLSFrontendServer(ctx, o, server)
 }
 
-func (p *Proxy) runUDSMasterServer(ctx context.Context, o *options.ProxyRunOptions, s *server.ProxyServer) (StopFunc, error) {
+func (p *Proxy) runUDSFrontendServer(ctx context.Context, o *options.ProxyRunOptions, s *server.ProxyServer) (StopFunc, error) {
 	if o.DeleteUDSFile {
 		if err := os.Remove(o.UdsName); err != nil && !os.IsNotExist(err) {
 			klog.ErrorS(err, "failed to delete file", "file", o.UdsName)
@@ -237,7 +237,7 @@ func (p *Proxy) getTLSConfig(caFile, certFile, keyFile string) (*tls.Config, err
 	return tlsConfig, nil
 }
 
-func (p *Proxy) runMTLSMasterServer(ctx context.Context, o *options.ProxyRunOptions, s *server.ProxyServer) (StopFunc, error) {
+func (p *Proxy) runMTLSFrontendServer(ctx context.Context, o *options.ProxyRunOptions, s *server.ProxyServer) (StopFunc, error) {
 	var stop StopFunc
 
 	var tlsConfig *tls.Config
@@ -280,7 +280,7 @@ func (p *Proxy) runMTLSMasterServer(ctx context.Context, o *options.ProxyRunOpti
 		go func() {
 			err := server.ListenAndServeTLS("", "") // empty files defaults to tlsConfig
 			if err != nil {
-				klog.ErrorS(err, "failed to listen on master port")
+				klog.ErrorS(err, "failed to listen on frontend port")
 			}
 		}()
 	}
