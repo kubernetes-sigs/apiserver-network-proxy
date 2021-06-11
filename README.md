@@ -149,7 +149,7 @@ Frontend client =HTTP-CONNECT=> (:8090) proxy (:8091) <=GRPC= agent =HTTP=> Simp
 
 - Run curl client (curl using a mTLS http-connect proxy)
 ```console
-curl -v -p --proxy-key certs/frontend/private/proxy-client.key --proxy-cert certs/frontend/issued/proxy-client.crt --proxy-cacert certs/frontend/issued/ca.crt --proxy-cert-type PEM -x https://127.0.0.1:8090  http://localhost:8000
+curl -v -p --proxy-key certs/frontend/private/proxy-client.key --proxy-cert certs/frontend/issued/proxy-client.crt --proxy-cacert certs/frontend/issued/ca.crt --proxy-cert-type PEM -x https://127.0.0.1:8090  http://localhost:8000/success
 ```
 
 ### Running on kubernetes
