@@ -1,6 +1,7 @@
 package tests
 
 import (
+	"context"
 	"io"
 	"io/ioutil"
 	"log"
@@ -183,14 +184,15 @@ func TestBasicHAProxyServer_GRPC(t *testing.T) {
 }
 
 func testProxyServer(t *testing.T, front string, target string) {
-	tunnel, err := client.CreateSingleUseGrpcTunnel(front, grpc.WithInsecure())
+	ctx := context.Background()
+	tunnel, err := client.CreateSingleUseGrpcTunnel(ctx, front, grpc.WithInsecure())
 	if err != nil {
 		t.Fatal(err)
 	}
 
 	c := &http.Client{
 		Transport: &http.Transport{
-			Dial: tunnel.Dial,
+			DialContext: tunnel.DialContext,
 		},
 		Timeout: 1 * time.Second,
 	}

@@ -55,6 +55,7 @@ func (s *testServer) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 }
 
 func TestBasicProxy_GRPC(t *testing.T) {
+	ctx := context.Background()
 	server := httptest.NewServer(newEchoServer("hello"))
 	defer server.Close()
 
@@ -73,14 +74,14 @@ func TestBasicProxy_GRPC(t *testing.T) {
 	time.Sleep(time.Second)
 
 	// run test client
-	tunnel, err := client.CreateSingleUseGrpcTunnel(proxy.front, grpc.WithInsecure())
+	tunnel, err := client.CreateSingleUseGrpcTunnel(ctx, proxy.front, grpc.WithInsecure())
 	if err != nil {
 		t.Fatal(err)
 	}
 
 	c := &http.Client{
 		Transport: &http.Transport{
-			Dial: tunnel.Dial,
+			DialContext: tunnel.DialContext,
 		},
 	}
 
@@ -100,6 +101,7 @@ func TestBasicProxy_GRPC(t *testing.T) {
 }
 
 func TestProxyHandleDialError_GRPC(t *testing.T) {
+	ctx := context.Background()
 	invalidServer := httptest.NewServer(newEchoServer("hello"))
 
 	stopCh := make(chan struct{})
@@ -117,14 +119,14 @@ func TestProxyHandleDialError_GRPC(t *testing.T) {
 	time.Sleep(time.Second)
 
 	// run test client
-	tunnel, err := client.CreateSingleUseGrpcTunnel(proxy.front, grpc.WithInsecure())
+	tunnel, err := client.CreateSingleUseGrpcTunnel(ctx, proxy.front, grpc.WithInsecure())
 	if err != nil {
 		t.Fatal(err)
 	}
 
 	c := &http.Client{
 		Transport: &http.Transport{
-			Dial: tunnel.Dial,
+			DialContext: tunnel.DialContext,
 		},
 	}
 
@@ -137,7 +139,87 @@ func TestProxyHandleDialError_GRPC(t *testing.T) {
 	}
 }
 
+func TestProxyHandle_DoneContext_GRPC(t *testing.T) {
+	hangingServer := newEchoServer("hello")
+	hangingServer.wchan = make(chan struct{})
+	server := httptest.NewServer(hangingServer)
+	defer server.Close()
+
+	stopCh := make(chan struct{})
+	defer close(stopCh)
+
+	proxy, cleanup, err := runGRPCProxyServer()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer cleanup()
+
+	runAgent(proxy.agent, stopCh)
+
+	// Wait for agent to register on proxy server
+	time.Sleep(time.Second)
+
+	// run test client
+	ctx, cancel := context.WithTimeout(context.Background(), -time.Second)
+	defer cancel()
+	_, err = client.CreateSingleUseGrpcTunnel(ctx, proxy.front, grpc.WithInsecure())
+	if err == nil || !strings.Contains(err.Error(), "context deadline exceeded") {
+		t.Error("Expected error when context is cancelled, did not receive error")
+	}
+}
+
+func TestProxyHandle_SlowContext_GRPC(t *testing.T) {
+	slowServer := newEchoServer("hello")
+	slowServer.wchan = make(chan struct{})
+	server := httptest.NewServer(slowServer)
+	defer server.Close()
+
+	stopCh := make(chan struct{})
+	defer close(stopCh)
+
+	proxy, cleanup, err := runGRPCProxyServer()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer cleanup()
+
+	runAgent(proxy.agent, stopCh)
+
+	// Wait for agent to register on proxy server
+	time.Sleep(time.Second)
+
+	// run test client
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	tunnel, err := client.CreateSingleUseGrpcTunnel(ctx, proxy.front, grpc.WithInsecure())
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	go func() {
+		time.Sleep(3 * time.Second)
+		close(slowServer.wchan)
+	}()
+
+	c := &http.Client{
+		Transport: &http.Transport{
+			DialContext: tunnel.DialContext,
+		},
+	}
+
+	// TODO: handle case where there is no context on the request.
+	req, err := http.NewRequestWithContext(ctx, "GET", server.URL, nil)
+	if err != nil {
+		t.Error(err)
+	}
+	_, err = c.Do(req)
+	if err == nil || !strings.Contains(err.Error(), "context deadline exceeded") {
+		t.Error("Expected error when context is cancelled, did not receive error")
+	}
+}
+
 func TestProxy_LargeResponse(t *testing.T) {
+	ctx := context.Background()
 	length := 1 << 20 // 1M
 	chunks := 10
 	server := httptest.NewServer(newSizedServer(length, chunks))
@@ -158,14 +240,14 @@ func TestProxy_LargeResponse(t *testing.T) {
 	time.Sleep(time.Second)
 
 	// run test client
-	tunnel, err := client.CreateSingleUseGrpcTunnel(proxy.front, grpc.WithInsecure())
+	tunnel, err := client.CreateSingleUseGrpcTunnel(ctx, proxy.front, grpc.WithInsecure())
 	if err != nil {
 		t.Fatal(err)
 	}
 
 	c := &http.Client{
 		Transport: &http.Transport{
-			Dial: tunnel.Dial,
+			DialContext: tunnel.DialContext,
 		},
 	}
 
@@ -311,6 +393,7 @@ func runGRPCProxyServerWithServerCount(serverCount int) (proxy, *server.ProxySer
 }
 
 func runHTTPConnProxyServer() (proxy, func(), error) {
+	ctx := context.Background()
 	var proxy proxy
 	s := server.NewProxyServer(uuid.New().String(), []server.ProxyStrategy{server.ProxyStrategyDefault}, 0, &server.AgentTokenAuthenticationOptions{})
 	agentServer := grpc.NewServer()
@@ -347,7 +430,7 @@ func runHTTPConnProxyServer() (proxy, func(), error) {
 	cleanup := func() {
 		lis.Close()
 		lis2.Close()
-		httpServer.Shutdown(context.Background())
+		httpServer.Shutdown(ctx)
 	}
 	proxy.server = s
 

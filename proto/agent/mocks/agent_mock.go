@@ -21,37 +21,36 @@ package mock_agent
 
 import (
 	context "context"
-	reflect "reflect"
-
 	gomock "github.com/golang/mock/gomock"
 	metadata "google.golang.org/grpc/metadata"
+	reflect "reflect"
 	client "sigs.k8s.io/apiserver-network-proxy/konnectivity-client/proto/client"
 )
 
-// MockAgentService_ConnectServer is a mock of AgentService_ConnectServer interface.
+// MockAgentService_ConnectServer is a mock of AgentService_ConnectServer interface
 type MockAgentService_ConnectServer struct {
 	ctrl     *gomock.Controller
 	recorder *MockAgentService_ConnectServerMockRecorder
 }
 
-// MockAgentService_ConnectServerMockRecorder is the mock recorder for MockAgentService_ConnectServer.
+// MockAgentService_ConnectServerMockRecorder is the mock recorder for MockAgentService_ConnectServer
 type MockAgentService_ConnectServerMockRecorder struct {
 	mock *MockAgentService_ConnectServer
 }
 
-// NewMockAgentService_ConnectServer creates a new mock instance.
+// NewMockAgentService_ConnectServer creates a new mock instance
 func NewMockAgentService_ConnectServer(ctrl *gomock.Controller) *MockAgentService_ConnectServer {
 	mock := &MockAgentService_ConnectServer{ctrl: ctrl}
 	mock.recorder = &MockAgentService_ConnectServerMockRecorder{mock}
 	return mock
 }
 
-// EXPECT returns an object that allows the caller to indicate expected use.
+// EXPECT returns an object that allows the caller to indicate expected use
 func (m *MockAgentService_ConnectServer) EXPECT() *MockAgentService_ConnectServerMockRecorder {
 	return m.recorder
 }
 
-// Context mocks base method.
+// Context mocks base method
 func (m *MockAgentService_ConnectServer) Context() context.Context {
 	m.ctrl.T.Helper()
 	ret := m.ctrl.Call(m, "Context")
@@ -59,13 +58,13 @@ func (m *MockAgentService_ConnectServer) Context() context.Context {
 	return ret0
 }
 
-// Context indicates an expected call of Context.
+// Context indicates an expected call of Context
 func (mr *MockAgentService_ConnectServerMockRecorder) Context() *gomock.Call {
 	mr.mock.ctrl.T.Helper()
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Context", reflect.TypeOf((*MockAgentService_ConnectServer)(nil).Context))
 }
 
-// Recv mocks base method.
+// Recv mocks base method
 func (m *MockAgentService_ConnectServer) Recv() (*client.Packet, error) {
 	m.ctrl.T.Helper()
 	ret := m.ctrl.Call(m, "Recv")
@@ -74,13 +73,13 @@ func (m *MockAgentService_ConnectServer) Recv() (*client.Packet, error) {
 	return ret0, ret1
 }
 
-// Recv indicates an expected call of Recv.
+// Recv indicates an expected call of Recv
 func (mr *MockAgentService_ConnectServerMockRecorder) Recv() *gomock.Call {
 	mr.mock.ctrl.T.Helper()
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Recv", reflect.TypeOf((*MockAgentService_ConnectServer)(nil).Recv))
 }
 
-// RecvMsg mocks base method.
+// RecvMsg mocks base method
 func (m *MockAgentService_ConnectServer) RecvMsg(arg0 interface{}) error {
 	m.ctrl.T.Helper()
 	ret := m.ctrl.Call(m, "RecvMsg", arg0)
@@ -88,13 +87,13 @@ func (m *MockAgentService_ConnectServer) RecvMsg(arg0 interface{}) error {
 	return ret0
 }
 
-// RecvMsg indicates an expected call of RecvMsg.
+// RecvMsg indicates an expected call of RecvMsg
 func (mr *MockAgentService_ConnectServerMockRecorder) RecvMsg(arg0 interface{}) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "RecvMsg", reflect.TypeOf((*MockAgentService_ConnectServer)(nil).RecvMsg), arg0)
 }
 
-// Send mocks base method.
+// Send mocks base method
 func (m *MockAgentService_ConnectServer) Send(arg0 *client.Packet) error {
 	m.ctrl.T.Helper()
 	ret := m.ctrl.Call(m, "Send", arg0)
@@ -102,13 +101,13 @@ func (m *MockAgentService_ConnectServer) Send(arg0 *client.Packet) error {
 	return ret0
 }
 
-// Send indicates an expected call of Send.
+// Send indicates an expected call of Send
 func (mr *MockAgentService_ConnectServerMockRecorder) Send(arg0 interface{}) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Send", reflect.TypeOf((*MockAgentService_ConnectServer)(nil).Send), arg0)
 }
 
-// SendHeader mocks base method.
+// SendHeader mocks base method
 func (m *MockAgentService_ConnectServer) SendHeader(arg0 metadata.MD) error {
 	m.ctrl.T.Helper()
 	ret := m.ctrl.Call(m, "SendHeader", arg0)
@@ -116,13 +115,13 @@ func (m *MockAgentService_ConnectServer) SendHeader(arg0 metadata.MD) error {
 	return ret0
 }
 
-// SendHeader indicates an expected call of SendHeader.
+// SendHeader indicates an expected call of SendHeader
 func (mr *MockAgentService_ConnectServerMockRecorder) SendHeader(arg0 interface{}) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "SendHeader", reflect.TypeOf((*MockAgentService_ConnectServer)(nil).SendHeader), arg0)
 }
 
-// SendMsg mocks base method.
+// SendMsg mocks base method
 func (m *MockAgentService_ConnectServer) SendMsg(arg0 interface{}) error {
 	m.ctrl.T.Helper()
 	ret := m.ctrl.Call(m, "SendMsg", arg0)
@@ -130,13 +129,13 @@ func (m *MockAgentService_ConnectServer) SendMsg(arg0 interface{}) error {
 	return ret0
 }
 
-// SendMsg indicates an expected call of SendMsg.
+// SendMsg indicates an expected call of SendMsg
 func (mr *MockAgentService_ConnectServerMockRecorder) SendMsg(arg0 interface{}) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "SendMsg", reflect.TypeOf((*MockAgentService_ConnectServer)(nil).SendMsg), arg0)
 }
 
-// SetHeader mocks base method.
+// SetHeader mocks base method
 func (m *MockAgentService_ConnectServer) SetHeader(arg0 metadata.MD) error {
 	m.ctrl.T.Helper()
 	ret := m.ctrl.Call(m, "SetHeader", arg0)
@@ -144,19 +143,19 @@ func (m *MockAgentService_ConnectServer) SetHeader(arg0 metadata.MD) error {
 	return ret0
 }
 
-// SetHeader indicates an expected call of SetHeader.
+// SetHeader indicates an expected call of SetHeader
 func (mr *MockAgentService_ConnectServerMockRecorder) SetHeader(arg0 interface{}) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "SetHeader", reflect.TypeOf((*MockAgentService_ConnectServer)(nil).SetHeader), arg0)
 }
 
-// SetTrailer mocks base method.
+// SetTrailer mocks base method
 func (m *MockAgentService_ConnectServer) SetTrailer(arg0 metadata.MD) {
 	m.ctrl.T.Helper()
 	m.ctrl.Call(m, "SetTrailer", arg0)
 }
 
-// SetTrailer indicates an expected call of SetTrailer.
+// SetTrailer indicates an expected call of SetTrailer
 func (mr *MockAgentService_ConnectServerMockRecorder) SetTrailer(arg0 interface{}) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "SetTrailer", reflect.TypeOf((*MockAgentService_ConnectServer)(nil).SetTrailer), arg0)

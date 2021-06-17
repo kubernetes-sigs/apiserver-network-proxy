@@ -337,9 +337,10 @@ func (c *Client) getDialer(o *GrpcProxyClientOptions) (func(ctx context.Context,
 }
 
 func (c *Client) getUDSDialer(o *GrpcProxyClientOptions) (func(ctx context.Context, network, addr string) (net.Conn, error), error) {
+	ctx := context.Background()
+
 	var proxyConn net.Conn
 	var err error
-
 	// Setup signal handler
 	ch := make(chan os.Signal, 1)
 	signal.Notify(ch)
@@ -364,13 +365,13 @@ func (c *Client) getUDSDialer(o *GrpcProxyClientOptions) (func(ctx context.Conte
 			}
 			return c, err
 		})
-		tunnel, err := client.CreateSingleUseGrpcTunnel(o.proxyUdsName, dialOption, grpc.WithInsecure(), grpc.WithUserAgent(o.userAgent))
+		tunnel, err := client.CreateSingleUseGrpcTunnel(ctx, o.proxyUdsName, dialOption, grpc.WithInsecure(), grpc.WithUserAgent(o.userAgent))
 		if err != nil {
 			return nil, fmt.Errorf("failed to create tunnel %s, got %v", o.proxyUdsName, err)
 		}
 
 		requestAddress := fmt.Sprintf("%s:%d", o.requestHost, o.requestPort)
-		proxyConn, err = tunnel.Dial("tcp", requestAddress)
+		proxyConn, err = tunnel.DialContext(ctx, "tcp", requestAddress)
 		if err != nil {
 			return nil, fmt.Errorf("failed to dial request %s, got %v", requestAddress, err)
 		}
@@ -410,6 +411,7 @@ func (c *Client) getUDSDialer(o *GrpcProxyClientOptions) (func(ctx context.Conte
 }
 
 func (c *Client) getMTLSDialer(o *GrpcProxyClientOptions) (func(ctx context.Context, network, addr string) (net.Conn, error), error) {
+	ctx := context.Background()
 	tlsConfig, err := util.GetClientTLSConfig(o.caCert, o.clientCert, o.clientKey, o.proxyHost, nil)
 	if err != nil {
 		return nil, err
@@ -434,13 +436,13 @@ func (c *Client) getMTLSDialer(o *GrpcProxyClientOptions) (func(ctx context.Cont
 		transportCreds := credentials.NewTLS(tlsConfig)
 		dialOption := grpc.WithTransportCredentials(transportCreds)
 		serverAddress := fmt.Sprintf("%s:%d", o.proxyHost, o.proxyPort)
-		tunnel, err := client.CreateSingleUseGrpcTunnel(serverAddress, dialOption)
+		tunnel, err := client.CreateSingleUseGrpcTunnel(ctx, serverAddress, dialOption)
 		if err != nil {
 			return nil, fmt.Errorf("failed to create tunnel %s, got %v", serverAddress, err)
 		}
 
 		requestAddress := fmt.Sprintf("%s:%d", o.requestHost, o.requestPort)
-		proxyConn, err = tunnel.Dial("tcp", requestAddress)
+		proxyConn, err = tunnel.DialContext(ctx, "tcp", requestAddress)
 		if err != nil {
 			return nil, fmt.Errorf("failed to dial request %s, got %v", requestAddress, err)
 		}

@@ -18,6 +18,7 @@ package client
 
 import (
 	"bytes"
+	"context"
 	"errors"
 	"testing"
 	"time"
@@ -28,6 +29,7 @@ import (
 )
 
 func TestDial(t *testing.T) {
+	ctx := context.Background()
 	s, ps := pipe()
 	ts := testServer(ps, 100)
 
@@ -43,7 +45,7 @@ func TestDial(t *testing.T) {
 	go tunnel.serve(&fakeConn{})
 	go ts.serve()
 
-	_, err := tunnel.Dial("tcp", "127.0.0.1:80")
+	_, err := tunnel.DialContext(ctx, "tcp", "127.0.0.1:80")
 	if err != nil {
 		t.Fatalf("expect nil; got %v", err)
 	}
@@ -58,6 +60,7 @@ func TestDial(t *testing.T) {
 }
 
 func TestData(t *testing.T) {
+	ctx := context.Background()
 	s, ps := pipe()
 	ts := testServer(ps, 100)
 
@@ -73,7 +76,7 @@ func TestData(t *testing.T) {
 	go tunnel.serve(&fakeConn{})
 	go ts.serve()
 
-	conn, err := tunnel.Dial("tcp", "127.0.0.1:80")
+	conn, err := tunnel.DialContext(ctx, "tcp", "127.0.0.1:80")
 	if err != nil {
 		t.Fatalf("expect nil; got %v", err)
 	}
@@ -115,6 +118,7 @@ func TestData(t *testing.T) {
 }
 
 func TestClose(t *testing.T) {
+	ctx := context.Background()
 	s, ps := pipe()
 	ts := testServer(ps, 100)
 
@@ -130,7 +134,7 @@ func TestClose(t *testing.T) {
 	go tunnel.serve(&fakeConn{})
 	go ts.serve()
 
-	conn, err := tunnel.Dial("tcp", "127.0.0.1:80")
+	conn, err := tunnel.DialContext(ctx, "tcp", "127.0.0.1:80")
 	if err != nil {
 		t.Fatalf("expect nil; got %v", err)
 	}
