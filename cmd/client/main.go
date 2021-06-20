@@ -210,6 +210,7 @@ func newGrpcProxyClientCommand(c *Client, o *GrpcProxyClientOptions) *cobra.Comm
 		Use:  "proxy-client",
 		Long: `A gRPC proxy Client, primarily used to test the Kubernetes gRPC Proxy Server.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
+			cmd.SilenceUsage = true
 			return c.run(o)
 		},
 	}
@@ -243,14 +244,16 @@ func (c *Client) run(o *GrpcProxyClientOptions) error {
 	// we explicitly close the tunnel on the first CLOSE_RSP we obtain from the inner TCP connection
 	// (https://github.com/kubernetes-sigs/apiserver-network-proxy/blob/master/konnectivity-client/pkg/client/client.go#L137).
 	var wg sync.WaitGroup
+	ch := make(chan error, o.testRequests)
 
 	for i := 1; i <= o.testRequests; i++ {
 		wg.Add(1)
-		go func() error {
+		go func() {
 			defer wg.Done()
 			dialer, err := c.getDialer(o)
 			if err != nil {
-				return fmt.Errorf("failed to get dialer for client, got %v", err)
+				ch <- fmt.Errorf("failed to get dialer for client, got %v", err)
+				return
 			}
 			transport := &http.Transport{
 				DialContext: dialer,
@@ -264,7 +267,8 @@ func (c *Client) run(o *GrpcProxyClientOptions) error {
 
 			err = c.makeRequest(o, client)
 			if err != nil {
-				return err
+				ch <- err
+				return
 			}
 
 			if i != o.testRequests {
@@ -272,13 +276,28 @@ func (c *Client) run(o *GrpcProxyClientOptions) error {
 				wait := time.Duration(o.testDelaySec) * time.Second
 				time.Sleep(wait)
 			}
-			return nil
+			ch <- nil
 		}()
 	}
 	wg.Wait()
+	close(ch)
 	if o.afterDelaySec > 0 {
 		wait := time.Duration(o.afterDelaySec) * time.Second
 		time.Sleep(wait)
+	}
+	// collect up and return errors
+	errs := []error{}
+	for err := range ch {
+		if err != nil {
+			errs = append(errs, err)
+		}
+	}
+	if len(errs) > 1 {
+		klog.Errorf("Failed request number %d", len(errs))
+		return fmt.Errorf("Requests failed: %d", len(errs))
+	} else if len(errs) == 1 {
+		klog.Errorf("Failed request %v", errs[0])
+		return errs[0]
 	}
 
 	return nil
