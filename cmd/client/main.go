@@ -245,6 +245,7 @@ func (c *Client) run(o *GrpcProxyClientOptions) error {
 	var wg sync.WaitGroup
 
 	for i := 1; i <= o.testRequests; i++ {
+		i := i
 		wg.Add(1)
 		go func() error {
 			defer wg.Done()
@@ -268,7 +269,7 @@ func (c *Client) run(o *GrpcProxyClientOptions) error {
 			}
 
 			if i != o.testRequests {
-				klog.V(1).InfoS("Waiting for next connection test.", "seconds", o.testDelaySec)
+				klog.V(1).InfoS("Waiting for next connection test.", "seconds", o.testDelaySec, "iteration", i, "test requests", o.testRequests)
 				wait := time.Duration(o.testDelaySec) * time.Second
 				time.Sleep(wait)
 			}
