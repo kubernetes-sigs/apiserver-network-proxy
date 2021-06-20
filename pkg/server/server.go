@@ -491,16 +491,6 @@ func (s *ProxyServer) serveRecvFrontend(stream client.ProxyService_ProxyServer, 
 	}
 }
 
-func (s *ProxyServer) serveSend(stream client.ProxyService_ProxyServer, sendCh <-chan *client.Packet) {
-	klog.V(4).Infoln("start serve send ...")
-	for pkt := range sendCh {
-		err := stream.Send(pkt)
-		if err != nil {
-			klog.ErrorS(err, "stream write failure")
-		}
-	}
-}
-
 func agentID(stream agent.AgentService_ConnectServer) (string, error) {
 	md, ok := metadata.FromIncomingContext(stream.Context())
 	if !ok {
