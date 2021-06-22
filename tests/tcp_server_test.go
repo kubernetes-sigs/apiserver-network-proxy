@@ -1,6 +1,7 @@
 package tests
 
 import (
+	"context"
 	"net"
 	"testing"
 	"time"
@@ -29,6 +30,7 @@ func echo(conn net.Conn) {
 }
 
 func TestEchoServer(t *testing.T) {
+	ctx := context.Background()
 	ln, err := net.Listen("tcp", "")
 	if err != nil {
 		t.Error(err)
@@ -60,12 +62,12 @@ func TestEchoServer(t *testing.T) {
 	time.Sleep(time.Second)
 
 	// run test client
-	tunnel, err := client.CreateSingleUseGrpcTunnel(proxy.front, grpc.WithInsecure())
+	tunnel, err := client.CreateSingleUseGrpcTunnel(ctx, proxy.front, grpc.WithInsecure())
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	conn, err := tunnel.Dial("tcp", ln.Addr().String())
+	conn, err := tunnel.DialContext(ctx, "tcp", ln.Addr().String())
 	if err != nil {
 		t.Error(err)
 	}

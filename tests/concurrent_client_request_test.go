@@ -41,14 +41,15 @@ func (s *simpleServer) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 
 // TODO: test http-connect as well.
 func getTestClient(front string, t *testing.T) *http.Client {
-	tunnel, err := client.CreateSingleUseGrpcTunnel(front, grpc.WithInsecure())
+	ctx := context.Background()
+	tunnel, err := client.CreateSingleUseGrpcTunnel(ctx, front, grpc.WithInsecure())
 	if err != nil {
 		t.Fatal(err)
 	}
 
 	return &http.Client{
 		Transport: &http.Transport{
-			Dial: tunnel.Dial,
+			DialContext: tunnel.DialContext,
 		},
 		Timeout: 2 * time.Second,
 	}

@@ -1,6 +1,7 @@
 package tests
 
 import (
+	"context"
 	"io/ioutil"
 	"net/http"
 	"net/http/httptest"
@@ -14,6 +15,7 @@ import (
 )
 
 func TestProxy_Concurrency(t *testing.T) {
+	ctx := context.Background()
 	length := 1 << 20
 	chunks := 10
 	server := httptest.NewServer(newSizedServer(length, chunks))
@@ -34,7 +36,7 @@ func TestProxy_Concurrency(t *testing.T) {
 	time.Sleep(time.Second)
 
 	// run test client
-	tunnel, err := client.CreateSingleUseGrpcTunnel(proxy.front, grpc.WithInsecure())
+	tunnel, err := client.CreateSingleUseGrpcTunnel(ctx, proxy.front, grpc.WithInsecure())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -45,7 +47,7 @@ func TestProxy_Concurrency(t *testing.T) {
 
 		c := &http.Client{
 			Transport: &http.Transport{
-				Dial: tunnel.Dial,
+				DialContext: tunnel.DialContext,
 			},
 		}
 
@@ -80,7 +82,7 @@ func TestAgent_MultipleConn(t *testing.T) {
 	testcases := []struct {
 		name                string
 		proxyServerFunction func() (proxy, func(), error)
-		clientFunction      func(string, string) (*http.Client, error)
+		clientFunction      func(context.Context, string, string) (*http.Client, error)
 	}{
 		{
 			name:                "grpc",
@@ -96,7 +98,7 @@ func TestAgent_MultipleConn(t *testing.T) {
 
 	for _, tc := range testcases {
 		t.Run(tc.name, func(t *testing.T) {
-
+			ctx := context.Background()
 			echoServer := newEchoServer("hello")
 			echoServer.wchan = make(chan struct{})
 			server := httptest.NewServer(echoServer)
@@ -121,7 +123,7 @@ func TestAgent_MultipleConn(t *testing.T) {
 			})
 
 			// run test client
-			c, err := tc.clientFunction(proxy.front, server.URL)
+			c, err := tc.clientFunction(ctx, proxy.front, server.URL)
 
 			fcnStopCh := make(chan struct{})
 
