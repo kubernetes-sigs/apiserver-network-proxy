@@ -82,7 +82,7 @@ bin/proxy-server: proto/agent/agent.pb.go konnectivity-client/proto/client/clien
 .PHONY: lint
 lint:
 	curl -sSfL https://raw.githubusercontent.com/golangci/golangci-lint/master/install.sh | sh -s -- -b $(INSTALL_LOCATION) v$(GOLANGCI_LINT_VERSION)
-	$(INSTALL_LOCATION)/golangci-lint run --no-config --disable-all --enable=gofmt,golint,gosec,govet --fix --verbose --timeout 3m
+	$(INSTALL_LOCATION)/golangci-lint run --no-config --disable-all --enable=gofmt,golint,gosec,govet,unused --fix --verbose --timeout 3m
 
 ## --------------------------------------
 ## Go
