@@ -38,12 +38,15 @@ import (
 	"sigs.k8s.io/apiserver-network-proxy/proto/header"
 )
 
+const dialTimeout = 5 * time.Second
+
 // connContext tracks a connection from agent to node network.
 type connContext struct {
 	conn      net.Conn
 	cleanFunc func()
 	dataCh    chan []byte
 	cleanOnce sync.Once
+	dialDone  chan struct{}
 }
 
 func (c *connContext) cleanup() {
@@ -358,62 +361,73 @@ func (a *Client) Serve() {
 
 		switch pkt.Type {
 		case client.PacketType_DIAL_REQ:
-			klog.V(4).Infoln("received DIAL_REQ")
-			resp := &client.Packet{
-				Type:    client.PacketType_DIAL_RSP,
-				Payload: &client.Packet_DialResponse{DialResponse: &client.DialResponse{}},
-			}
-
-			dialReq := pkt.GetDialRequest()
-			resp.GetDialResponse().Random = dialReq.Random
-
-			start := time.Now()
-			conn, err := net.Dial(dialReq.Protocol, dialReq.Address)
-			if err != nil {
-				resp.GetDialResponse().Error = err.Error()
-				if err := a.Send(resp); err != nil {
-					klog.ErrorS(err, "could not send stream")
+			go func() {
+				klog.V(4).Infoln("received DIAL_REQ")
+				resp := &client.Packet{
+					Type:    client.PacketType_DIAL_RSP,
+					Payload: &client.Packet_DialResponse{DialResponse: &client.DialResponse{}},
 				}
-				continue
-			}
-			metrics.Metrics.ObserveDialLatency(time.Since(start))
 
-			connID := atomic.AddInt64(&a.nextConnID, 1)
-			dataCh := make(chan []byte, 5)
-			ctx := &connContext{
-				conn:   conn,
-				dataCh: dataCh,
-				cleanFunc: func() {
-					klog.V(4).InfoS("close connection", "connectionID", connID)
-					resp := &client.Packet{
-						Type:    client.PacketType_CLOSE_RSP,
-						Payload: &client.Packet_CloseResponse{CloseResponse: &client.CloseResponse{}},
-					}
-					resp.GetCloseResponse().ConnectID = connID
+				dialReq := pkt.GetDialRequest()
+				resp.GetDialResponse().Random = dialReq.Random
 
-					err := conn.Close()
-					if err != nil {
-						resp.GetCloseResponse().Error = err.Error()
-					}
+				connID := atomic.AddInt64(&a.nextConnID, 1)
+				dataCh := make(chan []byte, 5)
+				dialDone := make(chan struct{})
+				ctx := &connContext{
+					dataCh: dataCh,
+					dialDone: dialDone,
+				}
+				ctx.cleanFunc = func() {
+					<- dialDone
+					if ctx.conn != nil {
+						klog.V(4).InfoS("close connection", "connectionID", connID)
+						resp := &client.Packet{
+							Type:    client.PacketType_CLOSE_RSP,
+							Payload: &client.Packet_CloseResponse{CloseResponse: &client.CloseResponse{}},
+						}
+						resp.GetCloseResponse().ConnectID = connID
 
-					if err := a.Send(resp); err != nil {
-						klog.ErrorS(err, "close response failure")
+						err := ctx.conn.Close()
+						if err != nil {
+							resp.GetCloseResponse().Error = err.Error()
+						}
+
+						if err := a.Send(resp); err != nil {
+							klog.ErrorS(err, "close response failure")
+						}
 					}
 
 					close(dataCh)
 					a.connManager.Delete(connID)
-				},
-			}
-			a.connManager.Add(connID, ctx)
+				}
+				a.connManager.Add(connID, ctx)
 
-			resp.GetDialResponse().ConnectID = connID
-			if err := a.Send(resp); err != nil {
-				klog.ErrorS(err, "stream send failure")
-				continue
-			}
+				start := time.Now()
+				conn, err := net.DialTimeout(dialReq.Protocol, dialReq.Address, dialTimeout)
+				if err != nil {
+					a.connManager.Delete(connID)
+					resp.GetDialResponse().Error = err.Error()
+					if err := a.Send(resp); err != nil {
+						klog.ErrorS(err, "could not send stream")
+					}
+					return
+				}
+				metrics.Metrics.ObserveDialLatency(time.Since(start))
 
-			go a.remoteToProxy(connID, ctx)
-			go a.proxyToRemote(connID, ctx)
+				ctx.conn = conn
+				close(dialDone)
+
+				resp.GetDialResponse().ConnectID = connID
+				if err := a.Send(resp); err != nil {
+					klog.ErrorS(err, "stream send failure")
+					return
+				}
+
+				go a.remoteToProxy(connID, ctx)
+				go a.proxyToRemote(connID, ctx)
+
+			}()
 
 		case client.PacketType_DATA:
 			data := pkt.GetData()
