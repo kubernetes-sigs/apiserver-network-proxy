@@ -10,7 +10,7 @@ require (
 	github.com/prometheus/client_golang v1.7.1
 	github.com/spf13/cobra v0.0.3
 	github.com/spf13/pflag v1.0.5
-	golang.org/x/net v0.0.0-20201110031124-69a78807bb2b
+	golang.org/x/net v0.0.0-20201110031124-69a78807bb2b // indirect
 	google.golang.org/grpc v1.27.0
 	k8s.io/api v0.19.10
 	k8s.io/apimachinery v0.19.10
