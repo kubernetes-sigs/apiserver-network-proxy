@@ -1,15 +1,13 @@
 # See the OWNERS docs at https://go.k8s.io/owners
 
 reviewers:
-  - elmiko
-  - tallclair
-  - ipochi
+  - ironcladlou
+  - sjenning
+  - enxebre
+  - csrwng
+  - relyt0925
 approvers:
-  - anfernee
-  - cheftako
-  - jkh52
-emeritus_approvers:
-  - andrewsykim
-  - caesarxuchao
-  - mcrute
-  - Sh4d1
+  - ironcladlou
+  - sjenning
+  - enxebre
+  - csrwng
