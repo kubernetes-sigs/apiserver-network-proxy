@@ -9,5 +9,5 @@ RUN go build -o proxy-agent sigs.k8s.io/apiserver-network-proxy/cmd/agent
 
 FROM quay.io/openshift/origin-base:4.7
 
-COPY --from=builder /go/src/sigs.k8s.io/apiserver-network-proxy /usr/bin/proxy-server
-COPY --from=builder /go/src/sigs.k8s.io/apiserver-network-proxy /usr/bin/proxy-agent
+COPY --from=builder /go/src/sigs.k8s.io/apiserver-network-proxy/proxy-server /usr/bin/proxy-server
+COPY --from=builder /go/src/sigs.k8s.io/apiserver-network-proxy/proxy-agent /usr/bin/proxy-agent
