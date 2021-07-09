@@ -19,6 +19,8 @@ package agent
 import (
 	"fmt"
 	"math"
+	"math/rand"
+	"net"
 	"sync"
 	"time"
 
@@ -26,6 +28,7 @@ import (
 	"google.golang.org/grpc/connectivity"
 	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/klog/v2"
+	"sigs.k8s.io/apiserver-network-proxy/pkg/features"
 )
 
 // ClientSet consists of clients connected to each instance of an HA proxy server.
@@ -33,6 +36,7 @@ type ClientSet struct {
 	mu      sync.Mutex         //protects the clients.
 	clients map[string]*Client // map between serverID and the client
 	// connects to this server.
+	serverIDs []string
 
 	agentID     string // ID of this agent
 	address     string // proxy server address. Assuming HA proxy server
@@ -92,6 +96,7 @@ func (cs *ClientSet) addClientLocked(serverID string, c *Client) error {
 		return fmt.Errorf("client for proxy server %s already exists", serverID)
 	}
 	cs.clients[serverID] = c
+	cs.serverIDs = append(cs.serverIDs, serverID)
 	return nil
 
 }
@@ -109,6 +114,13 @@ func (cs *ClientSet) RemoveClient(serverID string) {
 		return
 	}
 	cs.clients[serverID].Close()
+	for i, s := range cs.serverIDs {
+		if s == serverID {
+			cs.serverIDs[i] = cs.serverIDs[len(cs.serverIDs)-1]
+			cs.serverIDs = cs.serverIDs[:len(cs.serverIDs)-1]
+			break
+		}
+	}
 	delete(cs.clients, serverID)
 }
 
@@ -194,12 +206,34 @@ func (cs *ClientSet) syncOnce() error {
 		return nil
 	}
 	klog.V(2).InfoS("sync added client connecting to proxy server", "serverID", c.serverID)
-	go c.Serve()
+	if features.DefaultMutableFeatureGate.Enabled(features.NodeToMasterTraffic) {
+		go c.ServeBiDirectional()
+	} else {
+		go c.Serve()
+	}
 	return nil
 }
 
 func (cs *ClientSet) Serve() {
 	go cs.sync()
+}
+
+func (cs *ClientSet) handleConnection(protocol, address string, conn net.Conn) error {
+	// close the connection if no client is available
+	// TODO(irozzo): check if this can be handled better
+	if len(cs.clients) == 0 {
+		klog.V(2).InfoS("no clients available for connection", "protocol", protocol, "address", address)
+		err := conn.Close()
+		if err != nil {
+			klog.ErrorS(err, "error occurred while closing connection because of no available clients", "address", address, "protocol", protocol)
+		}
+		return fmt.Errorf("no client available for handling %s connection to %s", protocol, address)
+	}
+	// pick random client to handle the connection
+	serverID := cs.serverIDs[rand.Intn(len(cs.serverIDs))] /* #nosec G404 */
+	// this call is blocking until the connection is establised or a timeout is
+	// raised
+	return cs.clients[serverID].handleConnection(protocol, address, conn)
 }
 
 func (cs *ClientSet) shutdown() {
