@@ -1,0 +1,33 @@
+{{- if and .Values.testserver.enabled }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: konnectivity-test-server
+  labels:
+    app: konnectivity-test-server
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: konnectivity-test-server
+  template:
+    metadata:
+      labels:
+        app: konnectivity-test-server
+    spec:
+    {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+{{- toYaml . | nindent 8 }}
+    {{- end }}
+{{- if .Values.udsName }}
+      hostNetwork: true
+{{- end }}
+      containers:
+        - name: konnectivity-server-container
+          image: "{{ .Values.testserver.image.repository }}:{{ .Values.testserver.image.tag }}"
+          imagePullPolicy: {{ .Values.testserver.image.pullPolicy }}
+          resources:
+            requests:
+              cpu: 1m
+          command: [ "/http-test-server"]
+{{- end }}

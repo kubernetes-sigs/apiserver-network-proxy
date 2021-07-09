@@ -1,0 +1,84 @@
+{{- if and .Values.agent.enabled }}
+
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: konnectivity-agent
+
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: konnectivity-agent
+  labels:
+    app: konnectivity-agent
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: konnectivity-agent
+  template:
+    metadata:
+      labels:
+        app: konnectivity-agent
+    spec:
+    {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+{{- toYaml . | nindent 8 }}
+    {{- end }}
+{{- if .Values.udsName }}
+      hostNetwork: true
+{{- end }}
+
+      containers:
+      - name: konnectivity-agent-container
+        image: "{{ .Values.agent.image.repository }}:{{ .Values.agent.image.tag }}"
+        imagePullPolicy: {{ .Values.agent.image.pullPolicy }}
+        command: [ "/proxy-agent"]
+        args: [
+          "--v=3",
+          "--logtostderr=true",
+          "--ca-cert=/opt/pki/agentca/tls.crt",
+          "--agent-cert=/opt/pki/agentclient/tls.crt",
+          "--agent-key=/opt/pki/agentclient/tls.key",
+          # grpc tls will verify it
+          "--proxy-server-host=konnectivity-agentserver",
+          "--proxy-server-port=8091",
+          "--service-account-token-path=",
+          ]
+        env:
+{{- if and .Values.agent.debug }}
+          - name: GRPC_VERBOSITY
+            value: debug
+          - name: GRPC_TRACE
+            value: tcp,http,api
+          - name: GODEBUG
+            value: http2debug=2
+{{- end }}
+        livenessProbe:
+          httpGet:
+            scheme: HTTP
+            port: 8093
+            path: /healthz
+          initialDelaySeconds: 15
+          timeoutSeconds: 15
+        resources:
+          limits:
+            cpu: 50m
+            memory: 30Mi
+        volumeMounts:
+        - name: agentclient
+          mountPath: /opt/pki/agentclient
+          readOnly: true
+        - name: agentca
+          mountPath: /opt/pki/agentca
+          readOnly: true
+      serviceAccountName: konnectivity-agent
+      volumes:
+      - name: agentclient
+        secret:
+          secretName: konnectivity-agentclient
+      - name: agentca
+        secret:
+          secretName: konnectivity-agentca
+{{- end }}

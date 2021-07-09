@@ -1,0 +1,68 @@
+{{- if and .Values.testclient.enabled }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: konnectivity-test-client
+  labels:
+    app: konnectivity-test-client
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: konnectivity-test-client
+  template:
+    metadata:
+      labels:
+        app: konnectivity-test-client
+    spec:
+    {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+{{- toYaml . | nindent 8 }}
+    {{- end }}
+{{- if .Values.udsName }}
+      hostNetwork: true
+{{- end }}
+      containers:
+        - name: client
+          image: "{{ .Values.testclient.image.repository }}:{{ .Values.testclient.image.tag }}"
+          imagePullPolicy: {{ .Values.testclient.image.pullPolicy }}
+          resources:
+            requests:
+              cpu: 1m
+          env:
+            - name: GRPC_VERBOSITY
+              value: debug
+            - name: GRPC_TRACE
+              value: tcp,http,api
+            - name: GODEBUG
+              value: http2debug=2
+          command: [ "/proxy-test-client"]
+          args: [
+              "--logtostderr=true",
+              {{- if .Values.udsName -}}
+              "--proxy-uds=/etc/srv/kubernetes/konnectivity-server/konnectivity-server.socket",
+              {{- end -}}
+              "--proxy-host=konnectivity-proxyserver",
+              "--proxy-port=8090",
+              "--mode={{ .Values.connectMode}}",
+              "--request-port=80",
+              "--request-host=kubia",
+              "--ca-cert=/opt/pki/proxyca/tls.crt",
+              "--client-cert=/opt/pki/proxyclient/tls.crt",
+              "--client-key=/opt/pki/proxyclient/tls.key"
+          ]
+          volumeMounts:
+          - name: proxyca
+            mountPath: /opt/pki/proxyca
+            readOnly: true
+          - name: proxyclient
+            mountPath: /opt/pki/proxyclient
+            readOnly: true
+      volumes:
+      - name: proxyca
+        secret:
+          secretName: konnectivity-proxyca
+      - name: proxyclient
+        secret:
+          secretName: konnectivity-proxyclient
+{{- end }}
