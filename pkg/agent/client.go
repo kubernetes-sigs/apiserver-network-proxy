@@ -38,6 +38,8 @@ import (
 	"sigs.k8s.io/apiserver-network-proxy/proto/header"
 )
 
+const dialTimeout = 5 * time.Second
+
 // connContext tracks a connection from agent to node network.
 type connContext struct {
 	conn      net.Conn
@@ -368,7 +370,7 @@ func (a *Client) Serve() {
 			resp.GetDialResponse().Random = dialReq.Random
 
 			start := time.Now()
-			conn, err := net.Dial(dialReq.Protocol, dialReq.Address)
+			conn, err := net.DialTimeout(dialReq.Protocol, dialReq.Address, dialTimeout)
 			if err != nil {
 				resp.GetDialResponse().Error = err.Error()
 				if err := a.Send(resp); err != nil {
