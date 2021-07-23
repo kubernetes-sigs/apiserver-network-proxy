@@ -46,6 +46,7 @@ type connContext struct {
 	cleanFunc func()
 	dataCh    chan []byte
 	cleanOnce sync.Once
+	dialDone  chan struct{}
 }
 
 func (c *connContext) cleanup() {
@@ -369,23 +370,16 @@ func (a *Client) Serve() {
 			dialReq := pkt.GetDialRequest()
 			resp.GetDialResponse().Random = dialReq.Random
 
-			start := time.Now()
-			conn, err := net.DialTimeout(dialReq.Protocol, dialReq.Address, dialTimeout)
-			if err != nil {
-				resp.GetDialResponse().Error = err.Error()
-				if err := a.Send(resp); err != nil {
-					klog.ErrorS(err, "could not send stream")
-				}
-				continue
-			}
-			metrics.Metrics.ObserveDialLatency(time.Since(start))
-
 			connID := atomic.AddInt64(&a.nextConnID, 1)
 			dataCh := make(chan []byte, 5)
+			dialDone := make(chan struct{})
 			ctx := &connContext{
-				conn:   conn,
 				dataCh: dataCh,
-				cleanFunc: func() {
+				dialDone: dialDone,
+			}
+			ctx.cleanFunc: func() {
+				<- dialDone
+				if ctx.conn != nil {
 					klog.V(4).InfoS("close connection", "connectionID", connID)
 					resp := &client.Packet{
 						Type:    client.PacketType_CLOSE_RSP,
@@ -401,21 +395,38 @@ func (a *Client) Serve() {
 					if err := a.Send(resp); err != nil {
 						klog.ErrorS(err, "close response failure")
 					}
+				}
 
-					close(dataCh)
-					a.connManager.Delete(connID)
-				},
+				close(dataCh)
+				a.connManager.Delete(connID)
 			}
 			a.connManager.Add(connID, ctx)
 
-			resp.GetDialResponse().ConnectID = connID
-			if err := a.Send(resp); err != nil {
-				klog.ErrorS(err, "stream send failure")
-				continue
-			}
+			go func() {
+				defer close(dialDone)
+				start := time.Now()
+				conn, err := net.DialTimeout(dialReq.Protocol, dialReq.Address, dialTimeout)
+				if err != nil {
+					a.connManager.Delete(connID)
+					resp.GetDialResponse().Error = err.Error()
+					if err := a.Send(resp); err != nil {
+						klog.ErrorS(err, "could not send stream")
+					}
+					return
+				}
+				metrics.Metrics.ObserveDialLatency(time.Since(start))
 
-			go a.remoteToProxy(connID, ctx)
-			go a.proxyToRemote(connID, ctx)
+				ctx.conn = conn
+
+				resp.GetDialResponse().ConnectID = connID
+				if err := a.Send(resp); err != nil {
+					klog.ErrorS(err, "stream send failure")
+					return
+				}
+
+				go a.remoteToProxy(connID, ctx)
+				go a.proxyToRemote(connID, ctx)
+			}()
 
 		case client.PacketType_DATA:
 			data := pkt.GetData()
