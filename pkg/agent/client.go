@@ -52,6 +52,17 @@ func (c *connContext) cleanup() {
 	c.cleanOnce.Do(c.cleanFunc)
 }
 
+func (c *connContext) send(msg []byte) {
+	// TODO (cheftako@): Get perf test working and compare this solution with a lock based solution.
+	defer func() {
+		// Handles the race condition where we write to a closed channel
+		if err := recover(); err != nil {
+			klog.InfoS("Recovered from attempt to write to closed channel")
+		}
+	}()
+	c.dataCh <- msg
+}
+
 type connectionManager struct {
 	mu          sync.RWMutex
 	connections map[int64]*connContext
@@ -423,7 +434,7 @@ func (a *Client) Serve() {
 
 			ctx, ok := a.connManager.Get(data.ConnectID)
 			if ok {
-				ctx.dataCh <- data.Data
+				ctx.send(data.Data)
 			}
 
 		case client.PacketType_CLOSE_REQ:
