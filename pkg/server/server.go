@@ -445,6 +445,13 @@ func (s *ProxyServer) serveRecvFrontend(stream client.ProxyService_ProxyServer, 
 			}
 			klog.V(5).Infoln("CLOSE_REQ sent to backend")
 
+		case client.PacketType_DIAL_CLS:
+			random := pkt.GetCloseDial().Random
+			klog.V(5).InfoS("Received DIAL_CLOSE", "random", random)
+			// Currently not worrying about backend as we do not have an established connection,
+			s.PendingDial.Remove(random)
+			klog.V(5).Infoln("Removing pending dial request", "random", random)
+
 		case client.PacketType_DATA:
 			connID := pkt.GetData().ConnectID
 			data := pkt.GetData().Data
