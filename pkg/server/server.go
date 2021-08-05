@@ -97,6 +97,7 @@ func (pm *PendingDialManager) Add(random int64, clientConn *ProxyClientConnectio
 	pm.mu.Lock()
 	defer pm.mu.Unlock()
 	pm.pendingDial[random] = clientConn
+	metrics.Metrics.SetPendingDialCount(len(pm.pendingDial))
 }
 
 func (pm *PendingDialManager) Get(random int64) (*ProxyClientConnection, bool) {
@@ -110,6 +111,7 @@ func (pm *PendingDialManager) Remove(random int64) {
 	pm.mu.Lock()
 	defer pm.mu.Unlock()
 	delete(pm.pendingDial, random)
+	metrics.Metrics.SetPendingDialCount(len(pm.pendingDial))
 }
 
 // ProxyServer

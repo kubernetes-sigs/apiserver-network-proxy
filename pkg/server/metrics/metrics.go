@@ -47,6 +47,7 @@ type ServerMetrics struct {
 	frontendLatencies *prometheus.HistogramVec
 	connections       *prometheus.GaugeVec
 	backend           *prometheus.GaugeVec
+	pendingDials      *prometheus.GaugeVec
 }
 
 // newServerMetrics create a new ServerMetrics, configured with default metric names.
@@ -91,16 +92,27 @@ func newServerMetrics() *ServerMetrics {
 		},
 		[]string{},
 	)
+	pendingDials := prometheus.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Namespace: namespace,
+			Subsystem: subsystem,
+			Name:      "pending_backend_dials",
+			Help:      "Current number of pending backend dial requests",
+		},
+		[]string{},
+	)
 
 	prometheus.MustRegister(latencies)
 	prometheus.MustRegister(frontendLatencies)
 	prometheus.MustRegister(connections)
 	prometheus.MustRegister(backend)
+	prometheus.MustRegister(pendingDials)
 	return &ServerMetrics{
 		latencies:         latencies,
 		frontendLatencies: frontendLatencies,
 		connections:       connections,
 		backend:           backend,
+		pendingDials:      pendingDials,
 	}
 }
 
@@ -133,4 +145,9 @@ func (a *ServerMetrics) ConnectionDec(serviceMethod string) {
 // SetBackendCount sets the number of backend connection.
 func (a *ServerMetrics) SetBackendCount(count int) {
 	a.backend.WithLabelValues().Set(float64(count))
+}
+
+// SetPendingDialCount sets the number of pending dials.
+func (a *ServerMetrics) SetPendingDialCount(count int) {
+	a.pendingDials.WithLabelValues().Set(float64(count))
 }
