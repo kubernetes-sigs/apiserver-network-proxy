@@ -614,16 +614,6 @@ func (s *ProxyServer) Connect(stream agent.AgentService_ConnectServer) error {
 	}
 
 	klog.V(2).InfoS("Connect request from agent", "agentID", agentID)
-	backend := s.addBackend(agentID, stream)
-	defer s.removeBackend(agentID, stream)
-
-	h := metadata.Pairs(header.ServerID, s.serverID, header.ServerCount, strconv.Itoa(s.serverCount))
-	if err := stream.SendHeader(h); err != nil {
-		return err
-	}
-
-	recvCh := make(chan *client.Packet, 10)
-	stopCh := make(chan error)
 
 	if s.AgentAuthenticationOptions.Enabled {
 		if err := s.authenticateAgentViaToken(stream.Context()); err != nil {
@@ -632,12 +622,23 @@ func (s *ProxyServer) Connect(stream agent.AgentService_ConnectServer) error {
 		}
 	}
 
+	h := metadata.Pairs(header.ServerID, s.serverID, header.ServerCount, strconv.Itoa(s.serverCount))
+	if err := stream.SendHeader(h); err != nil {
+		return err
+	}
+
+	backend := s.addBackend(agentID, stream)
+	defer s.removeBackend(agentID, stream)
+
+	recvCh := make(chan *client.Packet, 10)
+
 	go s.serveRecvBackend(backend, stream, agentID, recvCh)
 
 	defer func() {
 		close(recvCh)
 	}()
 
+	stopCh := make(chan error)
 	go func() {
 		for {
 			in, err := stream.Recv()
