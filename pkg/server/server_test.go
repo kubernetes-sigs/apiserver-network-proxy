@@ -152,10 +152,10 @@ func TestAgentTokenAuthenticationErrorsToken(t *testing.T) {
 			ctx = metadata.NewIncomingContext(ctx, md)
 			conn := agentmock.NewMockAgentService_ConnectServer(stub)
 			conn.EXPECT().Context().AnyTimes().Return(ctx)
-			conn.EXPECT().SendHeader(gomock.Any()).Return(nil)
 
 			// close agent's connection if no error is expected
 			if !tc.wantError {
+				conn.EXPECT().SendHeader(gomock.Any()).Return(nil)
 				conn.EXPECT().Recv().Return(nil, io.EOF)
 			}
 
