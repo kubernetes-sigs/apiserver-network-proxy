@@ -622,13 +622,13 @@ func (s *ProxyServer) Connect(stream agent.AgentService_ConnectServer) error {
 		}
 	}
 
+	backend := s.addBackend(agentID, stream)
+	defer s.removeBackend(agentID, stream)
+
 	h := metadata.Pairs(header.ServerID, s.serverID, header.ServerCount, strconv.Itoa(s.serverCount))
 	if err := stream.SendHeader(h); err != nil {
 		return err
 	}
-
-	backend := s.addBackend(agentID, stream)
-	defer s.removeBackend(agentID, stream)
 
 	recvCh := make(chan *client.Packet, 10)
 
