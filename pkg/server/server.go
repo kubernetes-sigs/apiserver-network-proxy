@@ -401,7 +401,7 @@ func (s *ProxyServer) serveRecvFrontend(stream client.ProxyService_ProxyServer, 
 	for pkt := range recvCh {
 		switch pkt.Type {
 		case client.PacketType_DIAL_REQ:
-			klog.V(5).Infoln("Received DIAL_REQ")
+			klog.V(5).Infoln("Received DIAL_REQ to: ", pkt.GetDialRequest().Address)
 			// TODO: if we track what agent has historically served
 			// the address, then we can send the Dial_REQ to the
 			// same agent. That way we save the agent from creating
