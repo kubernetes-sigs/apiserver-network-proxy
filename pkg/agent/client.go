@@ -113,6 +113,13 @@ type Identifiers struct {
 	DefaultRoute bool
 }
 
+func (ids Identifiers) IsEmpty() bool {
+	return len(ids.IPv4) == 0 &&
+		len(ids.IPv6) == 0 &&
+		len(ids.Host) == 0 &&
+		len(ids.CIDR) == 0
+}
+
 type IdentifierType string
 
 const (
