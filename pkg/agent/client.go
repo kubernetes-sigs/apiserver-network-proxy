@@ -117,7 +117,8 @@ func (ids Identifiers) IsEmpty() bool {
 	return len(ids.IPv4) == 0 &&
 		len(ids.IPv6) == 0 &&
 		len(ids.Host) == 0 &&
-		len(ids.CIDR) == 0
+		len(ids.CIDR) == 0 &&
+		!ids.DefaultRoute
 }
 
 type IdentifierType string
