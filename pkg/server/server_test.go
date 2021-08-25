@@ -48,14 +48,14 @@ func (f *testAgent) Context() context.Context {
 	return ctx
 }
 
-func TestDefaultBackendStorage_AddBackend(t *testing.T) {
+func TestDefaultBackendStorage_AddRemoveBackend(t *testing.T) {
 	p := NewProxyServer("", []ProxyStrategy{ProxyStrategyDestHost, ProxyStrategyDefault}, 1, nil)
 
-	p.addBackend("a1", &testAgent{
-		hosts: "host=a1.com",
-	})
+	a1 := &testAgent{hosts: "host=a1.com"}
+	p.addBackend("a1", a1)
 
-	p.addBackend("a2", new(testAgent))
+	a2 := new(testAgent)
+	p.addBackend("a2", a2)
 
 	bm := p.BackendManagers[0]
 	if bm.NumBackends() != 1 {
@@ -66,6 +66,20 @@ func TestDefaultBackendStorage_AddBackend(t *testing.T) {
 	if bm.NumBackends() != 1 {
 		t.Fatalf("expected: %d, got: %d", 1, bm.NumBackends())
 	}
+
+	p.removeBackend("a1", a1)
+	p.removeBackend("a2", a2)
+
+	bm = p.BackendManagers[0]
+	if bm.NumBackends() != 0 {
+		t.Fatalf("expected: %d, got: %d", 0, bm.NumBackends())
+	}
+
+	bm = p.BackendManagers[1]
+	if bm.NumBackends() != 0 {
+		t.Fatalf("expected: %d, got: %d", 0, bm.NumBackends())
+	}
+
 }
 
 func TestAgentTokenAuthenticationErrorsToken(t *testing.T) {
