@@ -181,20 +181,22 @@ type Client struct {
 
 	// file path contains service account token.
 	// token's value is auto-rotated by kubernetes, based on projected volume configuration.
-	serviceAccountTokenPath string
+	serviceAccountTokenPath       string
+	enablePushServiceAccountToken bool
 }
 
 func newAgentClient(address, agentID, agentIdentifiers string, cs *ClientSet, opts ...grpc.DialOption) (*Client, int, error) {
 	a := &Client{
-		cs:                      cs,
-		address:                 address,
-		agentID:                 agentID,
-		agentIdentifiers:        agentIdentifiers,
-		opts:                    opts,
-		probeInterval:           cs.probeInterval,
-		stopCh:                  make(chan struct{}),
-		serviceAccountTokenPath: cs.serviceAccountTokenPath,
-		connManager:             newConnectionManager(),
+		cs:                            cs,
+		address:                       address,
+		agentID:                       agentID,
+		agentIdentifiers:              agentIdentifiers,
+		opts:                          opts,
+		probeInterval:                 cs.probeInterval,
+		stopCh:                        make(chan struct{}),
+		serviceAccountTokenPath:       cs.serviceAccountTokenPath,
+		connManager:                   newConnectionManager(),
+		enablePushServiceAccountToken: cs.enablePushServiceAccountToken,
 	}
 	serverCount, err := a.Connect()
 	if err != nil {
@@ -380,6 +382,11 @@ func (a *Client) Serve() {
 			dialReq := pkt.GetDialRequest()
 			resp.GetDialResponse().Random = dialReq.Random
 
+			if a.enablePushServiceAccountToken {
+				token, _ := a.getBearToken()
+				resp.GetDialResponse().BearerToken = token
+			}
+
 			start := time.Now()
 			conn, err := net.DialTimeout(dialReq.Protocol, dialReq.Address, dialTimeout)
 			if err != nil {
@@ -537,4 +544,13 @@ func (a *Client) probe() {
 		a.cs.RemoveClient(a.serverID)
 		return
 	}
+}
+
+func (a *Client) getBearToken() (string, bool) {
+	b, err := ioutil.ReadFile(a.serviceAccountTokenPath)
+	if err != nil {
+		klog.Errorf("Failed reading bearer token: %v", err)
+		return "", false
+	}
+	return string(b), true
 }

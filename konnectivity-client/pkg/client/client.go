@@ -39,8 +39,9 @@ type Tunnel interface {
 }
 
 type dialResult struct {
-	err    string
-	connid int64
+	err         string
+	bearerToken string
+	connid      int64
 }
 
 // grpcTunnel implements Tunnel
@@ -117,10 +118,11 @@ func (t *grpcTunnel) serve(c clientConn) {
 				klog.V(1).Infoln("DialResp not recognized; dropped")
 			} else {
 				result := dialResult{
-					err:    resp.Error,
-					connid: resp.ConnectID,
+					err:         resp.Error,
+					connid:      resp.ConnectID,
+					bearerToken: resp.BearerToken,
 				}
-				select  {
+				select {
 				case ch <- result:
 				default:
 					klog.ErrorS(fmt.Errorf("blocked pending channel"), "Received second dial response for connection request", "connectionID", resp.ConnectID, "dialID", resp.Random)
@@ -220,6 +222,7 @@ func (t *grpcTunnel) DialContext(ctx context.Context, protocol, address string) 
 		c.connID = res.connid
 		c.readCh = make(chan []byte, 10)
 		c.closeCh = make(chan string, 1)
+		c.bearerToken = res.bearerToken
 		t.connsLock.Lock()
 		t.conns[res.connid] = c
 		t.connsLock.Unlock()

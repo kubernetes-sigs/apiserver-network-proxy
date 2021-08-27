@@ -34,6 +34,11 @@ type GrpcProxyAgentOptions struct {
 	// If EnableProfiling is true, this enables the lock contention
 	// profiling at host:adminPort/debug/pprof/block.
 	EnableContentionProfiling bool
+	// If EnablePushServiceAccountToken is true, the agent will be
+	// sending its mounted service-account token upon replying dialing
+	// so that the peer client can use the token to raise requests
+	// against kube-apiserver.
+	EnablePushServiceAccountToken bool
 
 	AgentID          string
 	AgentIdentifiers string
@@ -47,14 +52,15 @@ type GrpcProxyAgentOptions struct {
 
 func (o *GrpcProxyAgentOptions) ClientSetConfig(dialOptions ...grpc.DialOption) *agent.ClientSetConfig {
 	return &agent.ClientSetConfig{
-		Address:                 fmt.Sprintf("%s:%d", o.ProxyServerHost, o.ProxyServerPort),
-		AgentID:                 o.AgentID,
-		AgentIdentifiers:        o.AgentIdentifiers,
-		SyncInterval:            o.SyncInterval,
-		ProbeInterval:           o.ProbeInterval,
-		SyncIntervalCap:         o.SyncIntervalCap,
-		DialOptions:             dialOptions,
-		ServiceAccountTokenPath: o.ServiceAccountTokenPath,
+		Address:                       fmt.Sprintf("%s:%d", o.ProxyServerHost, o.ProxyServerPort),
+		AgentID:                       o.AgentID,
+		AgentIdentifiers:              o.AgentIdentifiers,
+		SyncInterval:                  o.SyncInterval,
+		ProbeInterval:                 o.ProbeInterval,
+		SyncIntervalCap:               o.SyncIntervalCap,
+		DialOptions:                   dialOptions,
+		ServiceAccountTokenPath:       o.ServiceAccountTokenPath,
+		EnablePushServiceAccountToken: o.EnablePushServiceAccountToken,
 	}
 }
 
@@ -76,6 +82,7 @@ func (o *GrpcProxyAgentOptions) Flags() *pflag.FlagSet {
 	flags.DurationVar(&o.SyncIntervalCap, "sync-interval-cap", o.SyncIntervalCap, "The maximum interval for the SyncInterval to back off to when unable to connect to the proxy server")
 	flags.StringVar(&o.ServiceAccountTokenPath, "service-account-token-path", o.ServiceAccountTokenPath, "If non-empty proxy agent uses this token to prove its identity to the proxy server.")
 	flags.StringVar(&o.AgentIdentifiers, "agent-identifiers", o.AgentIdentifiers, "Identifiers of the agent that will be used by the server when choosing agent. N.B. the list of identifiers must be in URL encoded format. e.g.,host=localhost&host=node1.mydomain.com&cidr=127.0.0.1/16&ipv4=1.2.3.4&ipv4=5.6.7.8&ipv6=:::::&default-route=true")
+	flags.BoolVar(&o.EnablePushServiceAccountToken, "enable-push-service-account-token", o.EnablePushServiceAccountToken, "The agent will be sending its bearer token to the konnectivity-clients")
 	return flags
 }
 

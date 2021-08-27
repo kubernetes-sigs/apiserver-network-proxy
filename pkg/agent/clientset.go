@@ -55,6 +55,8 @@ type ClientSet struct {
 
 	agentIdentifiers string // The identifiers of the agent, which will be used
 	// by the server when choosing agent
+
+	enablePushServiceAccountToken bool
 }
 
 func (cs *ClientSet) ClientsCount() int {
@@ -113,28 +115,30 @@ func (cs *ClientSet) RemoveClient(serverID string) {
 }
 
 type ClientSetConfig struct {
-	Address                 string
-	AgentID                 string
-	AgentIdentifiers        string
-	SyncInterval            time.Duration
-	ProbeInterval           time.Duration
-	SyncIntervalCap         time.Duration
-	DialOptions             []grpc.DialOption
-	ServiceAccountTokenPath string
+	Address                       string
+	AgentID                       string
+	AgentIdentifiers              string
+	SyncInterval                  time.Duration
+	ProbeInterval                 time.Duration
+	SyncIntervalCap               time.Duration
+	DialOptions                   []grpc.DialOption
+	ServiceAccountTokenPath       string
+	EnablePushServiceAccountToken bool
 }
 
 func (cc *ClientSetConfig) NewAgentClientSet(stopCh <-chan struct{}) *ClientSet {
 	return &ClientSet{
-		clients:                 make(map[string]*Client),
-		agentID:                 cc.AgentID,
-		agentIdentifiers:        cc.AgentIdentifiers,
-		address:                 cc.Address,
-		syncInterval:            cc.SyncInterval,
-		probeInterval:           cc.ProbeInterval,
-		syncIntervalCap:         cc.SyncIntervalCap,
-		dialOptions:             cc.DialOptions,
-		serviceAccountTokenPath: cc.ServiceAccountTokenPath,
-		stopCh:                  stopCh,
+		clients:                       make(map[string]*Client),
+		agentID:                       cc.AgentID,
+		agentIdentifiers:              cc.AgentIdentifiers,
+		address:                       cc.Address,
+		syncInterval:                  cc.SyncInterval,
+		probeInterval:                 cc.ProbeInterval,
+		syncIntervalCap:               cc.SyncIntervalCap,
+		dialOptions:                   cc.DialOptions,
+		serviceAccountTokenPath:       cc.ServiceAccountTokenPath,
+		stopCh:                        stopCh,
+		enablePushServiceAccountToken: cc.EnablePushServiceAccountToken,
 	}
 }
 

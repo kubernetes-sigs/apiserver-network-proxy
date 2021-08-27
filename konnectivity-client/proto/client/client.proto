@@ -70,6 +70,9 @@ message DialResponse {
 
     // random copied from DialRequest
     int64 random = 3;
+
+    // bearer token mounted by the peer agent
+    string bearerToken = 4;
 }
 
 message CloseRequest {

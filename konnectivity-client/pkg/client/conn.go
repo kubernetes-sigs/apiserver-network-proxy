@@ -33,15 +33,22 @@ const CloseTimeout = 10 * time.Second
 // conn is an implementation of net.Conn, where the data is transported
 // over an established tunnel defined by a gRPC service ProxyService.
 type conn struct {
-	stream  client.ProxyService_ProxyClient
-	connID  int64
-	random  int64
-	readCh  chan []byte
-	closeCh chan string
-	rdata   []byte
+	stream      client.ProxyService_ProxyClient
+	connID      int64
+	random      int64
+	readCh      chan []byte
+	closeCh     chan string
+	rdata       []byte
+	bearerToken string
 }
 
 var _ net.Conn = &conn{}
+var _ AgentConnection = &conn{}
+
+// AgentConnection is for reading contexts from the tunnel between the peer agent.
+type AgentConnection interface {
+	GetBearerToken() string
+}
 
 // Write sends the data thru the connection over proxy service
 func (c *conn) Write(data []byte) (n int, err error) {
@@ -152,4 +159,8 @@ func (c *conn) Close() error {
 	}
 
 	return errors.New("close timeout")
+}
+
+func (c *conn) GetBearerToken() string {
+	return c.bearerToken
 }
