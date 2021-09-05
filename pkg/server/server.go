@@ -21,6 +21,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math/rand"
 	"net"
 	"strconv"
 	"strings"
@@ -140,6 +141,9 @@ type ProxyServer struct {
 	AgentAuthenticationOptions *AgentTokenAuthenticationOptions
 
 	proxyStrategies []ProxyStrategy
+
+	muConnsFromAgents sync.Mutex
+	connsFromAgents   map[int64]net.Conn // connections initiated by agents to KAS
 }
 
 // AgentTokenAuthenticationOptions contains list of parameters required for agent token based authentication
@@ -346,6 +350,7 @@ func NewProxyServer(serverID string, proxyStrategies []ProxyStrategy, serverCoun
 		// use the first backendmanager as the Readiness Manager
 		Readiness:       bms[0],
 		proxyStrategies: proxyStrategies,
+		connsFromAgents: make(map[int64]net.Conn),
 	}
 }
 
@@ -659,6 +664,8 @@ func (s *ProxyServer) Connect(stream agent.AgentService_ConnectServer) error {
 	return <-stopCh
 }
 
+const dialTimeout = 5 * time.Second
+
 // route the packet back to the correct client
 func (s *ProxyServer) serveRecvBackend(backend Backend, stream agent.AgentService_ConnectServer, agentID string, recvCh <-chan *client.Packet) {
 	defer func() {
@@ -685,6 +692,112 @@ func (s *ProxyServer) serveRecvBackend(backend Backend, stream agent.AgentServic
 
 	for pkt := range recvCh {
 		switch pkt.Type {
+
+		case client.PacketType_CLOSE_REQ:
+			klog.V(4).Infoln("received CLOSE_REQ")
+			connID := pkt.GetCloseRequest().ConnectID
+			klog.V(4).Infoln("received CLOSE_REQ", "ConnectionID", connID)
+			func() {
+				s.muConnsFromAgents.Lock()
+				defer s.muConnsFromAgents.Unlock()
+				conn, ok := s.connsFromAgents[connID]
+				if ok {
+					err := conn.Close()
+					if err != nil {
+						klog.ErrorS(err, "failed to close connection")
+					}
+				}
+				delete(s.connsFromAgents, connID)
+			}()
+
+		case client.PacketType_DIAL_REQ:
+			klog.V(4).Infoln("received DIAL_REQ")
+			resp := &client.Packet{
+				Type:    client.PacketType_DIAL_RSP,
+				Payload: &client.Packet_DialResponse{DialResponse: &client.DialResponse{}},
+			}
+
+			dialReq := pkt.GetDialRequest()
+			resp.GetDialResponse().Random = dialReq.Random
+
+			conn, err := net.DialTimeout(dialReq.Protocol, dialReq.Address, dialTimeout)
+			if err != nil {
+				resp.GetDialResponse().Error = err.Error()
+				if err := stream.Send(resp); err != nil {
+					klog.ErrorS(err, "could not send stream")
+				}
+				return
+			}
+
+			connID := rand.Int63()
+			resp.GetDialResponse().ConnectID = connID
+			err = stream.Send(resp)
+			if err != nil {
+				klog.ErrorS(err, "failed to send response")
+			}
+			klog.Infoln("sent dial response")
+			s.muConnsFromAgents.Lock()
+			s.connsFromAgents[connID] = conn
+			s.muConnsFromAgents.Unlock()
+
+			go func() {
+				defer func() {
+					s.muConnsFromAgents.Lock()
+					defer s.muConnsFromAgents.Unlock()
+					conn, ok := s.connsFromAgents[connID]
+					if ok {
+						err := conn.Close()
+						if err != nil {
+							klog.ErrorS(err, "failed to close connection")
+						}
+					}
+					delete(s.connsFromAgents, connID)
+				}()
+
+				send := func(data []byte, err error) error {
+					return stream.Send(&client.Packet{
+						Type: client.PacketType_DATA,
+						Payload: &client.Packet_Data{
+							Data: &client.Data{
+								ConnectID: connID,
+								Error:     fmt.Sprintf("%s", err),
+								Data:      data,
+							},
+						},
+					})
+				}
+
+				for {
+
+					s.muConnsFromAgents.Lock()
+					_, ok := s.connsFromAgents[connID]
+					if !ok {
+						break
+					}
+					s.muConnsFromAgents.Unlock()
+
+					fromTarget := make([]byte, 100)
+					n, err := conn.Read(fromTarget)
+					if err == io.EOF {
+						klog.ErrorS(err, "received EOF killing conn")
+						break
+					}
+					if err != nil {
+						klog.ErrorS(err, "failed to read from conn")
+						err = send(fromTarget[:n], err)
+						if err != nil {
+							break
+						}
+						break
+					}
+
+					err = send(fromTarget[:n], nil)
+					if err != nil {
+						break
+					}
+				}
+			}()
+
 		case client.PacketType_DIAL_RSP:
 			resp := pkt.GetDialResponse()
 			klog.V(5).InfoS("Received DIAL_RSP", "random", resp.Random, "agentID", agentID, "connectionID", resp.ConnectID)
@@ -717,15 +830,28 @@ func (s *ProxyServer) serveRecvBackend(backend Backend, stream agent.AgentServic
 		case client.PacketType_DATA:
 			resp := pkt.GetData()
 			klog.V(5).InfoS("Received data from agent", "bytes", len(resp.Data), "agentID", agentID, "connectionID", resp.ConnectID)
-			frontend, err := s.getFrontend(agentID, resp.ConnectID)
-			if err != nil {
-				klog.ErrorS(err, "could not get frontend client", "connectionID", resp.ConnectID)
-				break
-			}
-			if err := frontend.send(pkt); err != nil {
-				klog.ErrorS(err, "send to client stream failure")
+			if false {
+				frontend, err := s.getFrontend(agentID, resp.ConnectID)
+				if err != nil {
+					klog.ErrorS(err, "could not get frontend client", "connectionID", resp.ConnectID)
+					break
+				}
+				if err := frontend.send(pkt); err != nil {
+					klog.ErrorS(err, "send to client stream failure")
+				} else {
+					klog.V(5).InfoS("DATA sent to frontend")
+				}
 			} else {
-				klog.V(5).InfoS("DATA sent to frontend")
+				s.muConnsFromAgents.Lock()
+				conn, ok := s.connsFromAgents[resp.ConnectID]
+				if ok {
+					n, err := conn.Write(pkt.GetData().Data)
+					if err != nil {
+						klog.ErrorS(err, "failed to write data", err)
+					}
+					klog.Infoln("wrote bytes %d", n)
+				}
+				s.muConnsFromAgents.Unlock()
 			}
 
 		case client.PacketType_CLOSE_RSP:

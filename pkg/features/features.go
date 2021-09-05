@@ -39,5 +39,5 @@ func init() {
 }
 
 var defaultFeatureGates = map[featuregate.Feature]featuregate.FeatureSpec{
-	NodeToMasterTraffic: {Default: false, PreRelease: featuregate.Alpha},
+	NodeToMasterTraffic: {Default: true, PreRelease: featuregate.Alpha},
 }

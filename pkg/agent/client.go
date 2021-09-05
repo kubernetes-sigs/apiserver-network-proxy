@@ -440,6 +440,7 @@ func (a *Client) Serve() {
 // The requests include things like opening a connection to a server,
 // streaming data and close the connection.
 func (a *Client) ServeBiDirectional() {
+	klog.Infoln("serving bidi")
 	defer func() {
 		// close all of conns with remote when Client exits
 		for _, connCtx := range a.connManager.List() {
