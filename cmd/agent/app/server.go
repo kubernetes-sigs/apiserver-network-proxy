@@ -51,7 +51,7 @@ func (a *Agent) run(o *options.GrpcProxyAgentOptions) error {
 		return fmt.Errorf("failed to run proxy connection with %v", err)
 	}
 
-	if features.DefaultMutableFeatureGate.Enabled(features.NodeToMasterTraffic) {
+	if features.DefaultMutableFeatureGate.Enabled(features.NodeToMasterTraffic) && !o.ApiServerMapping.IsEmpty() {
 		if err := a.runControlPlaneProxy(ctx, o, cs); err != nil {
 			return fmt.Errorf("failed to start listening with %v", err)
 		}
