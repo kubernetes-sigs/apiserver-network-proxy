@@ -44,7 +44,8 @@ func (a *Agent) run(o *options.GrpcProxyAgentOptions) error {
 		return fmt.Errorf("failed to validate agent options with %v", err)
 	}
 
-	ctx := context.Background()
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
 	var err error
 	var cs *agent.ClientSet
 	if cs, err = a.runProxyConnection(ctx, o); err != nil {
