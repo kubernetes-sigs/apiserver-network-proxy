@@ -15,7 +15,9 @@
 ARCH ?= amd64
 ALL_ARCH = amd64 arm arm64 ppc64le s390x
 
-GOPATH ?= $(GOPATH)
+ifeq ($(GOPATH),)
+export GOPATH := $(shell go env GOPATH)
+endif
 GOOS ?= $(shell go env GOOS)
 GOARCH ?= $(shell go env GOARCH)
 INSTALL_LOCATION:=$(shell go env GOPATH)/bin
