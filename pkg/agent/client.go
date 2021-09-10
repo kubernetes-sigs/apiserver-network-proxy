@@ -467,6 +467,13 @@ func (a *Client) Serve() {
 }
 
 func (a *Client) remoteToProxy(connID int64, ctx *connContext) {
+	defer func() {
+		if panicInfo := recover(); panicInfo != nil {
+			klog.V(2).InfoS("Exiting remoteToProxy with recovery", "panicInfo", panicInfo, "connectionID", connID)
+		} else {
+			klog.V(2).InfoS("Exiting remoteToProxy", "connectionID", connID)
+		}
+	}()
 	defer ctx.cleanup()
 
 	var buf [1 << 12]byte
@@ -479,11 +486,11 @@ func (a *Client) remoteToProxy(connID int64, ctx *connContext) {
 		klog.V(5).InfoS("received data from remote", "bytes", n, "connectionID", connID)
 
 		if err == io.EOF {
-			klog.V(2).Infoln("connection EOF")
+			klog.V(2).InfoS("connection EOF", "connectionID", connID)
 			return
 		} else if err != nil {
 			// Normal when receive a CLOSE_REQ
-			klog.ErrorS(err, "connection read failure")
+			klog.ErrorS(err, "connection read failure", "connectionID", connID)
 			return
 		} else {
 			resp.Payload = &client.Packet_Data{Data: &client.Data{
@@ -491,13 +498,20 @@ func (a *Client) remoteToProxy(connID int64, ctx *connContext) {
 				ConnectID: connID,
 			}}
 			if err := a.Send(resp); err != nil {
-				klog.ErrorS(err, "stream send failure")
+				klog.ErrorS(err, "stream send failure", "connectionID", connID)
 			}
 		}
 	}
 }
 
 func (a *Client) proxyToRemote(connID int64, ctx *connContext) {
+	defer func() {
+		if panicInfo := recover(); panicInfo != nil {
+			klog.V(2).InfoS("Exiting proxyToRemote with recovery", "panicInfo", panicInfo, "connectionID", connID)
+		} else {
+			klog.V(2).InfoS("Exiting proxyToRemote", "connectionID", connID)
+		}
+	}()
 	defer ctx.cleanup()
 
 	for d := range ctx.dataCh {
