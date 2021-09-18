@@ -37,8 +37,16 @@ enum Error {
   // ...
 }
 
+enum Network {
+    Unknown = 0;
+    ControlPlane = 1;
+    Node = 2;
+}
+
 message Packet {
   PacketType type = 1;
+  Network source = 8;
+  Network destination = 9;
 
   oneof payload {
     DialRequest dialRequest = 2;
@@ -99,4 +107,6 @@ message Data {
 
     // stream data
     bytes data = 3;
+
+    //
 }

@@ -503,8 +503,9 @@ func (a *Client) ServeBiDirectional() {
 func (a *Client) handleDialRequest(pkt *client.Packet) {
 	klog.V(4).Infoln("received DIAL_REQ")
 	resp := &client.Packet{
-		Type:    client.PacketType_DIAL_RSP,
-		Payload: &client.Packet_DialResponse{DialResponse: &client.DialResponse{}},
+		Destination: client.Network_ControlPlane,
+		Type:        client.PacketType_DIAL_RSP,
+		Payload:     &client.Packet_DialResponse{DialResponse: &client.DialResponse{}},
 	}
 
 	dialReq := pkt.GetDialRequest()
@@ -685,7 +686,8 @@ func (a *Client) remoteToProxy(connID int64, ctx *connContext) {
 
 	var buf [1 << 12]byte
 	resp := &client.Packet{
-		Type: client.PacketType_DATA,
+		Destination: client.Network_ControlPlane,
+		Type:        client.PacketType_DATA,
 	}
 
 	for {
@@ -700,10 +702,12 @@ func (a *Client) remoteToProxy(connID int64, ctx *connContext) {
 			klog.ErrorS(err, "connection read failure")
 			return
 		} else {
-			resp.Payload = &client.Packet_Data{Data: &client.Data{
-				Data:      buf[:n],
-				ConnectID: connID,
-			}}
+			resp.Payload = &client.Packet_Data{
+				Data: &client.Data{
+					Data:      buf[:n],
+					ConnectID: connID,
+				},
+			}
 			if err := a.Send(resp); err != nil {
 				klog.ErrorS(err, "stream send failure")
 			}

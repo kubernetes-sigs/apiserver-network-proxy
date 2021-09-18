@@ -21,11 +21,11 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"math/rand"
 	"net"
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"google.golang.org/grpc/metadata"
@@ -40,6 +40,8 @@ import (
 	"sigs.k8s.io/apiserver-network-proxy/proto/agent"
 	"sigs.k8s.io/apiserver-network-proxy/proto/header"
 )
+
+const dialTimeout = 5 * time.Second
 
 type key int
 
@@ -142,8 +144,13 @@ type ProxyServer struct {
 
 	proxyStrategies []ProxyStrategy
 
+	genID             int64
 	muConnsFromAgents sync.Mutex
 	connsFromAgents   map[int64]net.Conn // connections initiated by agents to KAS
+}
+
+func (s *ProxyServer) NextID() int64 {
+	return atomic.AddInt64(&s.genID, 1)
 }
 
 // AgentTokenAuthenticationOptions contains list of parameters required for agent token based authentication
@@ -664,8 +671,6 @@ func (s *ProxyServer) Connect(stream agent.AgentService_ConnectServer) error {
 	return <-stopCh
 }
 
-const dialTimeout = 5 * time.Second
-
 // route the packet back to the correct client
 func (s *ProxyServer) serveRecvBackend(backend Backend, stream agent.AgentService_ConnectServer, agentID string, recvCh <-chan *client.Packet) {
 	defer func() {
@@ -729,7 +734,7 @@ func (s *ProxyServer) serveRecvBackend(backend Backend, stream agent.AgentServic
 				return
 			}
 
-			connID := rand.Int63()
+			connID := s.NextID()
 			resp.GetDialResponse().ConnectID = connID
 			err = stream.Send(resp)
 			if err != nil {
@@ -767,36 +772,32 @@ func (s *ProxyServer) serveRecvBackend(backend Backend, stream agent.AgentServic
 					})
 				}
 
+				var buf [1 << 12]byte
+
 				for {
-
-					s.muConnsFromAgents.Lock()
-					_, ok := s.connsFromAgents[connID]
-					if !ok {
-						break
-					}
-					s.muConnsFromAgents.Unlock()
-
-					fromTarget := make([]byte, 100)
-					n, err := conn.Read(fromTarget)
+					n, err := conn.Read(buf[:])
 					if err == io.EOF {
 						klog.ErrorS(err, "received EOF killing conn")
 						break
 					}
 					if err != nil {
 						klog.ErrorS(err, "failed to read from conn")
-						err = send(fromTarget[:n], err)
+						err = send(buf[:n], err)
 						if err != nil {
 							break
 						}
 						break
 					}
 
-					err = send(fromTarget[:n], nil)
+					err = send(buf[:n], nil)
 					if err != nil {
 						break
 					}
 				}
 			}()
+
+		case client.PacketType_DIAL_CLS:
+			klog.Infoln("GOT DIAL_CLS")
 
 		case client.PacketType_DIAL_RSP:
 			resp := pkt.GetDialResponse()
@@ -830,7 +831,8 @@ func (s *ProxyServer) serveRecvBackend(backend Backend, stream agent.AgentServic
 		case client.PacketType_DATA:
 			resp := pkt.GetData()
 			klog.V(5).InfoS("Received data from agent", "bytes", len(resp.Data), "agentID", agentID, "connectionID", resp.ConnectID)
-			if false {
+			switch pkt.GetDestination() {
+			case client.Network_Unknown, client.Network_Node:
 				frontend, err := s.getFrontend(agentID, resp.ConnectID)
 				if err != nil {
 					klog.ErrorS(err, "could not get frontend client", "connectionID", resp.ConnectID)
@@ -841,7 +843,8 @@ func (s *ProxyServer) serveRecvBackend(backend Backend, stream agent.AgentServic
 				} else {
 					klog.V(5).InfoS("DATA sent to frontend")
 				}
-			} else {
+			case client.Network_ControlPlane:
+				klog.Infoln("Here I come")
 				s.muConnsFromAgents.Lock()
 				conn, ok := s.connsFromAgents[resp.ConnectID]
 				if ok {

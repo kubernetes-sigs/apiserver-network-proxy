@@ -216,3 +216,7 @@ func TestAddRemoveFrontends(t *testing.T) {
 		t.Errorf("expected %v, got %v", e, a)
 	}
 }
+
+func TestNodeToControlPlane(t *testing.T) {
+
+}

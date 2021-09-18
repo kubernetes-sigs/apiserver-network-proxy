@@ -12,6 +12,7 @@ require (
 	github.com/spf13/pflag v1.0.5
 	golang.org/x/net v0.0.0-20201110031124-69a78807bb2b
 	google.golang.org/grpc v1.27.1
+	google.golang.org/protobuf v1.25.0 // indirect
 	k8s.io/api v0.20.10
 	k8s.io/apimachinery v0.20.10
 	k8s.io/client-go v0.20.10
