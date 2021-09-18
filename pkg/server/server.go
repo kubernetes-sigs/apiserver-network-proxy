@@ -706,11 +706,13 @@ func (s *ProxyServer) serveRecvBackend(backend Backend, stream agent.AgentServic
 				s.muConnsFromAgents.Lock()
 				defer s.muConnsFromAgents.Unlock()
 				conn, ok := s.connsFromAgents[connID]
-				if ok {
-					err := conn.Close()
-					if err != nil {
-						klog.ErrorS(err, "failed to close connection")
-					}
+				if !ok {
+					klog.Infoln("unknown connID", connID)
+					return
+				}
+				err := conn.Close()
+				if err != nil {
+					klog.ErrorS(err, "failed to close connection")
 				}
 				delete(s.connsFromAgents, connID)
 			}()

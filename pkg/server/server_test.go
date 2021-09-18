@@ -266,6 +266,7 @@ func TestNodeToControlPlane(t *testing.T) {
 		panic(err)
 	}
 
+	var receivedData []byte
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
@@ -282,7 +283,7 @@ func TestNodeToControlPlane(t *testing.T) {
 			if err != nil {
 				panic(err)
 			}
-			fmt.Println("got ~ ", string(data[:n]))
+			receivedData = append(receivedData, data[:n]...)
 		}
 	}()
 
@@ -304,6 +305,10 @@ func TestNodeToControlPlane(t *testing.T) {
 	stream.ch <- packetCloseReq(connID)
 	close(stream.ch)
 	wg.Wait()
+
+	if !reflect.DeepEqual(testData, receivedData) {
+		t.Fatalf("Expected: %v Got: %v", testData, receivedData)
+	}
 }
 
 func packetCloseReq(connID int64) *client.Packet {
