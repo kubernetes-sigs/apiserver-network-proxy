@@ -796,9 +796,6 @@ func (s *ProxyServer) serveRecvBackend(backend Backend, stream agent.AgentServic
 				}
 			}()
 
-		case client.PacketType_DIAL_CLS:
-			klog.Infoln("GOT DIAL_CLS")
-
 		case client.PacketType_DIAL_RSP:
 			resp := pkt.GetDialResponse()
 			klog.V(5).InfoS("Received DIAL_RSP", "random", resp.Random, "agentID", agentID, "connectionID", resp.ConnectID)
@@ -844,7 +841,6 @@ func (s *ProxyServer) serveRecvBackend(backend Backend, stream agent.AgentServic
 					klog.V(5).InfoS("DATA sent to frontend")
 				}
 			case client.Network_ControlPlane:
-				klog.Infoln("Here I come")
 				s.muConnsFromAgents.Lock()
 				conn, ok := s.connsFromAgents[resp.ConnectID]
 				if ok {
@@ -852,7 +848,9 @@ func (s *ProxyServer) serveRecvBackend(backend Backend, stream agent.AgentServic
 					if err != nil {
 						klog.ErrorS(err, "failed to write data", err)
 					}
-					klog.Infoln("wrote bytes %d", n)
+					klog.Infof("wrote %d bytes", n)
+				} else {
+					klog.Errorln("unknown connectionID", resp.ConnectID)
 				}
 				s.muConnsFromAgents.Unlock()
 			}
