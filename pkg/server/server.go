@@ -645,11 +645,11 @@ func (s *ProxyServer) serveRecvBackend(backend Backend, stream agent.AgentServic
 	for {
 		pkt, err := stream.Recv()
 		if err == io.EOF {
-			return
+			break
 		}
 		if err != nil {
 			klog.ErrorS(err, "stream read failure")
-			return
+			break
 		}
 
 		switch pkt.Type {
