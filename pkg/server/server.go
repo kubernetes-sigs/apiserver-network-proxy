@@ -377,11 +377,11 @@ func (s *ProxyServer) serveRecvFrontend(stream client.ProxyService_ProxyServer) 
 		pkt, err := stream.Recv()
 		if err != nil {
 			if err == io.EOF {
-				return
+				break
 			}
 			if err != nil {
 				klog.ErrorS(err, "Stream read from frontend failure")
-				return
+				break
 			}
 		}
 
