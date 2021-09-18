@@ -831,7 +831,7 @@ func (s *ProxyServer) serveRecvBackend(backend Backend, stream agent.AgentServic
 		case client.PacketType_DATA:
 			resp := pkt.GetData()
 			klog.V(5).InfoS("Received data from agent", "bytes", len(resp.Data), "agentID", agentID, "connectionID", resp.ConnectID)
-			switch pkt.GetDestination() {
+			switch pkt.GetDest() {
 			case client.Network_Unknown, client.Network_Node:
 				frontend, err := s.getFrontend(agentID, resp.ConnectID)
 				if err != nil {

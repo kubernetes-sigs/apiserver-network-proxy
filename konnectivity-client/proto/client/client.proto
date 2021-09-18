@@ -38,15 +38,14 @@ enum Error {
 }
 
 enum Network {
-    Unknown = 0;
+    Unknown = 0; // for backward compatibility
     ControlPlane = 1;
     Node = 2;
 }
 
 message Packet {
   PacketType type = 1;
-  Network source = 8;
-  Network destination = 9;
+  Network dest = 9;
 
   oneof payload {
     DialRequest dialRequest = 2;
