@@ -226,6 +226,9 @@ type Client struct {
 	// file path contains service account token.
 	// token's value is auto-rotated by kubernetes, based on projected volume configuration.
 	serviceAccountTokenPath string
+
+	muConnIDToDest sync.Mutex
+	connIDToDest   map[int64]client.Network
 }
 
 func newAgentClient(address, agentID, agentIdentifiers string, cs *ClientSet, opts ...grpc.DialOption) (*Client, int, error) {
@@ -240,6 +243,7 @@ func newAgentClient(address, agentID, agentIdentifiers string, cs *ClientSet, op
 		stopCh:                  make(chan struct{}),
 		serviceAccountTokenPath: cs.serviceAccountTokenPath,
 		connManager:             newConnectionManager(),
+		connIDToDest:            make(map[int64]client.Network),
 	}
 	serverCount, err := a.Connect()
 	if err != nil {
@@ -503,7 +507,6 @@ func (a *Client) ServeBiDirectional() {
 func (a *Client) handleDialRequest(pkt *client.Packet) {
 	klog.V(4).Infoln("received DIAL_REQ")
 	resp := &client.Packet{
-		Dest:    client.Network_ControlPlane,
 		Type:    client.PacketType_DIAL_RSP,
 		Payload: &client.Packet_DialResponse{DialResponse: &client.DialResponse{}},
 	}
@@ -522,9 +525,7 @@ func (a *Client) handleDialRequest(pkt *client.Packet) {
 	}
 	metrics.Metrics.ObserveDialLatency(time.Since(start))
 
-	// Even identifiers are used for connections from master to node network,
-	// increment by 2 to maintain the invariant.
-	connID := atomic.AddInt64(&a.nextConnID, 2)
+	connID := atomic.AddInt64(&a.nextConnID, 1)
 	dataCh := make(chan []byte, 5)
 	ctx := &connContext{
 		conn:   conn,
@@ -557,8 +558,10 @@ func (a *Client) handleDialRequest(pkt *client.Packet) {
 		klog.ErrorS(err, "stream send failure")
 		return
 	}
-
-	go a.remoteToProxy(connID, ctx)
+	a.muConnIDToDest.Lock()
+	a.connIDToDest[connID] = client.Network_Node
+	a.muConnIDToDest.Unlock()
+	go a.remoteToProxy(connID, ctx, client.Network_Node)
 	go a.proxyToRemote(connID, ctx)
 }
 
@@ -608,8 +611,10 @@ func (a *Client) handleDialResponse(pkt *client.Packet) {
 		},
 	}
 	a.connManager.Add(connID, ctx)
-
-	go a.remoteToProxy(connID, ctx)
+	a.muConnIDToDest.Lock()
+	a.connIDToDest[connID] = client.Network_ControlPlane
+	a.muConnIDToDest.Unlock()
+	go a.remoteToProxy(connID, ctx, client.Network_ControlPlane)
 	go a.proxyToRemote(connID, ctx)
 }
 
@@ -618,13 +623,16 @@ func (a *Client) handleCloseRequest(pkt *client.Packet) {
 	connID := closeReq.ConnectID
 
 	klog.V(4).InfoS("received CLOSE_REQ", "connectionID", connID)
-
+	//a.muConnIDToDest.Lock()
+	////dest := a.connIDToDest[connID]
+	//a.muConnIDToDest.Unlock()
 	ctx, ok := a.connManager.Get(connID)
 	if ok {
 		ctx.cleanup()
 	} else {
 		klog.V(4).InfoS("Failed to find connection context for close", "connectionID", connID)
 		resp := &client.Packet{
+			//Dest:    dest,
 			Type:    client.PacketType_CLOSE_RSP,
 			Payload: &client.Packet_CloseResponse{CloseResponse: &client.CloseResponse{}},
 		}
@@ -681,12 +689,12 @@ func (a *Client) handleConnection(protocol, address string, conn net.Conn) error
 	return nil
 }
 
-func (a *Client) remoteToProxy(connID int64, ctx *connContext) {
+func (a *Client) remoteToProxy(connID int64, ctx *connContext, dest client.Network) {
 	defer ctx.cleanup()
 
 	var buf [1 << 12]byte
 	resp := &client.Packet{
-		Dest: client.Network_ControlPlane,
+		Dest: dest,
 		Type: client.PacketType_DATA,
 	}
 
