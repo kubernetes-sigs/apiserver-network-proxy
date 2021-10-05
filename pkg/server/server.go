@@ -40,6 +40,8 @@ import (
 	"sigs.k8s.io/apiserver-network-proxy/proto/header"
 )
 
+const xfrChannelSize = 10
+
 type key int
 
 type ProxyClientConnection struct {
@@ -135,6 +137,9 @@ type ProxyServer struct {
 
 	serverID    string // unique ID of this server
 	serverCount int    // Number of proxy server instances, should be 1 unless it is a HA server.
+
+	// Allows a special debug flag which warns if we write to a full transfer channel
+	warnOnChannelLimit bool
 
 	// agent authentication
 	AgentAuthenticationOptions *AgentTokenAuthenticationOptions
@@ -321,7 +326,7 @@ func (s *ProxyServer) getFrontendsForBackendConn(agentID string, backend Backend
 }
 
 // NewProxyServer creates a new ProxyServer instance
-func NewProxyServer(serverID string, proxyStrategies []ProxyStrategy, serverCount int, agentAuthenticationOptions *AgentTokenAuthenticationOptions) *ProxyServer {
+func NewProxyServer(serverID string, proxyStrategies []ProxyStrategy, serverCount int, agentAuthenticationOptions *AgentTokenAuthenticationOptions, warnOnChannelLimit bool) *ProxyServer {
 	var bms []BackendManager
 	for _, ps := range proxyStrategies {
 		switch ps {
@@ -343,9 +348,10 @@ func NewProxyServer(serverID string, proxyStrategies []ProxyStrategy, serverCoun
 		serverCount:                serverCount,
 		BackendManagers:            bms,
 		AgentAuthenticationOptions: agentAuthenticationOptions,
-		// use the first backendmanager as the Readiness Manager
-		Readiness:       bms[0],
-		proxyStrategies: proxyStrategies,
+		// use the first backend-manager as the Readiness Manager
+		Readiness:          bms[0],
+		proxyStrategies:    proxyStrategies,
+		warnOnChannelLimit: warnOnChannelLimit,
 	}
 }
 
@@ -361,7 +367,7 @@ func (s *ProxyServer) Proxy(stream client.ProxyService_ProxyServer) error {
 	userAgent := md.Get(header.UserAgent)
 	klog.V(2).InfoS("proxy request from client", "userAgent", userAgent)
 
-	recvCh := make(chan *client.Packet, 10)
+	recvCh := make(chan *client.Packet, xfrChannelSize)
 	stopCh := make(chan error)
 
 	go s.serveRecvFrontend(stream, recvCh)
@@ -386,7 +392,7 @@ func (s *ProxyServer) Proxy(stream client.ProxyService_ProxyServer) error {
 				return
 			}
 
-			if len(recvCh) > 9 {
+			if s.warnOnChannelLimit && len(recvCh) >= xfrChannelSize {
 				klog.V(2).InfoS("Receive channel on Proxy is full", "userAgent", userAgent, "serverID", s.serverID)
 			}
 			recvCh <- in
@@ -640,7 +646,7 @@ func (s *ProxyServer) Connect(stream agent.AgentService_ConnectServer) error {
 	backend := s.addBackend(agentID, stream)
 	defer s.removeBackend(agentID, stream)
 
-	recvCh := make(chan *client.Packet, 10)
+	recvCh := make(chan *client.Packet, xfrChannelSize)
 
 	go s.serveRecvBackend(backend, stream, agentID, recvCh)
 
@@ -664,7 +670,7 @@ func (s *ProxyServer) Connect(stream agent.AgentService_ConnectServer) error {
 				return
 			}
 
-			if len(recvCh) > 9 {
+			if s.warnOnChannelLimit && len(recvCh) >= xfrChannelSize {
 				klog.V(2).InfoS("Receive channel on Connect is full", "agentID", agentID, "serverID", s.serverID)
 			}
 			recvCh <- in
