@@ -70,6 +70,13 @@ type ProxyRunOptions struct {
 	// backend within the destCIDR. if it still can't find any backend,
 	// it will use the default backend manager to choose a random backend.
 	ProxyStrategies string
+
+	// This controls if we attempt to push onto a "full" transfer channel.
+	// However checking that the transfer channel is full is not safe.
+	// It violates our race condition checking. Adding locks around a potentially
+	// blocking call has its own problems, so it cannot easily be made race condition safe.
+	// The check is an "unlocked" read but is still use at your own peril.
+	WarnOnChannelLimit bool
 }
 
 func (o *ProxyRunOptions) Flags() *pflag.FlagSet {
@@ -100,6 +107,7 @@ func (o *ProxyRunOptions) Flags() *pflag.FlagSet {
 	flags.IntVar(&o.KubeconfigBurst, "kubeconfig-burst", o.KubeconfigBurst, "Maximum client burst (proxy server uses this client to authenticate agent tokens).")
 	flags.StringVar(&o.AuthenticationAudience, "authentication-audience", o.AuthenticationAudience, "Expected agent's token authentication audience (used with agent-namespace, agent-service-account, kubeconfig).")
 	flags.StringVar(&o.ProxyStrategies, "proxy-strategies", o.ProxyStrategies, "The list of proxy strategies used by the server to pick a backend/tunnel, available strategies are: default, destHost.")
+	flags.BoolVar(&o.WarnOnChannelLimit, "warn-on-channel-limit", o.WarnOnChannelLimit, "Turns on a warning if the system is going to push to a full channel. The check involves an unsafe read.")
 	return flags
 }
 
@@ -130,6 +138,7 @@ func (o *ProxyRunOptions) Print() {
 	klog.V(1).Infof("KubeconfigQPS set to %f.\n", o.KubeconfigQPS)
 	klog.V(1).Infof("KubeconfigBurst set to %d.\n", o.KubeconfigBurst)
 	klog.V(1).Infof("ProxyStrategies set to %q.\n", o.ProxyStrategies)
+	klog.V(1).Infof("WarnOnChannelLimit set to %t.\n", o.WarnOnChannelLimit)
 }
 
 func (o *ProxyRunOptions) Validate() error {
@@ -290,6 +299,7 @@ func NewProxyRunOptions() *ProxyRunOptions {
 		KubeconfigBurst:           0,
 		AuthenticationAudience:    "",
 		ProxyStrategies:           "default",
+		WarnOnChannelLimit:        false,
 	}
 	return &o
 }
