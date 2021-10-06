@@ -10,6 +10,7 @@ import (
 	"net/http/httptest"
 	"net/url"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -336,6 +337,71 @@ func TestBasicProxy_HTTPCONN(t *testing.T) {
 
 }
 
+func TestFailedDial_HTTPCONN(t *testing.T) {
+	server := httptest.NewServer(newEchoServer("hello"))
+	server.Close() // cleanup immediately so connections will fail
+
+	stopCh := make(chan struct{})
+	defer close(stopCh)
+
+	proxy, cleanup, err := runHTTPConnProxyServer()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer cleanup()
+
+	runAgent(proxy.agent, stopCh)
+
+	// Wait for agent to register on proxy server
+	time.Sleep(time.Second)
+
+	conn, err := net.Dial("tcp", proxy.front)
+	if err != nil {
+		t.Error(err)
+	}
+
+	serverURL, _ := url.Parse(server.URL)
+
+	// Send HTTP-Connect request
+	_, err = fmt.Fprintf(conn, "CONNECT %s HTTP/1.1\r\nHost: %s\r\n\r\n", serverURL.Host, "127.0.0.1")
+	if err != nil {
+		t.Error(err)
+	}
+
+	// Parse the HTTP response for Connect
+	br := bufio.NewReader(conn)
+	res, err := http.ReadResponse(br, nil)
+	if err != nil {
+		t.Errorf("reading HTTP response from CONNECT: %v", err)
+	}
+	if res.StatusCode != 200 {
+		t.Errorf("expect 200; got %d", res.StatusCode)
+	}
+
+	dialer := func(network, addr string) (net.Conn, error) {
+		return conn, nil
+	}
+
+	c := &http.Client{
+		Transport: &http.Transport{
+			Dial: dialer,
+		},
+	}
+
+	_, err = c.Get(server.URL)
+	if err == nil || !strings.Contains(err.Error(), "connection reset by peer") {
+		t.Error(err)
+	}
+
+	for i := 0; i < 20; i++ {
+		if proxy.getActiveHTTPConnectConns() == 0 {
+			return
+		}
+		time.Sleep(time.Millisecond * 10)
+	}
+	t.Errorf("expected connection to eventually be closed")
+}
+
 func localAddr(addr net.Addr) string {
 	return addr.String()
 }
@@ -344,6 +410,8 @@ type proxy struct {
 	server *server.ProxyServer
 	front  string
 	agent  string
+
+	getActiveHTTPConnectConns func() int
 }
 
 func runGRPCProxyServer() (proxy, func(), error) {
@@ -409,10 +477,17 @@ func runHTTPConnProxyServer() (proxy, func(), error) {
 	proxy.agent = localAddr(lis.Addr())
 
 	// http-connect
+	active := int32(0)
+	proxy.getActiveHTTPConnectConns = func() int { return int(atomic.LoadInt32(&active)) }
+	handler := &server.Tunnel{
+		Server: s,
+	}
 	httpServer := &http.Server{
-		Handler: &server.Tunnel{
-			Server: s,
-		},
+		Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			atomic.AddInt32(&active, 1)
+			defer atomic.AddInt32(&active, -1)
+			handler.ServeHTTP(w, r)
+		}),
 	}
 	lis2, err := net.Listen("tcp", "")
 	if err != nil {

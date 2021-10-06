@@ -55,6 +55,7 @@ func (t *Tunnel) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
+	defer conn.Close()
 
 	random := rand.Int63() /* #nosec G404 */
 	dialRequest := &client.Packet{
@@ -74,10 +75,18 @@ func (t *Tunnel) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, fmt.Sprintf("currently no tunnels available: %v", err), http.StatusInternalServerError)
 		return
 	}
+	closed := make(chan struct{})
 	connected := make(chan struct{})
 	connection := &ProxyClientConnection{
-		Mode:      "http-connect",
-		HTTP:      conn,
+		Mode: "http-connect",
+		HTTP: conn,
+		CloseHTTP: func() error {
+			if err := conn.Close(); err != nil {
+				return err
+			}
+			close(closed)
+			return nil
+		},
 		connected: connected,
 		start:     time.Now(),
 		backend:   backend,
@@ -100,6 +109,7 @@ func (t *Tunnel) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	select {
 	case <-connection.connected: // Waiting for response before we begin full communication.
+	case <-closed: // Connection was closed before being established
 	}
 
 	defer func() {
