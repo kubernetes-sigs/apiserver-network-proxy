@@ -25,6 +25,7 @@ import (
 
 	"k8s.io/klog/v2"
 	"sigs.k8s.io/apiserver-network-proxy/konnectivity-client/proto/client"
+	"sigs.k8s.io/apiserver-network-proxy/pkg/server/metrics"
 )
 
 // Tunnel implements Proxy based on HTTP Connect, which tunnels the traffic to
@@ -34,6 +35,9 @@ type Tunnel struct {
 }
 
 func (t *Tunnel) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	metrics.Metrics.HTTPConnectionInc()
+	defer metrics.Metrics.HTTPConnectionDec()
+
 	klog.V(2).InfoS("Received request for host", "method", r.Method, "host", r.Host, "userAgent", r.UserAgent())
 	if r.TLS != nil {
 		klog.V(2).InfoS("TLS", "commonName", r.TLS.PeerCertificates[0].Subject.CommonName)
