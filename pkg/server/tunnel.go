@@ -79,7 +79,7 @@ func (t *Tunnel) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	connected := make(chan struct{})
 	connection := &ProxyClientConnection{
 		Mode: "http-connect",
-		HTTP: conn,
+		HTTP: io.ReadWriter(conn), // pass as ReadWriter so the caller must close with CloseHTTP
 		CloseHTTP: func() error {
 			if err := conn.Close(); err != nil {
 				return err
