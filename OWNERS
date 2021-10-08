@@ -2,7 +2,6 @@
 
 reviewers:
   - caesarxuchao
-  - Sh4d1
   - dberkov
   - jefftree
   - jkh52
@@ -12,3 +11,5 @@ approvers:
   - anfernee
   - andrewsykim
   - caesarxuchao
+emeritus_approvers:
+  - Sh4d1
