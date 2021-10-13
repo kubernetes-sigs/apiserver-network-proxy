@@ -21,6 +21,7 @@ import (
 	"io"
 	"math/rand"
 	"net/http"
+	"sync"
 	"time"
 
 	"k8s.io/klog/v2"
@@ -59,7 +60,8 @@ func (t *Tunnel) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
-	defer conn.Close()
+	var closeOnce sync.Once
+	defer closeOnce.Do(func() { conn.Close() })
 
 	random := rand.Int63() /* #nosec G404 */
 	dialRequest := &client.Packet{
@@ -85,9 +87,7 @@ func (t *Tunnel) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		Mode: "http-connect",
 		HTTP: io.ReadWriter(conn), // pass as ReadWriter so the caller must close with CloseHTTP
 		CloseHTTP: func() error {
-			if err := conn.Close(); err != nil {
-				return err
-			}
+			closeOnce.Do(func() { conn.Close() })
 			close(closed)
 			return nil
 		},
