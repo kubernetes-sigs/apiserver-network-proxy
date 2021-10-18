@@ -46,6 +46,7 @@ type ServerMetrics struct {
 	latencies         *prometheus.HistogramVec
 	frontendLatencies *prometheus.HistogramVec
 	connections       *prometheus.GaugeVec
+	httpConnections   prometheus.Gauge
 	backend           *prometheus.GaugeVec
 	pendingDials      *prometheus.GaugeVec
 }
@@ -83,6 +84,14 @@ func newServerMetrics() *ServerMetrics {
 			"service_method",
 		},
 	)
+	httpConnections := prometheus.NewGauge(
+		prometheus.GaugeOpts{
+			Namespace: namespace,
+			Subsystem: subsystem,
+			Name:      "http_connections",
+			Help:      "Number of current HTTP CONNECT connections",
+		},
+	)
 	backend := prometheus.NewGaugeVec(
 		prometheus.GaugeOpts{
 			Namespace: namespace,
@@ -105,12 +114,14 @@ func newServerMetrics() *ServerMetrics {
 	prometheus.MustRegister(latencies)
 	prometheus.MustRegister(frontendLatencies)
 	prometheus.MustRegister(connections)
+	prometheus.MustRegister(httpConnections)
 	prometheus.MustRegister(backend)
 	prometheus.MustRegister(pendingDials)
 	return &ServerMetrics{
 		latencies:         latencies,
 		frontendLatencies: frontendLatencies,
 		connections:       connections,
+		httpConnections:   httpConnections,
 		backend:           backend,
 		pendingDials:      pendingDials,
 	}
@@ -141,6 +152,12 @@ func (a *ServerMetrics) ConnectionInc(serviceMethod string) {
 func (a *ServerMetrics) ConnectionDec(serviceMethod string) {
 	a.connections.With(prometheus.Labels{"service_method": serviceMethod}).Dec()
 }
+
+// HTTPConnectionDec increments a new HTTP CONNECTION connection.
+func (a *ServerMetrics) HTTPConnectionInc() { a.httpConnections.Inc() }
+
+// HTTPConnectionDec decrements a finished HTTP CONNECTION connection.
+func (a *ServerMetrics) HTTPConnectionDec() { a.httpConnections.Dec() }
 
 // SetBackendCount sets the number of backend connection.
 func (a *ServerMetrics) SetBackendCount(count int) {

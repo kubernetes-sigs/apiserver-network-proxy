@@ -21,7 +21,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"net"
 	"strconv"
 	"strings"
 	"sync"
@@ -47,7 +46,8 @@ type key int
 type ProxyClientConnection struct {
 	Mode      string
 	Grpc      client.ProxyService_ProxyServer
-	HTTP      net.Conn
+	HTTP      io.ReadWriter
+	CloseHTTP func() error
 	connected chan struct{}
 	connectID int64
 	agentID   string
@@ -67,13 +67,13 @@ func (c *ProxyClientConnection) send(pkt *client.Packet) error {
 		return stream.Send(pkt)
 	} else if c.Mode == "http-connect" {
 		if pkt.Type == client.PacketType_CLOSE_RSP {
-			return c.HTTP.Close()
+			return c.CloseHTTP()
 		} else if pkt.Type == client.PacketType_DATA {
 			_, err := c.HTTP.Write(pkt.GetData().Data)
 			return err
 		} else if pkt.Type == client.PacketType_DIAL_RSP {
 			if pkt.GetDialResponse().Error != "" {
-				return c.HTTP.Close()
+				return c.CloseHTTP()
 			}
 			return nil
 		} else {
