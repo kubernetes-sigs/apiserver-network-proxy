@@ -44,10 +44,10 @@ func (dibm *DestHostBackendManager) Backend(ctx context.Context) (Backend, error
 	}
 	destHost := ctx.Value(destHost).(string)
 	if destHost != "" {
-		bes, exist := dibm.backends[destHost]
-		if exist && len(bes) > 0 {
+		uniqueAgentIDs, exist := dibm.hostToUniqueAgentIDTracker[destHost]
+		if exist && len(uniqueAgentIDs) > 0 {
 			klog.V(5).InfoS("Get the backend through the DestHostBackendManager", "destHost", destHost)
-			return dibm.backends[destHost][0], nil
+			return dibm.backends[uniqueAgentIDs[dibm.random.Intn(len(uniqueAgentIDs))]][0], nil
 		}
 	}
 	return nil, &ErrNotFound{}

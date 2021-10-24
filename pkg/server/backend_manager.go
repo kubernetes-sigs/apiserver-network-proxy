@@ -101,9 +101,9 @@ func newBackend(conn agent.AgentService_ConnectServer) *backend {
 // connections, i.e., get, add and remove
 type BackendStorage interface {
 	// AddBackend adds a backend.
-	AddBackend(identifier string, idType pkgagent.IdentifierType, conn agent.AgentService_ConnectServer) Backend
+	AddBackend(agentID string, identifier string, idType pkgagent.IdentifierType, conn agent.AgentService_ConnectServer) Backend
 	// RemoveBackend removes a backend.
-	RemoveBackend(identifier string, idType pkgagent.IdentifierType, conn agent.AgentService_ConnectServer)
+	RemoveBackend(agentID string, identifier string, idType pkgagent.IdentifierType, conn agent.AgentService_ConnectServer)
 	// NumBackends returns the number of backends.
 	NumBackends() int
 }
@@ -146,6 +146,11 @@ type DefaultBackendStorage struct {
 	// randomly pick a key from a map (in this case, the backends) in
 	// Golang.
 	agentIDs []string
+
+	// hostToUniqueAgentIDTracker tracks the unique agentIDs that have registered themselves
+	// to be able to serve traffic for a given host or ip.
+	hostToUniqueAgentIDTracker map[string][]string
+
 	// defaultRouteAgentIDs tracks the agents that have claimed the default route.
 	defaultRouteAgentIDs []string
 	random               *rand.Rand
@@ -167,9 +172,10 @@ func NewDefaultBackendManager() *DefaultBackendManager {
 // NewDefaultBackendStorage returns a DefaultBackendStorage
 func NewDefaultBackendStorage(idTypes []pkgagent.IdentifierType) *DefaultBackendStorage {
 	return &DefaultBackendStorage{
-		backends: make(map[string][]*backend),
-		random:   rand.New(rand.NewSource(time.Now().UnixNano())),
-		idTypes:  idTypes,
+		backends:                   make(map[string][]*backend),
+		hostToUniqueAgentIDTracker: make(map[string][]string),
+		random:                     rand.New(rand.NewSource(time.Now().UnixNano())),
+		idTypes:                    idTypes,
 	} /* #nosec G404 */
 }
 
@@ -183,63 +189,80 @@ func containIDType(idTypes []pkgagent.IdentifierType, idType pkgagent.Identifier
 }
 
 // AddBackend adds a backend.
-func (s *DefaultBackendStorage) AddBackend(identifier string, idType pkgagent.IdentifierType, conn agent.AgentService_ConnectServer) Backend {
+func (s *DefaultBackendStorage) AddBackend(agentID string, identifier string, idType pkgagent.IdentifierType, conn agent.AgentService_ConnectServer) Backend {
 	if !containIDType(s.idTypes, idType) {
-		klog.V(4).InfoS("fail to add backend", "backend", identifier, "error", &ErrWrongIDType{idType, s.idTypes})
+		klog.V(4).InfoS("fail to add backend", "backend", agentID, "error", &ErrWrongIDType{idType, s.idTypes})
 		return nil
 	}
-	klog.V(2).InfoS("Register backend for agent", "connection", conn, "agentID", identifier)
+	klog.V(2).InfoS("Register backend for agent", "connection", conn, "agentID", agentID)
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	_, ok := s.backends[identifier]
+	_, ok := s.backends[agentID]
 	addedBackend := newBackend(conn)
 	if ok {
-		for _, v := range s.backends[identifier] {
+		for _, v := range s.backends[agentID] {
 			if v.conn == conn {
-				klog.V(1).InfoS("This should not happen. Adding existing backend for agent", "connection", conn, "agentID", identifier)
+				klog.V(1).InfoS("This should only happen when multiple strategies are in use. Adding existing backend for agent", "connection", conn, "agentID", agentID)
 				return v
 			}
 		}
-		s.backends[identifier] = append(s.backends[identifier], addedBackend)
+		s.backends[agentID] = append(s.backends[agentID], addedBackend)
 		return addedBackend
 	}
-	s.backends[identifier] = []*backend{addedBackend}
+	s.backends[agentID] = []*backend{addedBackend}
 	metrics.Metrics.SetBackendCount(len(s.backends))
-	s.agentIDs = append(s.agentIDs, identifier)
+	s.agentIDs = append(s.agentIDs, agentID)
 	if idType == pkgagent.DefaultRoute {
-		s.defaultRouteAgentIDs = append(s.defaultRouteAgentIDs, identifier)
+		s.defaultRouteAgentIDs = append(s.defaultRouteAgentIDs, agentID)
+	}
+	if idType == pkgagent.IPv4 || idType == pkgagent.IPv6 || idType == pkgagent.Host {
+		agentIDExistsForHostAdded := false
+		if uniqueAgentIDs, ok := s.hostToUniqueAgentIDTracker[identifier]; ok && len(uniqueAgentIDs) > 0 {
+			for _, uniqueAgentIDForHost := range s.hostToUniqueAgentIDTracker[identifier] {
+				if uniqueAgentIDForHost == agentID {
+					agentIDExistsForHostAdded = true
+					break
+				}
+			}
+		}
+		if !agentIDExistsForHostAdded {
+			if uniqueAgentIDSlice, ok := s.hostToUniqueAgentIDTracker[identifier]; !ok || len(uniqueAgentIDSlice) == 0 {
+				s.hostToUniqueAgentIDTracker[identifier] = []string{}
+			}
+			s.hostToUniqueAgentIDTracker[identifier] = append(s.hostToUniqueAgentIDTracker[identifier], agentID)
+		}
 	}
 	return addedBackend
 }
 
 // RemoveBackend removes a backend.
-func (s *DefaultBackendStorage) RemoveBackend(identifier string, idType pkgagent.IdentifierType, conn agent.AgentService_ConnectServer) {
+func (s *DefaultBackendStorage) RemoveBackend(agentID string, identifier string, idType pkgagent.IdentifierType, conn agent.AgentService_ConnectServer) {
 	if !containIDType(s.idTypes, idType) {
 		klog.ErrorS(&ErrWrongIDType{idType, s.idTypes}, "fail to remove backend")
 		return
 	}
-	klog.V(2).InfoS("Remove connection for agent", "connection", conn, "identifier", identifier)
+	klog.V(2).InfoS("Remove connection for agent", "connection", conn, "agentID", agentID)
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	backends, ok := s.backends[identifier]
+	backends, ok := s.backends[agentID]
 	if !ok {
-		klog.V(1).InfoS("Cannot find agent in backends", "identifier", identifier)
+		klog.V(1).InfoS("Cannot find agent in backends", "agentID", agentID)
 		return
 	}
 	var found bool
 	for i, c := range backends {
 		if c.conn == conn {
-			s.backends[identifier] = append(s.backends[identifier][:i], s.backends[identifier][i+1:]...)
-			if i == 0 && len(s.backends[identifier]) != 0 {
+			s.backends[agentID] = append(s.backends[agentID][:i], s.backends[agentID][i+1:]...)
+			if i == 0 && len(s.backends[agentID]) != 0 {
 				klog.V(1).InfoS("This should not happen. Removed connection that is not the first connection", "connection", conn, "remainingConnections", s.backends[identifier])
 			}
 			found = true
 		}
 	}
-	if len(s.backends[identifier]) == 0 {
-		delete(s.backends, identifier)
+	if len(s.backends[agentID]) == 0 {
+		delete(s.backends, agentID)
 		for i := range s.agentIDs {
-			if s.agentIDs[i] == identifier {
+			if s.agentIDs[i] == agentID {
 				s.agentIDs[i] = s.agentIDs[len(s.agentIDs)-1]
 				s.agentIDs = s.agentIDs[:len(s.agentIDs)-1]
 				break
@@ -247,15 +270,25 @@ func (s *DefaultBackendStorage) RemoveBackend(identifier string, idType pkgagent
 		}
 		if idType == pkgagent.DefaultRoute {
 			for i := range s.defaultRouteAgentIDs {
-				if s.defaultRouteAgentIDs[i] == identifier {
+				if s.defaultRouteAgentIDs[i] == agentID {
 					s.defaultRouteAgentIDs = append(s.defaultRouteAgentIDs[:i], s.defaultRouteAgentIDs[i+1:]...)
 					break
 				}
 			}
 		}
+		if idType == pkgagent.IPv4 || idType == pkgagent.IPv6 || idType == pkgagent.Host {
+			if uniqueAgentIDs, ok := s.hostToUniqueAgentIDTracker[identifier]; ok && len(uniqueAgentIDs) > 0 {
+				for i := range s.hostToUniqueAgentIDTracker[identifier] {
+					if s.hostToUniqueAgentIDTracker[identifier][i] == agentID {
+						s.hostToUniqueAgentIDTracker[identifier] = append(s.hostToUniqueAgentIDTracker[identifier][:i], s.hostToUniqueAgentIDTracker[identifier][i+1:]...)
+						break
+					}
+				}
+			}
+		}
 	}
 	if !found {
-		klog.V(1).InfoS("Could not find connection matching identifier to remove", "connection", conn, "identifier", identifier)
+		klog.V(1).InfoS("Could not find connection matching identifier to remove", "connection", conn, "agentID", agentID)
 	}
 	metrics.Metrics.SetBackendCount(len(s.backends))
 }
