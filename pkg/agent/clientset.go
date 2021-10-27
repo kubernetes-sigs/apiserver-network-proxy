@@ -55,6 +55,8 @@ type ClientSet struct {
 
 	agentIdentifiers string // The identifiers of the agent, which will be used
 	// by the server when choosing agent
+
+	warnOnChannelLimit bool
 }
 
 func (cs *ClientSet) ClientsCount() int {
@@ -121,6 +123,7 @@ type ClientSetConfig struct {
 	SyncIntervalCap         time.Duration
 	DialOptions             []grpc.DialOption
 	ServiceAccountTokenPath string
+	WarnOnChannelLimit      bool
 }
 
 func (cc *ClientSetConfig) NewAgentClientSet(stopCh <-chan struct{}) *ClientSet {
@@ -134,6 +137,7 @@ func (cc *ClientSetConfig) NewAgentClientSet(stopCh <-chan struct{}) *ClientSet 
 		syncIntervalCap:         cc.SyncIntervalCap,
 		dialOptions:             cc.DialOptions,
 		serviceAccountTokenPath: cc.ServiceAccountTokenPath,
+		warnOnChannelLimit:		 cc.WarnOnChannelLimit,
 		stopCh:                  stopCh,
 	}
 }
