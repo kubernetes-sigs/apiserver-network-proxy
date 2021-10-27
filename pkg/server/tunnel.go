@@ -133,7 +133,7 @@ func (t *Tunnel) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}()
 
 	klog.V(3).InfoS("Starting proxy to host", "host", r.Host)
-	pkt := make([]byte, 1<<12)
+	pkt := make([]byte, 1<<15) // Match GRPC Window size
 
 	connID := connection.connectID
 	agentID := connection.agentID
