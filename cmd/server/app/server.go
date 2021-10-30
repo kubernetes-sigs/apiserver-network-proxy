@@ -170,7 +170,10 @@ func (p *Proxy) runUDSFrontendServer(ctx context.Context, o *options.ProxyRunOpt
 	}
 	var stop StopFunc
 	if o.Mode == "grpc" {
-		grpcServer := grpc.NewServer()
+		frontendServerOptions := []grpc.ServerOption{
+			grpc.KeepaliveParams(keepalive.ServerParameters{Time: o.FrontendKeepaliveTime}),
+		}
+		grpcServer := grpc.NewServer(frontendServerOptions...)
 		client.RegisterProxyServiceServer(grpcServer, s)
 		lis, err := getUDSListener(ctx, o.UdsName)
 		if err != nil {
