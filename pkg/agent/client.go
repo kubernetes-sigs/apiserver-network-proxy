@@ -39,13 +39,16 @@ import (
 )
 
 const dialTimeout = 5 * time.Second
+const xfrChannelSize = 150
 
 // connContext tracks a connection from agent to node network.
 type connContext struct {
 	conn      net.Conn
+	connID    int64
 	cleanFunc func()
 	dataCh    chan []byte
 	cleanOnce sync.Once
+	warnChLim bool
 }
 
 func (c *connContext) cleanup() {
@@ -60,6 +63,10 @@ func (c *connContext) send(msg []byte) {
 			klog.InfoS("Recovered from attempt to write to closed channel")
 		}
 	}()
+	if c.warnChLim && len(c.dataCh) >= xfrChannelSize {
+		klog.V(2).InfoS("Data channel on agent is full", "connectionID", c.connID)
+	}
+
 	c.dataCh <- msg
 }
 
@@ -182,6 +189,8 @@ type Client struct {
 	// file path contains service account token.
 	// token's value is auto-rotated by kubernetes, based on projected volume configuration.
 	serviceAccountTokenPath string
+
+	warnOnChannelLimit bool
 }
 
 func newAgentClient(address, agentID, agentIdentifiers string, cs *ClientSet, opts ...grpc.DialOption) (*Client, int, error) {
@@ -195,6 +204,7 @@ func newAgentClient(address, agentID, agentIdentifiers string, cs *ClientSet, op
 		stopCh:                  make(chan struct{}),
 		serviceAccountTokenPath: cs.serviceAccountTokenPath,
 		connManager:             newConnectionManager(),
+		warnOnChannelLimit:      cs.warnOnChannelLimit,
 	}
 	serverCount, err := a.Connect()
 	if err != nil {
@@ -392,9 +402,10 @@ func (a *Client) Serve() {
 			metrics.Metrics.ObserveDialLatency(time.Since(start))
 
 			connID := atomic.AddInt64(&a.nextConnID, 1)
-			dataCh := make(chan []byte, 5)
+			dataCh := make(chan []byte, xfrChannelSize)
 			ctx := &connContext{
 				conn:   conn,
+				connID: connID,
 				dataCh: dataCh,
 				cleanFunc: func() {
 					klog.V(4).InfoS("close connection", "connectionID", connID)
@@ -416,6 +427,7 @@ func (a *Client) Serve() {
 					close(dataCh)
 					a.connManager.Delete(connID)
 				},
+				warnChLim: a.warnOnChannelLimit,
 			}
 			a.connManager.Add(connID, ctx)
 
@@ -519,7 +531,7 @@ func (a *Client) proxyToRemote(connID int64, ctx *connContext) {
 		for {
 			n, err := ctx.conn.Write(d[pos:])
 			if err == nil {
-				klog.V(4).InfoS("write to remote", "connectionID", connID, "lastData", n)
+				klog.V(4).InfoS("write to remote", "connectionID", connID, "lastData", n, "dataSize", len(d))
 				break
 			} else if n > 0 {
 				// https://golang.org/pkg/io/#Writer specifies return non nil error if n < len(d)

@@ -46,6 +46,13 @@ type GrpcProxyAgentOptions struct {
 
 	// file contains service account authorization token for enabling proxy-server token based authorization
 	ServiceAccountTokenPath string
+
+	// This warns if we attempt to push onto a "full" transfer channel.
+	// However checking that the transfer channel is full is not safe.
+	// It violates our race condition checking. Adding locks around a potentially
+	// blocking call has its own problems, so it cannot easily be made race condition safe.
+	// The check is an "unlocked" read but is still use at your own peril.
+	WarnOnChannelLimit bool
 }
 
 func (o *GrpcProxyAgentOptions) ClientSetConfig(dialOptions ...grpc.DialOption) *agent.ClientSetConfig {
@@ -58,6 +65,7 @@ func (o *GrpcProxyAgentOptions) ClientSetConfig(dialOptions ...grpc.DialOption) 
 		SyncIntervalCap:         o.SyncIntervalCap,
 		DialOptions:             dialOptions,
 		ServiceAccountTokenPath: o.ServiceAccountTokenPath,
+		WarnOnChannelLimit:		 o.WarnOnChannelLimit,
 	}
 }
 
@@ -80,6 +88,7 @@ func (o *GrpcProxyAgentOptions) Flags() *pflag.FlagSet {
 	flags.DurationVar(&o.KeepaliveTime, "keepalive-time", o.KeepaliveTime, "Time for gRPC agent server keepalive.")
 	flags.StringVar(&o.ServiceAccountTokenPath, "service-account-token-path", o.ServiceAccountTokenPath, "If non-empty proxy agent uses this token to prove its identity to the proxy server.")
 	flags.StringVar(&o.AgentIdentifiers, "agent-identifiers", o.AgentIdentifiers, "Identifiers of the agent that will be used by the server when choosing agent. N.B. the list of identifiers must be in URL encoded format. e.g.,host=localhost&host=node1.mydomain.com&cidr=127.0.0.1/16&ipv4=1.2.3.4&ipv4=5.6.7.8&ipv6=:::::&default-route=true")
+	flags.BoolVar(&o.WarnOnChannelLimit, "warn-on-channel-limit", o.WarnOnChannelLimit, "Turns on a warning if the system is going to push to a full channel. The check involves an unsafe read.")
 	return flags
 }
 
@@ -101,6 +110,7 @@ func (o *GrpcProxyAgentOptions) Print() {
 	klog.V(1).Infof("Keepalive time set to %v.\n", o.KeepaliveTime)
 	klog.V(1).Infof("ServiceAccountTokenPath set to %q.\n", o.ServiceAccountTokenPath)
 	klog.V(1).Infof("AgentIdentifiers set to %s.\n", util.PrettyPrintURL(o.AgentIdentifiers))
+	klog.V(1).Infof("WarnOnChannelLimit set to %t.\n", o.WarnOnChannelLimit)
 }
 
 func (o *GrpcProxyAgentOptions) Validate() error {
@@ -188,6 +198,7 @@ func NewGrpcProxyAgentOptions() *GrpcProxyAgentOptions {
 		SyncIntervalCap:           10 * time.Second,
 		KeepaliveTime:             1 * time.Hour,
 		ServiceAccountTokenPath:   "",
+		WarnOnChannelLimit:        false,
 	}
 	return &o
 }
