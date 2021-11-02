@@ -388,6 +388,7 @@ func (s *ProxyServer) Proxy(stream client.ProxyService_ProxyServer) error {
 			}
 			if err != nil {
 				klog.ErrorS(err, "Stream read from frontend failure")
+				stopCh <- err
 				close(stopCh)
 				return
 			}
@@ -666,6 +667,7 @@ func (s *ProxyServer) Connect(stream agent.AgentService_ConnectServer) error {
 			}
 			if err != nil {
 				klog.ErrorS(err, "stream read failure")
+				stopCh <- err
 				close(stopCh)
 				return
 			}
