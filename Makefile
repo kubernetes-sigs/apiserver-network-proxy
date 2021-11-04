@@ -173,6 +173,7 @@ certs: easy-rsa cfssl cfssljson
 ## Docker
 ## --------------------------------------
 
+.PHONY: buildx-setup
 buildx-setup:
 	${DOCKER_CMD} buildx inspect img-builder > /dev/null || docker buildx create --name img-builder --use
 
