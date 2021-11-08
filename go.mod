@@ -6,7 +6,6 @@ require (
 	github.com/golang/mock v1.4.4
 	github.com/golang/protobuf v1.4.3
 	github.com/google/uuid v1.1.2
-	github.com/inconshreveable/mousetrap v1.0.0 // indirect
 	github.com/prometheus/client_golang v1.7.1
 	github.com/spf13/cobra v0.0.3
 	github.com/spf13/pflag v1.0.5
@@ -30,6 +29,7 @@ require (
 	github.com/google/gofuzz v1.1.0 // indirect
 	github.com/googleapis/gnostic v0.4.1 // indirect
 	github.com/imdario/mergo v0.3.5 // indirect
+	github.com/inconshreveable/mousetrap v1.0.0 // indirect
 	github.com/json-iterator/go v1.1.10 // indirect
 	github.com/matttproud/golang_protobuf_extensions v1.0.2-0.20181231171920-c182affec369 // indirect
 	github.com/modern-go/concurrent v0.0.0-20180306012644-bacd9c7ef1dd // indirect

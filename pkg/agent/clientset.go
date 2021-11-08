@@ -137,7 +137,7 @@ func (cc *ClientSetConfig) NewAgentClientSet(stopCh <-chan struct{}) *ClientSet 
 		syncIntervalCap:         cc.SyncIntervalCap,
 		dialOptions:             cc.DialOptions,
 		serviceAccountTokenPath: cc.ServiceAccountTokenPath,
-		warnOnChannelLimit:		 cc.WarnOnChannelLimit,
+		warnOnChannelLimit:      cc.WarnOnChannelLimit,
 		stopCh:                  stopCh,
 	}
 }

@@ -42,7 +42,7 @@ type GrpcProxyAgentOptions struct {
 	SyncIntervalCap  time.Duration
 	// After a duration of this time if the agent doesn't see any activity it
 	// pings the server to see if the transport is still alive.
-	KeepaliveTime    time.Duration
+	KeepaliveTime time.Duration
 
 	// file contains service account authorization token for enabling proxy-server token based authorization
 	ServiceAccountTokenPath string
@@ -65,7 +65,7 @@ func (o *GrpcProxyAgentOptions) ClientSetConfig(dialOptions ...grpc.DialOption) 
 		SyncIntervalCap:         o.SyncIntervalCap,
 		DialOptions:             dialOptions,
 		ServiceAccountTokenPath: o.ServiceAccountTokenPath,
-		WarnOnChannelLimit:		 o.WarnOnChannelLimit,
+		WarnOnChannelLimit:      o.WarnOnChannelLimit,
 	}
 }
 
