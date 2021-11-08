@@ -22,11 +22,13 @@ import (
 	"crypto/tls"
 	"flag"
 	"fmt"
+	"golang.org/x/net/http2"
 	"io/ioutil"
 	"net"
 	"net/http"
 	"os"
 	"os/signal"
+	"strconv"
 	"sync"
 	"time"
 
@@ -65,22 +67,23 @@ func main() {
 }
 
 type GrpcProxyClientOptions struct {
-	clientCert    string
-	clientKey     string
-	caCert        string
-	requestProto  string
-	requestPath   string
-	requestHost   string
-	requestPort   int
-	proxyHost     string
-	proxyPort     int
-	proxyUdsName  string
-	mode          string
-	userAgent     string
-	testRequests  int
-	testDelaySec  int
-	afterDelaySec int
-	closeIdleConn bool
+	clientCert              string
+	clientKey               string
+	caCert                  string
+	requestProto            string
+	requestPath             string
+	requestHost             string
+	requestPort             int
+	proxyHost               string
+	proxyPort               int
+	proxyUdsName            string
+	mode                    string
+	userAgent               string
+	testRequests            int
+	testDelaySec            int
+	afterDelaySec           int
+	closeIdleConn           bool
+	enableHTTP2HealthChecks bool
 }
 
 func (o *GrpcProxyClientOptions) Flags() *pflag.FlagSet {
@@ -101,6 +104,7 @@ func (o *GrpcProxyClientOptions) Flags() *pflag.FlagSet {
 	flags.IntVar(&o.testDelaySec, "test-delay", o.testDelaySec, "The delay in seconds between sending requests.")
 	flags.IntVar(&o.afterDelaySec, "after-delay", o.afterDelaySec, "The delay in seconds after sending requests.")
 	flags.BoolVar(&o.closeIdleConn, "close-idle-conn", o.closeIdleConn, "Controls if the client calls closeIdleConnections.")
+	flags.BoolVar(&o.enableHTTP2HealthChecks, "enable-http2-healthchecks", o.enableHTTP2HealthChecks, "enables health checks on http2 connections made by the client.")
 
 	return flags
 }
@@ -185,22 +189,23 @@ func (o *GrpcProxyClientOptions) Validate() error {
 
 func newGrpcProxyClientOptions() *GrpcProxyClientOptions {
 	o := GrpcProxyClientOptions{
-		clientCert:    "",
-		clientKey:     "",
-		caCert:        "",
-		requestProto:  "http",
-		requestPath:   "success",
-		requestHost:   "localhost",
-		requestPort:   8000,
-		proxyHost:     "localhost",
-		proxyPort:     8090,
-		proxyUdsName:  "",
-		mode:          "grpc",
-		userAgent:     "test-client",
-		testRequests:  1,
-		testDelaySec:  0,
-		afterDelaySec: 0,
-		closeIdleConn: true,
+		clientCert:              "",
+		clientKey:               "",
+		caCert:                  "",
+		requestProto:            "http",
+		requestPath:             "success",
+		requestHost:             "localhost",
+		requestPort:             8000,
+		proxyHost:               "localhost",
+		proxyPort:               8090,
+		proxyUdsName:            "",
+		mode:                    "grpc",
+		userAgent:               "test-client",
+		testRequests:            1,
+		testDelaySec:            0,
+		afterDelaySec:           0,
+		closeIdleConn:           true,
+		enableHTTP2HealthChecks: true,
 	}
 	return &o
 }
@@ -259,6 +264,12 @@ func (c *Client) run(o *GrpcProxyClientOptions) error {
 			transport := &http.Transport{
 				DialContext: dialer,
 			}
+			if o.enableHTTP2HealthChecks {
+				err = configureHTTP2Transport(transport)
+				if err != nil {
+					klog.V(1).Error(err, "error initializing HTTP2 health checking parameters. Using default transport.")
+				}
+			}
 			client := &http.Client{
 				Transport: transport,
 			}
@@ -301,6 +312,54 @@ func (c *Client) run(o *GrpcProxyClientOptions) error {
 		return errs[0]
 	}
 
+	return nil
+}
+
+func readIdleTimeoutSeconds() int {
+	ret := 30
+	// User can set the readIdleTimeout to 0 to disable the HTTP/2
+	// connection health check.
+	if s := os.Getenv("HTTP2_READ_IDLE_TIMEOUT_SECONDS"); len(s) > 0 {
+		i, err := strconv.Atoi(s)
+		if err != nil {
+			klog.Warningf("Illegal HTTP2_READ_IDLE_TIMEOUT_SECONDS(%q): %v."+
+				" Default value %d is used", s, err, ret)
+			return ret
+		}
+		ret = i
+	}
+	return ret
+}
+
+func pingTimeoutSeconds() int {
+	ret := 15
+	if s := os.Getenv("HTTP2_PING_TIMEOUT_SECONDS"); len(s) > 0 {
+		i, err := strconv.Atoi(s)
+		if err != nil {
+			klog.Warningf("Illegal HTTP2_PING_TIMEOUT_SECONDS(%q): %v."+
+				" Default value %d is used", s, err, ret)
+			return ret
+		}
+		ret = i
+	}
+	return ret
+}
+
+func configureHTTP2Transport(t *http.Transport) error {
+	t2, err := http2.ConfigureTransports(t)
+	if err != nil {
+		return err
+	}
+	// The following enables the HTTP/2 connection health check added in
+	// https://github.com/golang/net/pull/55. The health check detects and
+	// closes broken transport layer connections. Without the health check,
+	// a broken connection can linger too long, e.g., a broken TCP
+	// connection will be closed by the Linux kernel after 13 to 30 minutes
+	// by default, which caused
+	// https://github.com/kubernetes/client-go/issues/374 and
+	// https://github.com/kubernetes/kubernetes/issues/87615.
+	t2.ReadIdleTimeout = time.Duration(readIdleTimeoutSeconds()) * time.Second
+	t2.PingTimeout = time.Duration(pingTimeoutSeconds()) * time.Second
 	return nil
 }
 
