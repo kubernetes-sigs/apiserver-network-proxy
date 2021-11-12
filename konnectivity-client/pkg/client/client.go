@@ -115,6 +115,7 @@ func (t *grpcTunnel) serve(c clientConn) {
 
 			if !ok {
 				klog.V(1).InfoS("DialResp not recognized; dropped", "connectionID", resp.ConnectID, "dialID", resp.Random)
+				return
 			} else {
 				result := dialResult{
 					err:    resp.Error,
