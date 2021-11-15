@@ -41,5 +41,6 @@ Creating a new release of network proxy involves releasing a new version of the 
 
     ```
     ./hack/pin-dependency.sh sigs.k8s.io/apiserver-network-proxy/konnectivity-client v0.0.15
+    make clean generated_files
     ./hack/update-vendor.sh
     ```
