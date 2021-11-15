@@ -220,6 +220,7 @@ func (a *Client) Connect() (int, error) {
 	if err != nil {
 		return 0, err
 	}
+
 	ctx := metadata.AppendToOutgoingContext(context.Background(),
 		header.AgentID, a.agentID,
 		header.AgentIdentifiers, a.agentIdentifiers)
@@ -237,12 +238,17 @@ func (a *Client) Connect() (int, error) {
 		conn.Close() /* #nosec G104 */
 		return 0, err
 	}
-	serverID, err := serverID(stream)
+	md, err := getAndValidateStreamHeader(stream)
 	if err != nil {
 		conn.Close() /* #nosec G104 */
 		return 0, err
 	}
-	serverCount, err := serverCount(stream)
+	serverID, err := serverID(md)
+	if err != nil {
+		conn.Close() /* #nosec G104 */
+		return 0, err
+	}
+	serverCount, err := serverCount(md)
 	if err != nil {
 		conn.Close() /* #nosec G104 */
 		return 0, err
@@ -289,11 +295,19 @@ func (a *Client) Recv() (*client.Packet, error) {
 	return pkt, err
 }
 
-func serverCount(stream agent.AgentService_ConnectClient) (int, error) {
+func getAndValidateStreamHeader(stream agent.AgentService_ConnectClient) (metadata.MD, error) {
+	// TODO: this is a blocking call. Add a timeout?
 	md, err := stream.Header()
 	if err != nil {
-		return 0, err
+		return nil, err
 	}
+	if authenticationErrors := md.Get(header.AuthenticationError); len(authenticationErrors) != 0 {
+		return nil, fmt.Errorf("authentication failed, error: %s", authenticationErrors[0])
+	}
+	return md, nil
+}
+
+func serverCount(md metadata.MD) (int, error) {
 	scounts := md.Get(header.ServerCount)
 	if len(scounts) != 1 {
 		return 0, fmt.Errorf("expected one server count, got %d", len(scounts))
@@ -302,12 +316,7 @@ func serverCount(stream agent.AgentService_ConnectClient) (int, error) {
 	return strconv.Atoi(scount)
 }
 
-func serverID(stream agent.AgentService_ConnectClient) (string, error) {
-	// TODO: this is a blocking call. Add a timeout?
-	md, err := stream.Header()
-	if err != nil {
-		return "", err
-	}
+func serverID(md metadata.MD) (string, error) {
 	sids := md.Get(header.ServerID)
 	if len(sids) != 1 {
 		return "", fmt.Errorf("expected one server ID in the context, got %v", sids)
@@ -502,7 +511,7 @@ func (a *Client) remoteToProxy(connID int64, ctx *connContext) {
 			return
 		} else if err != nil {
 			// Normal when receive a CLOSE_REQ
-			klog.ErrorS(err, "connection read failure", "connectionID", connID)
+			klog.V(3).InfoS("connection read failure", "connectionID", connID, "err", err)
 			return
 		} else {
 			resp.Payload = &client.Packet_Data{Data: &client.Data{

@@ -25,6 +25,9 @@ const (
 	// (https://tools.ietf.org/html/rfc6750#section-2.1)
 	AuthenticationTokenContextKey = "Authorization"
 
+	// AuthenticationError provides token authentication failure error message to client
+	AuthenticationError = "AuthenticationError"
+
 	// AuthenticationTokenContextSchemePrefix has a prefix for auth token's content.
 	// (https://tools.ietf.org/html/rfc6750#section-2.1)
 	AuthenticationTokenContextSchemePrefix = "Bearer "
