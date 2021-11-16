@@ -231,8 +231,10 @@ docker-push/http-test-server: docker-build/http-test-server
 ## Docker — All ARCH
 ## --------------------------------------
 
+# As `docker buildx` is time and resource consuming, if not necessary, building specific arch images,
+# like `make docker-build-arch-aamd64`, is recommended.
 .PHONY: docker-build-all
-docker-build-all: $(addprefix docker-build/proxy-agent-,$(ALL_ARCH)) $(addprefix docker-build/proxy-server-,$(ALL_ARCH)) $(addprefix docker-build/proxy-test-client-,$(ALL_ARCH)) $(addprefix docker-build/http-test-server-,$(ALL_ARCH))
+docker-build-all: $(addprefix docker-build-arch-,$(ALL_ARCH))
 
 .PHONY: docker-push-all
 docker-push-all: $(addprefix docker-push/proxy-agent-,$(ALL_ARCH)) $(addprefix docker-push/proxy-server-,$(ALL_ARCH)) $(addprefix docker-push/proxy-test-client-,$(ALL_ARCH)) $(addprefix docker-push/http-test-server-,$(ALL_ARCH))
@@ -240,6 +242,12 @@ docker-push-all: $(addprefix docker-push/proxy-agent-,$(ALL_ARCH)) $(addprefix d
 	$(MAKE) docker-push-manifest/proxy-server
 	$(MAKE) docker-push-manifest/proxy-test-client
 	$(MAKE) docker-push-manifest/http-test-server
+
+docker-build-arch-%:
+	$(MAKE) docker-build/proxy-agent-$*
+	$(MAKE) docker-build/proxy-server-$*
+	$(MAKE) docker-build/proxy-test-client-$*
+	$(MAKE) docker-build/http-test-server-$*
 
 docker-build/proxy-agent-%:
 	$(MAKE) ARCH=$* docker-build/proxy-agent
