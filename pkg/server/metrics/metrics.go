@@ -99,7 +99,10 @@ func newServerMetrics() *ServerMetrics {
 			Name:      "ready_backend_connections",
 			Help:      "Number of konnectivity agent connected to the proxy server",
 		},
-		[]string{},
+		[]string{
+			"manager",
+			"idType",
+		},
 	)
 	pendingDials := prometheus.NewGaugeVec(
 		prometheus.GaugeOpts{
@@ -160,8 +163,8 @@ func (a *ServerMetrics) HTTPConnectionInc() { a.httpConnections.Inc() }
 func (a *ServerMetrics) HTTPConnectionDec() { a.httpConnections.Dec() }
 
 // SetBackendCount sets the number of backend connection.
-func (a *ServerMetrics) SetBackendCount(count int) {
-	a.backend.WithLabelValues().Set(float64(count))
+func (a *ServerMetrics) SetBackendCount(managerName string, idType string, count int) {
+	a.backend.WithLabelValues(managerName, idType).Set(float64(count))
 }
 
 // SetPendingDialCount sets the number of pending dials.

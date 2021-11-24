@@ -20,7 +20,7 @@ import (
 	"context"
 
 	"k8s.io/klog/v2"
-	"sigs.k8s.io/apiserver-network-proxy/pkg/agent"
+	pkgagent "sigs.k8s.io/apiserver-network-proxy/pkg/agent"
 )
 
 type DefaultRouteBackendManager struct {
@@ -32,20 +32,21 @@ var _ BackendManager = &DefaultRouteBackendManager{}
 func NewDefaultRouteBackendManager() *DefaultRouteBackendManager {
 	return &DefaultRouteBackendManager{
 		DefaultBackendStorage: NewDefaultBackendStorage(
-			[]agent.IdentifierType{agent.DefaultRoute})}
+			[]pkgagent.IdentifierType{pkgagent.DefaultRoute},
+			"DefaultRouteBackendManager")}
 }
 
 // Backend tries to get a backend associating to the request destination host.
-func (dibm *DefaultRouteBackendManager) Backend(ctx context.Context) (Backend, error) {
-	dibm.mu.RLock()
-	defer dibm.mu.RUnlock()
-	if len(dibm.backends) == 0 {
+func (drbm *DefaultRouteBackendManager) Backend(ctx context.Context) (Backend, error) {
+	drbm.mu.RLock()
+	defer drbm.mu.RUnlock()
+	if len(drbm.backends) == 0 {
 		return nil, &ErrNotFound{}
 	}
-	if len(dibm.defaultRouteAgentIDs) == 0 {
+	if len(drbm.defaultRouteAgentIDs) == 0 {
 		return nil, &ErrNotFound{}
 	}
-	agentID := dibm.defaultRouteAgentIDs[dibm.random.Intn(len(dibm.defaultRouteAgentIDs))]
+	agentID := drbm.defaultRouteAgentIDs[drbm.random.Intn(len(drbm.defaultRouteAgentIDs))]
 	klog.V(4).InfoS("Picked agent as backend", "agentID", agentID)
-	return dibm.backends[agentID][0], nil
+	return drbm.backends[agentID][0], nil
 }

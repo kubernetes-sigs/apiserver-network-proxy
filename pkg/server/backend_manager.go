@@ -25,7 +25,7 @@ import (
 	"time"
 
 	"k8s.io/klog/v2"
-	client "sigs.k8s.io/apiserver-network-proxy/konnectivity-client/proto/client"
+	"sigs.k8s.io/apiserver-network-proxy/konnectivity-client/proto/client"
 	pkgagent "sigs.k8s.io/apiserver-network-proxy/pkg/agent"
 	"sigs.k8s.io/apiserver-network-proxy/pkg/server/metrics"
 	"sigs.k8s.io/apiserver-network-proxy/proto/agent"
@@ -155,21 +155,25 @@ type DefaultBackendStorage struct {
 	// e.g., when associating to the DestHostBackendManager, it can only use the
 	// identifiers of types, IPv4, IPv6 and Host.
 	idTypes []pkgagent.IdentifierType
+	// managerName defines this storage belongs to what kind of backend manager.
+	// It is used to record some metrics.
+	managerName string
 }
 
 // NewDefaultBackendManager returns a DefaultBackendManager.
 func NewDefaultBackendManager() *DefaultBackendManager {
 	return &DefaultBackendManager{
 		DefaultBackendStorage: NewDefaultBackendStorage(
-			[]pkgagent.IdentifierType{pkgagent.UID})}
+			[]pkgagent.IdentifierType{pkgagent.UID}, "DefaultBackendManager")}
 }
 
 // NewDefaultBackendStorage returns a DefaultBackendStorage
-func NewDefaultBackendStorage(idTypes []pkgagent.IdentifierType) *DefaultBackendStorage {
+func NewDefaultBackendStorage(idTypes []pkgagent.IdentifierType, managerName string) *DefaultBackendStorage {
 	return &DefaultBackendStorage{
-		backends: make(map[string][]*backend),
-		random:   rand.New(rand.NewSource(time.Now().UnixNano())),
-		idTypes:  idTypes,
+		backends:    make(map[string][]*backend),
+		random:      rand.New(rand.NewSource(time.Now().UnixNano())),
+		idTypes:     idTypes,
+		managerName: managerName,
 	} /* #nosec G404 */
 }
 
@@ -204,7 +208,7 @@ func (s *DefaultBackendStorage) AddBackend(identifier string, idType pkgagent.Id
 		return addedBackend
 	}
 	s.backends[identifier] = []*backend{addedBackend}
-	metrics.Metrics.SetBackendCount(len(s.backends))
+	metrics.Metrics.SetBackendCount(s.managerName, string(idType), len(s.backends[string(idType)]))
 	s.agentIDs = append(s.agentIDs, identifier)
 	if idType == pkgagent.DefaultRoute {
 		s.defaultRouteAgentIDs = append(s.defaultRouteAgentIDs, identifier)
@@ -257,7 +261,7 @@ func (s *DefaultBackendStorage) RemoveBackend(identifier string, idType pkgagent
 	if !found {
 		klog.V(1).InfoS("Could not find connection matching identifier to remove", "connection", conn, "identifier", identifier)
 	}
-	metrics.Metrics.SetBackendCount(len(s.backends))
+	metrics.Metrics.SetBackendCount(s.managerName, string(idType), len(s.backends[string(idType)]))
 }
 
 // NumBackends resturns the number of available backends
