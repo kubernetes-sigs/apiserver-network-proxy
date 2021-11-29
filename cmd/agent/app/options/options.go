@@ -53,6 +53,8 @@ type GrpcProxyAgentOptions struct {
 	// blocking call has its own problems, so it cannot easily be made race condition safe.
 	// The check is an "unlocked" read but is still use at your own peril.
 	WarnOnChannelLimit bool
+
+	SyncForever bool
 }
 
 func (o *GrpcProxyAgentOptions) ClientSetConfig(dialOptions ...grpc.DialOption) *agent.ClientSetConfig {
@@ -66,6 +68,7 @@ func (o *GrpcProxyAgentOptions) ClientSetConfig(dialOptions ...grpc.DialOption) 
 		DialOptions:             dialOptions,
 		ServiceAccountTokenPath: o.ServiceAccountTokenPath,
 		WarnOnChannelLimit:      o.WarnOnChannelLimit,
+		SyncForever:             o.SyncForever,
 	}
 }
 
@@ -89,6 +92,7 @@ func (o *GrpcProxyAgentOptions) Flags() *pflag.FlagSet {
 	flags.StringVar(&o.ServiceAccountTokenPath, "service-account-token-path", o.ServiceAccountTokenPath, "If non-empty proxy agent uses this token to prove its identity to the proxy server.")
 	flags.StringVar(&o.AgentIdentifiers, "agent-identifiers", o.AgentIdentifiers, "Identifiers of the agent that will be used by the server when choosing agent. N.B. the list of identifiers must be in URL encoded format. e.g.,host=localhost&host=node1.mydomain.com&cidr=127.0.0.1/16&ipv4=1.2.3.4&ipv4=5.6.7.8&ipv6=:::::&default-route=true")
 	flags.BoolVar(&o.WarnOnChannelLimit, "warn-on-channel-limit", o.WarnOnChannelLimit, "Turns on a warning if the system is going to push to a full channel. The check involves an unsafe read.")
+	flags.BoolVar(&o.SyncForever, "sync-forever", o.SyncForever, "If true, the agent continues syncing, in order to support server count changes.")
 	return flags
 }
 
@@ -111,6 +115,7 @@ func (o *GrpcProxyAgentOptions) Print() {
 	klog.V(1).Infof("ServiceAccountTokenPath set to %q.\n", o.ServiceAccountTokenPath)
 	klog.V(1).Infof("AgentIdentifiers set to %s.\n", util.PrettyPrintURL(o.AgentIdentifiers))
 	klog.V(1).Infof("WarnOnChannelLimit set to %t.\n", o.WarnOnChannelLimit)
+	klog.V(1).Infof("SyncForever set to %v.\n", o.SyncForever)
 }
 
 func (o *GrpcProxyAgentOptions) Validate() error {
@@ -199,6 +204,7 @@ func NewGrpcProxyAgentOptions() *GrpcProxyAgentOptions {
 		KeepaliveTime:             1 * time.Hour,
 		ServiceAccountTokenPath:   "",
 		WarnOnChannelLimit:        false,
+		SyncForever:               false,
 	}
 	return &o
 }

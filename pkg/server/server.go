@@ -464,10 +464,10 @@ func (s *ProxyServer) serveRecvFrontend(stream client.ProxyService_ProxyServer, 
 
 		case client.PacketType_DIAL_CLS:
 			random := pkt.GetCloseDial().Random
-			klog.V(5).InfoS("Received DIAL_CLOSE", "serverID", s.serverID, "random", random)
+			klog.V(5).InfoS("Received DIAL_CLOSE", "serverID", s.serverID, "dialID", random)
 			// Currently not worrying about backend as we do not have an established connection,
 			s.PendingDial.Remove(random)
-			klog.V(5).Infoln("Removing pending dial request", "serverID", s.serverID, "random", random)
+			klog.V(5).Infoln("Removing pending dial request", "serverID", s.serverID, "dialID", random)
 
 		case client.PacketType_DATA:
 			connID := pkt.GetData().ConnectID
@@ -711,21 +711,21 @@ func (s *ProxyServer) serveRecvBackend(backend Backend, stream agent.AgentServic
 		switch pkt.Type {
 		case client.PacketType_DIAL_RSP:
 			resp := pkt.GetDialResponse()
-			klog.V(5).InfoS("Received DIAL_RSP", "random", resp.Random, "agentID", agentID, "connectionID", resp.ConnectID)
+			klog.V(5).InfoS("Received DIAL_RSP", "dialID", resp.Random, "agentID", agentID, "connectionID", resp.ConnectID)
 
 			if frontend, ok := s.PendingDial.Get(resp.Random); !ok {
-				klog.V(2).Infoln("DIAL_RSP not recognized; dropped", "random", resp.Random, "agentID", agentID, "connectionID", resp.ConnectID)
+				klog.V(2).Infoln("DIAL_RSP not recognized; dropped", "dialID", resp.Random, "agentID", agentID, "connectionID", resp.ConnectID)
 			} else {
 				dialErr := false
 				if resp.Error != "" {
-					klog.ErrorS(errors.New(resp.Error), "DIAL_RSP contains failure", "random", resp.Random, "agentID", agentID, "connectionID", resp.ConnectID)
+					klog.ErrorS(errors.New(resp.Error), "DIAL_RSP contains failure", "dialID", resp.Random, "agentID", agentID, "connectionID", resp.ConnectID)
 					dialErr = true
 				}
 				err := frontend.send(pkt)
 				s.PendingDial.Remove(resp.Random)
 				if err != nil {
 					klog.ErrorS(err, "DIAL_RSP send to frontend stream failure",
-						"random", resp.Random, "serverID", s.serverID, "agentID", agentID, "connectionID", resp.ConnectID)
+						"dialID", resp.Random, "serverID", s.serverID, "agentID", agentID, "connectionID", resp.ConnectID)
 					dialErr = true
 				}
 				// Avoid adding the frontend if there was an error dialing the destination
