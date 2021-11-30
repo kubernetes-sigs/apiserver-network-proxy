@@ -14,6 +14,8 @@
 
 ARCH ?= amd64
 ALL_ARCH = amd64 arm arm64 ppc64le s390x
+# The output type could either be docker (local), or registry.
+OUTPUT_TYPE ?= docker
 
 ifeq ($(GOPATH),)
 export GOPATH := $(shell go env GOPATH)
@@ -171,6 +173,10 @@ certs: easy-rsa cfssl cfssljson
 ## Docker
 ## --------------------------------------
 
+.PHONY: buildx-setup
+buildx-setup:
+	${DOCKER_CMD} buildx inspect img-builder > /dev/null || docker buildx create --name img-builder --use
+
 .PHONY: docker-build
 docker-build: docker-build/proxy-agent docker-build/proxy-server docker-build/proxy-test-client docker-build/http-test-server
 
@@ -178,10 +184,10 @@ docker-build: docker-build/proxy-agent docker-build/proxy-server docker-build/pr
 docker-push: docker-push/proxy-agent docker-push/proxy-server docker-push/proxy-test-client docker-push/http-test-server
 
 .PHONY: docker-build/proxy-agent
-docker-build/proxy-agent: cmd/agent/main.go proto/agent/agent.pb.go
+docker-build/proxy-agent: cmd/agent/main.go proto/agent/agent.pb.go buildx-setup
 	@[ "${TAG}" ] || ( echo "TAG is not set"; exit 1 )
 	echo "Building proxy-agent for ${ARCH}"
-	${DOCKER_CMD} build . --build-arg ARCH=$(ARCH) -f artifacts/images/agent-build.Dockerfile -t ${AGENT_FULL_IMAGE}-$(ARCH):${TAG}
+	${DOCKER_CMD} buildx build . --pull --output=type=$(OUTPUT_TYPE) --platform linux/$(ARCH) --build-arg ARCH=$(ARCH) -f artifacts/images/agent-build.Dockerfile -t ${AGENT_FULL_IMAGE}-$(ARCH):${TAG}
 
 .PHONY: docker-push/proxy-agent
 docker-push/proxy-agent: docker-build/proxy-agent
@@ -189,10 +195,10 @@ docker-push/proxy-agent: docker-build/proxy-agent
 	${DOCKER_CMD} push ${AGENT_FULL_IMAGE}-$(ARCH):${TAG}
 
 .PHONY: docker-build/proxy-server
-docker-build/proxy-server: cmd/server/main.go proto/agent/agent.pb.go
+docker-build/proxy-server: cmd/server/main.go proto/agent/agent.pb.go buildx-setup
 	@[ "${TAG}" ] || ( echo "TAG is not set"; exit 1 )
 	echo "Building proxy-server for ${ARCH}"
-	${DOCKER_CMD} build . --build-arg ARCH=$(ARCH) -f artifacts/images/server-build.Dockerfile -t ${SERVER_FULL_IMAGE}-$(ARCH):${TAG}
+	${DOCKER_CMD} buildx build . --pull --output=type=$(OUTPUT_TYPE) --platform linux/$(ARCH) --build-arg ARCH=$(ARCH) -f artifacts/images/server-build.Dockerfile -t ${SERVER_FULL_IMAGE}-$(ARCH):${TAG}
 
 .PHONY: docker-push/proxy-server
 docker-push/proxy-server: docker-build/proxy-server
@@ -200,10 +206,10 @@ docker-push/proxy-server: docker-build/proxy-server
 	${DOCKER_CMD} push ${SERVER_FULL_IMAGE}-$(ARCH):${TAG}
 
 .PHONY: docker-build/proxy-test-client
-docker-build/proxy-test-client: cmd/client/main.go proto/agent/agent.pb.go
+docker-build/proxy-test-client: cmd/client/main.go proto/agent/agent.pb.go buildx-setup
 	@[ "${TAG}" ] || ( echo "TAG is not set"; exit 1 )
 	echo "Building proxy-test-client for ${ARCH}"
-	${DOCKER_CMD} build . --build-arg ARCH=$(ARCH) -f artifacts/images/client-build.Dockerfile -t ${TEST_CLIENT_FULL_IMAGE}-$(ARCH):${TAG}
+	${DOCKER_CMD} buildx build . --pull --output=type=$(OUTPUT_TYPE) --platform linux/$(ARCH) --build-arg ARCH=$(ARCH) -f artifacts/images/client-build.Dockerfile -t ${TEST_CLIENT_FULL_IMAGE}-$(ARCH):${TAG}
 
 .PHONY: docker-push/proxy-test-client
 docker-push/proxy-test-client: docker-build/proxy-test-client
@@ -211,10 +217,10 @@ docker-push/proxy-test-client: docker-build/proxy-test-client
 	${DOCKER_CMD} push ${TEST_CLIENT_FULL_IMAGE}-$(ARCH):${TAG}
 
 .PHONY: docker-build/http-test-server
-docker-build/http-test-server: cmd/test-server/main.go
+docker-build/http-test-server: cmd/test-server/main.go buildx-setup
 	@[ "${TAG}" ] || ( echo "TAG is not set"; exit 1 )
 	echo "Building http-test-server for ${ARCH}"
-	${DOCKER_CMD} build . --build-arg ARCH=$(ARCH) -f artifacts/images/test-server-build.Dockerfile -t ${TEST_SERVER_FULL_IMAGE}-$(ARCH):${TAG}
+	${DOCKER_CMD} buildx build . --pull --output=type=$(OUTPUT_TYPE) --platform linux/$(ARCH) --build-arg ARCH=$(ARCH) -f artifacts/images/test-server-build.Dockerfile -t ${TEST_SERVER_FULL_IMAGE}-$(ARCH):${TAG}
 
 .PHONY: docker-push/http-test-server
 docker-push/http-test-server: docker-build/http-test-server
@@ -225,8 +231,10 @@ docker-push/http-test-server: docker-build/http-test-server
 ## Docker — All ARCH
 ## --------------------------------------
 
+# As `docker buildx` is time and resource consuming, if not necessary, building specific arch images,
+# like `make docker-build-arch-aamd64`, is recommended.
 .PHONY: docker-build-all
-docker-build-all: $(addprefix docker-build/proxy-agent-,$(ALL_ARCH)) $(addprefix docker-build/proxy-server-,$(ALL_ARCH)) $(addprefix docker-build/proxy-test-client-,$(ALL_ARCH)) $(addprefix docker-build/http-test-server-,$(ALL_ARCH))
+docker-build-all: $(addprefix docker-build-arch-,$(ALL_ARCH))
 
 .PHONY: docker-push-all
 docker-push-all: $(addprefix docker-push/proxy-agent-,$(ALL_ARCH)) $(addprefix docker-push/proxy-server-,$(ALL_ARCH)) $(addprefix docker-push/proxy-test-client-,$(ALL_ARCH)) $(addprefix docker-push/http-test-server-,$(ALL_ARCH))
@@ -234,6 +242,12 @@ docker-push-all: $(addprefix docker-push/proxy-agent-,$(ALL_ARCH)) $(addprefix d
 	$(MAKE) docker-push-manifest/proxy-server
 	$(MAKE) docker-push-manifest/proxy-test-client
 	$(MAKE) docker-push-manifest/http-test-server
+
+docker-build-arch-%:
+	$(MAKE) docker-build/proxy-agent-$*
+	$(MAKE) docker-build/proxy-server-$*
+	$(MAKE) docker-build/proxy-test-client-$*
+	$(MAKE) docker-build/http-test-server-$*
 
 docker-build/proxy-agent-%:
 	$(MAKE) ARCH=$* docker-build/proxy-agent
