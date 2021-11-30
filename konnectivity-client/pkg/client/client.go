@@ -209,7 +209,7 @@ func (t *grpcTunnel) DialContext(ctx context.Context, protocol, address string) 
 		return nil, err
 	}
 
-	klog.V(5).Infoln("DIAL_REQ sent to proxy server")
+	klog.V(5).InfoS("DIAL_REQ sent to proxy server")
 
 	c := &conn{stream: t.stream, random: random}
 

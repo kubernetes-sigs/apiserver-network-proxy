@@ -75,7 +75,7 @@ func (t *Tunnel) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		},
 	}
 
-	klog.V(4).Infof("Set pending(rand=%d) to %v", random, w)
+	klog.V(4).InfoS("Set pending", "rand", random, "to", w)
 	backend, err := t.Server.getBackend(r.Host)
 	if err != nil {
 		http.Error(w, fmt.Sprintf("currently no tunnels available: %v", err), http.StatusInternalServerError)
@@ -100,6 +100,8 @@ func (t *Tunnel) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		klog.ErrorS(err, "failed to tunnel dial request")
 		return
 	}
+	klog.V(5).InfoS("DIAL_REQ sent to backend")
+
 	ctxt := backend.Context()
 	if ctxt.Err() != nil {
 		klog.ErrorS(err, "context reports failure")
@@ -107,7 +109,7 @@ func (t *Tunnel) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	select {
 	case <-ctxt.Done():
-		klog.V(5).Infoln("context reports done")
+		klog.V(5).InfoS("context reports done")
 	default:
 	}
 

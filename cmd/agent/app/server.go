@@ -103,7 +103,7 @@ func (a *Agent) runHealthServer(o *options.GrpcProxyAgentOptions) error {
 		if err != nil {
 			klog.ErrorS(err, "health server could not listen")
 		}
-		klog.V(0).Infoln("Health server stopped listening")
+		klog.V(0).InfoS("Health server stopped listening")
 	}()
 
 	return nil
@@ -139,7 +139,7 @@ func (a *Agent) runAdminServer(o *options.GrpcProxyAgentOptions) error {
 		if err != nil {
 			klog.ErrorS(err, "admin server could not listen")
 		}
-		klog.V(0).Infoln("Admin server stopped listening")
+		klog.V(0).InfoS("Admin server stopped listening")
 	}()
 
 	return nil

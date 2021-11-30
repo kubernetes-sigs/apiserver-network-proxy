@@ -49,6 +49,7 @@ type connContext struct {
 	dataCh    chan []byte
 	cleanOnce sync.Once
 	warnChLim bool
+	dialDone  chan struct{}
 }
 
 func (c *connContext) cleanup() {
@@ -357,7 +358,7 @@ func (a *Client) Serve() {
 	for {
 		select {
 		case <-a.stopCh:
-			klog.V(2).Infoln("stop agent client.")
+			klog.V(2).InfoS("stop agent client.")
 			return
 		default:
 		}
@@ -365,7 +366,7 @@ func (a *Client) Serve() {
 		pkt, err := a.Recv()
 		if err != nil {
 			if err == io.EOF {
-				klog.V(2).Infoln("received EOF, exit")
+				klog.V(2).InfoS("received EOF, exit")
 				return
 			}
 			klog.ErrorS(err, "could not read stream")
@@ -375,70 +376,73 @@ func (a *Client) Serve() {
 		klog.V(5).InfoS("[tracing] recv packet", "type", pkt.Type)
 
 		if pkt == nil {
-			klog.V(3).Infoln("empty packet received")
+			klog.V(3).InfoS("empty packet received")
 			continue
 		}
 
 		switch pkt.Type {
 		case client.PacketType_DIAL_REQ:
-			klog.V(4).Infoln("received DIAL_REQ")
-			resp := &client.Packet{
+			klog.V(4).InfoS("received DIAL_REQ")
+			dialResp := &client.Packet{
 				Type:    client.PacketType_DIAL_RSP,
 				Payload: &client.Packet_DialResponse{DialResponse: &client.DialResponse{}},
 			}
 
 			dialReq := pkt.GetDialRequest()
-			resp.GetDialResponse().Random = dialReq.Random
-
-			start := time.Now()
-			conn, err := net.DialTimeout(dialReq.Protocol, dialReq.Address, dialTimeout)
-			if err != nil {
-				resp.GetDialResponse().Error = err.Error()
-				if err := a.Send(resp); err != nil {
-					klog.ErrorS(err, "could not send stream")
-				}
-				continue
-			}
-			metrics.Metrics.ObserveDialLatency(time.Since(start))
+			dialResp.GetDialResponse().Random = dialReq.Random
 
 			connID := atomic.AddInt64(&a.nextConnID, 1)
 			dataCh := make(chan []byte, xfrChannelSize)
+			dialDone := make(chan struct{})
 			ctx := &connContext{
-				conn:   conn,
-				connID: connID,
-				dataCh: dataCh,
-				cleanFunc: func() {
+				dataCh:    dataCh,
+				dialDone:  dialDone,
+				warnChLim: a.warnOnChannelLimit,
+			}
+			ctx.cleanFunc = func() {
+				// block on purpose
+				<-dialDone
+				if ctx.conn != nil {
 					klog.V(4).InfoS("close connection", "connectionID", connID)
-					resp := &client.Packet{
+					closeResp := &client.Packet{
 						Type:    client.PacketType_CLOSE_RSP,
 						Payload: &client.Packet_CloseResponse{CloseResponse: &client.CloseResponse{}},
 					}
-					resp.GetCloseResponse().ConnectID = connID
 
-					close(dataCh)
-					a.connManager.Delete(connID)
-
-					err := conn.Close()
+					closeResp.GetCloseResponse().ConnectID = connID
 					if err != nil {
-						resp.GetCloseResponse().Error = err.Error()
+						closeResp.GetCloseResponse().Error = err.Error()
 					}
-
-					if err := a.Send(resp); err != nil {
+					if err := a.Send(closeResp); err != nil {
 						klog.ErrorS(err, "close response failure")
 					}
-				},
-				warnChLim: a.warnOnChannelLimit,
+					close(dataCh)
+					a.connManager.Delete(connID)
+				}
 			}
 			a.connManager.Add(connID, ctx)
-
-			resp.GetDialResponse().ConnectID = connID
-			if err := a.Send(resp); err != nil {
-				klog.ErrorS(err, "stream send failure")
-				continue
-			}
-
-			go a.remoteToProxy(connID, ctx)
-			go a.proxyToRemote(connID, ctx)
+			go func() {
+				defer close(dialDone)
+				start := time.Now()
+				conn, err := net.DialTimeout(dialReq.Protocol, dialReq.Address, dialTimeout)
+				if err != nil {
+					a.connManager.Delete(connID)
+					dialResp.GetDialResponse().Error = err.Error()
+					if err := a.Send(dialResp); err != nil {
+						klog.ErrorS(err, "could not send stream")
+					}
+					return
+				}
+				metrics.Metrics.ObserveDialLatency(time.Since(start))
+				ctx.conn = conn
+				dialResp.GetDialResponse().ConnectID = connID
+				if err := a.Send(dialResp); err != nil {
+					klog.ErrorS(err, "stream send failure")
+					return
+				}
+				go a.remoteToProxy(connID, ctx)
+				go a.proxyToRemote(connID, ctx)
+			}()
 
 		case client.PacketType_DATA:
 			data := pkt.GetData()

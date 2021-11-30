@@ -102,7 +102,7 @@ func (p *Proxy) run(o *options.ProxyRunOptions) error {
 		KubernetesClient:       k8sClient,
 		AuthenticationAudience: o.AuthenticationAudience,
 	}
-	klog.V(1).Infoln("Starting frontend server for client connections.")
+	klog.V(1).InfoS("Starting frontend server for client connections.")
 	ps, err := server.GenProxyStrategiesFromStr(o.ProxyStrategies)
 	if err != nil {
 		return err
@@ -114,17 +114,17 @@ func (p *Proxy) run(o *options.ProxyRunOptions) error {
 		return fmt.Errorf("failed to run the frontend server: %v", err)
 	}
 
-	klog.V(1).Infoln("Starting agent server for tunnel connections.")
+	klog.V(1).InfoS("Starting agent server for tunnel connections.")
 	err = p.runAgentServer(o, server)
 	if err != nil {
 		return fmt.Errorf("failed to run the agent server: %v", err)
 	}
-	klog.V(1).Infoln("Starting admin server for debug connections.")
+	klog.V(1).InfoS("Starting admin server for debug connections.")
 	err = p.runAdminServer(o, server)
 	if err != nil {
 		return fmt.Errorf("failed to run the admin server: %v", err)
 	}
-	klog.V(1).Infoln("Starting health server for healthchecks.")
+	klog.V(1).InfoS("Starting health server for healthchecks.")
 	err = p.runHealthServer(o, server)
 	if err != nil {
 		return fmt.Errorf("failed to run the health server: %v", err)
@@ -132,7 +132,7 @@ func (p *Proxy) run(o *options.ProxyRunOptions) error {
 
 	stopCh := SetupSignalHandler()
 	<-stopCh
-	klog.V(1).Infoln("Shutting down server.")
+	klog.V(1).InfoS("Shutting down server.")
 
 	if frontendStop != nil {
 		frontendStop()
@@ -354,7 +354,7 @@ func (p *Proxy) runAdminServer(o *options.ProxyRunOptions, server *server.ProxyS
 		if err != nil {
 			klog.ErrorS(err, "admin server could not listen")
 		}
-		klog.V(1).Infoln("Admin server stopped listening")
+		klog.V(1).InfoS("Admin server stopped listening")
 	}()
 
 	return nil
@@ -391,7 +391,7 @@ func (p *Proxy) runHealthServer(o *options.ProxyRunOptions, server *server.Proxy
 		if err != nil {
 			klog.ErrorS(err, "health server could not listen")
 		}
-		klog.V(1).Infoln("Health server stopped listening")
+		klog.V(1).InfoS("Health server stopped listening")
 	}()
 
 	return nil
