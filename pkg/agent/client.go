@@ -415,6 +415,9 @@ func (a *Client) Serve() {
 					}
 					resp.GetCloseResponse().ConnectID = connID
 
+					close(dataCh)
+					a.connManager.Delete(connID)
+
 					err := conn.Close()
 					if err != nil {
 						resp.GetCloseResponse().Error = err.Error()
@@ -423,9 +426,6 @@ func (a *Client) Serve() {
 					if err := a.Send(resp); err != nil {
 						klog.ErrorS(err, "close response failure")
 					}
-
-					close(dataCh)
-					a.connManager.Delete(connID)
 				},
 				warnChLim: a.warnOnChannelLimit,
 			}
