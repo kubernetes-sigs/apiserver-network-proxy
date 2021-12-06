@@ -41,6 +41,9 @@ type ProxyRunOptions struct {
 	// pings the client to see if the transport is still alive.
 	KeepaliveTime         time.Duration
 	FrontendKeepaliveTime time.Duration
+	// Time that a gRPC stream between frontend and the proxy-server can be inactive (no pkt received) before
+	// it is closed.
+	GrpcMaxIdleTime time.Duration
 	// Enables pprof at host:AdminPort/debug/pprof.
 	EnableProfiling bool
 	// If EnableProfiling is true, this enables the lock contention
@@ -117,6 +120,7 @@ func (o *ProxyRunOptions) Flags() *pflag.FlagSet {
 	flags.StringVar(&o.ProxyStrategies, "proxy-strategies", o.ProxyStrategies, "The list of proxy strategies used by the server to pick a backend/tunnel, available strategies are: default, destHost.")
 	flags.BoolVar(&o.WarnOnChannelLimit, "warn-on-channel-limit", o.WarnOnChannelLimit, "Turns on a warning if the system is going to push to a full channel. The check involves an unsafe read.")
 	flags.StringVar(&o.CipherSuites, "cipher-suites", o.CipherSuites, "The comma separated list of allowed cipher suites. Has no effect on TLS1.3. Empty means allow default list.")
+	flags.DurationVar(&o.GrpcMaxIdleTime, "grpc-max-idle-time", o.GrpcMaxIdleTime, "Time that a gRPC connection can be inactive (no pkt received) before it is closed.")
 	return flags
 }
 
@@ -136,6 +140,7 @@ func (o *ProxyRunOptions) Print() {
 	klog.V(1).Infof("Health port set to %d.\n", o.HealthPort)
 	klog.V(1).Infof("Keepalive time set to %v.\n", o.KeepaliveTime)
 	klog.V(1).Infof("Frontend keepalive time set to %v.\n", o.FrontendKeepaliveTime)
+	klog.V(1).Infof("gRPC maxIdleTime time set to %v.\n", o.GrpcMaxIdleTime)
 	klog.V(1).Infof("EnableProfiling set to %v.\n", o.EnableProfiling)
 	klog.V(1).Infof("EnableContentionProfiling set to %v.\n", o.EnableContentionProfiling)
 	klog.V(1).Infof("ServerID set to %s.\n", o.ServerID)

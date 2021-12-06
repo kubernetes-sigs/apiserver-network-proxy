@@ -145,6 +145,9 @@ type ProxyServer struct {
 	AgentAuthenticationOptions *AgentTokenAuthenticationOptions
 
 	proxyStrategies []ProxyStrategy
+
+	// Klls inactive (no app payload) Proxy connections after this duration.
+	grpcMaxIdleTime time.Duration
 }
 
 // AgentTokenAuthenticationOptions contains list of parameters required for agent token based authentication
@@ -326,7 +329,7 @@ func (s *ProxyServer) getFrontendsForBackendConn(agentID string, backend Backend
 }
 
 // NewProxyServer creates a new ProxyServer instance
-func NewProxyServer(serverID string, proxyStrategies []ProxyStrategy, serverCount int, agentAuthenticationOptions *AgentTokenAuthenticationOptions, warnOnChannelLimit bool) *ProxyServer {
+func NewProxyServer(serverID string, proxyStrategies []ProxyStrategy, serverCount int, agentAuthenticationOptions *AgentTokenAuthenticationOptions, warnOnChannelLimit bool, grpcMaxIdleTime time.Duration) *ProxyServer {
 	var bms []BackendManager
 	for _, ps := range proxyStrategies {
 		switch ps {
@@ -352,6 +355,7 @@ func NewProxyServer(serverID string, proxyStrategies []ProxyStrategy, serverCoun
 		Readiness:          bms[0],
 		proxyStrategies:    proxyStrategies,
 		warnOnChannelLimit: warnOnChannelLimit,
+		grpcMaxIdleTime:    grpcMaxIdleTime,
 	}
 }
 
