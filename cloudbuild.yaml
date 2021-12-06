@@ -10,6 +10,9 @@ steps:
     - DOCKER_CLI_EXPERIMENTAL=enabled
     args:
     - release-staging
+    # default cloudbuild has HOME=/builder/home and docker buildx is in /root/.docker/cli-plugins/docker-buildx
+    # set the home to /root explicitly to if using docker buildx
+    - HOME=/root
 substitutions:
   # _GIT_TAG will be filled with a git-based tag for the image, of the form vYYYYMMDD-hash, and
   # can be used as a substitution
