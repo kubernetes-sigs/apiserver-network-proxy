@@ -179,10 +179,10 @@ buildx-setup:
 	${DOCKER_CMD} buildx inspect img-builder > /dev/null || docker buildx create --name img-builder --use
 
 .PHONY: docker-build
-docker-build: docker-build/proxy-agent docker-build/proxy-server docker-build/proxy-test-client docker-build/http-test-server
+docker-build: docker-build/proxy-agent docker-build/proxy-server
 
 .PHONY: docker-push
-docker-push: docker-push/proxy-agent docker-push/proxy-server docker-push/proxy-test-client docker-push/http-test-server
+docker-push: docker-push/proxy-agent docker-push/proxy-server
 
 .PHONY: docker-build/proxy-agent
 docker-build/proxy-agent: cmd/agent/main.go proto/agent/agent.pb.go buildx-setup
@@ -206,28 +206,6 @@ docker-push/proxy-server: docker-build/proxy-server
 	@[ "${DOCKER_CMD}" ] || ( echo "DOCKER_CMD is not set"; exit 1 )
 	${DOCKER_CMD} push ${SERVER_FULL_IMAGE}-$(ARCH):${TAG}
 
-.PHONY: docker-build/proxy-test-client
-docker-build/proxy-test-client: cmd/client/main.go proto/agent/agent.pb.go buildx-setup
-	@[ "${TAG}" ] || ( echo "TAG is not set"; exit 1 )
-	echo "Building proxy-test-client for ${ARCH}"
-	${DOCKER_CMD} buildx build . --pull --output=type=$(OUTPUT_TYPE) --platform linux/$(ARCH) --build-arg ARCH=$(ARCH) -f artifacts/images/client-build.Dockerfile -t ${TEST_CLIENT_FULL_IMAGE}-$(ARCH):${TAG}
-
-.PHONY: docker-push/proxy-test-client
-docker-push/proxy-test-client: docker-build/proxy-test-client
-	@[ "${DOCKER_CMD}" ] || ( echo "DOCKER_CMD is not set"; exit 1 )
-	${DOCKER_CMD} push ${TEST_CLIENT_FULL_IMAGE}-$(ARCH):${TAG}
-
-.PHONY: docker-build/http-test-server
-docker-build/http-test-server: cmd/test-server/main.go buildx-setup
-	@[ "${TAG}" ] || ( echo "TAG is not set"; exit 1 )
-	echo "Building http-test-server for ${ARCH}"
-	${DOCKER_CMD} buildx build . --pull --output=type=$(OUTPUT_TYPE) --platform linux/$(ARCH) --build-arg ARCH=$(ARCH) -f artifacts/images/test-server-build.Dockerfile -t ${TEST_SERVER_FULL_IMAGE}-$(ARCH):${TAG}
-
-.PHONY: docker-push/http-test-server
-docker-push/http-test-server: docker-build/http-test-server
-	@[ "${DOCKER_CMD}" ] || ( echo "DOCKER_CMD is not set"; exit 1 )
-	${DOCKER_CMD} push ${TEST_SERVER_FULL_IMAGE}-$(ARCH):${TAG}
-
 ## --------------------------------------
 ## Docker — All ARCH
 ## --------------------------------------
@@ -238,17 +216,13 @@ docker-push/http-test-server: docker-build/http-test-server
 docker-build-all: $(addprefix docker-build-arch-,$(ARCH_LIST))
 
 .PHONY: docker-push-all
-docker-push-all: $(addprefix docker-push/proxy-agent-,$(ARCH_LIST)) $(addprefix docker-push/proxy-server-,$(ARCH_LIST)) $(addprefix docker-push/proxy-test-client-,$(ARCH_LIST)) $(addprefix docker-push/http-test-server-,$(ARCH_LIST))
+docker-push-all: $(addprefix docker-push/proxy-agent-,$(ARCH_LIST)) $(addprefix docker-push/proxy-server-,$(ARCH_LIST))
 	$(MAKE) docker-push-manifest/proxy-agent
 	$(MAKE) docker-push-manifest/proxy-server
-	$(MAKE) docker-push-manifest/proxy-test-client
-	$(MAKE) docker-push-manifest/http-test-server
 
 docker-build-arch-%:
 	$(MAKE) docker-build/proxy-agent-$*
 	$(MAKE) docker-build/proxy-server-$*
-	$(MAKE) docker-build/proxy-test-client-$*
-	$(MAKE) docker-build/http-test-server-$*
 
 docker-build/proxy-agent-%:
 	$(MAKE) ARCH=$* docker-build/proxy-agent
@@ -261,19 +235,6 @@ docker-build/proxy-server-%:
 
 docker-push/proxy-server-%:
 	$(MAKE) ARCH=$* docker-push/proxy-server
-
-docker-build/proxy-test-client-%:
-	$(MAKE) ARCH=$* docker-build/proxy-test-client
-
-docker-push/proxy-test-client-%:
-	$(MAKE) ARCH=$* docker-push/proxy-test-client
-
-docker-build/http-test-server-%:
-	$(MAKE) ARCH=$* docker-build/http-test-server
-
-docker-push/http-test-server-%:
-	$(MAKE) ARCH=$* docker-push/http-test-server
-
 
 .PHONY: docker-push-manifest/proxy-agent
 docker-push-manifest/proxy-agent: ## Push the fat manifest docker image.
@@ -288,20 +249,6 @@ docker-push-manifest/proxy-server: ## Push the fat manifest docker image.
 	${DOCKER_CMD} manifest create --amend $(SERVER_FULL_IMAGE):$(TAG) $(shell echo $(ARCH_LIST) | sed -e "s~[^ ]*~$(SERVER_FULL_IMAGE)\-&:$(TAG)~g")
 	@for arch in $(ARCH_LIST); do ${DOCKER_CMD} manifest annotate --arch $${arch} ${SERVER_FULL_IMAGE}:${TAG} ${SERVER_FULL_IMAGE}-$${arch}:${TAG}; done
 	${DOCKER_CMD} manifest push --purge $(SERVER_FULL_IMAGE):$(TAG)
-
-.PHONY: docker-push-manifest/proxy-test-client
-docker-push-manifest/proxy-test-client: ## Push the fat manifest docker image.
-	## Minimum docker version 18.06.0 is required for creating and pushing manifest images.
-	${DOCKER_CMD} manifest create --amend $(TEST_CLIENT_FULL_IMAGE):$(TAG) $(shell echo $(ARCH) | sed -e "s~[^ ]*~$(TEST_CLIENT_FULL_IMAGE)\-&:$(TAG)~g")
-	@for arch in $(ARCH_LIST); do ${DOCKER_CMD} manifest annotate --arch $${arch} ${TEST_CLIENT_FULL_IMAGE}:${TAG} ${TEST_CLIENT_FULL_IMAGE}-$${arch}:${TAG}; done
-	${DOCKER_CMD} manifest push --purge $(TEST_CLIENT_FULL_IMAGE):$(TAG)
-
-.PHONY: docker-push-manifest/http-test-server
-docker-push-manifest/http-test-server: ## Push the fat manifest docker image.
-	## Minimum docker version 18.06.0 is required for creating and pushing manifest images.
-	${DOCKER_CMD} manifest create --amend $(TEST_SERVER_FULL_IMAGE):$(TAG) $(shell echo $(ARCH_LIST) | sed -e "s~[^ ]*~$(TEST_SERVER_FULL_IMAGE)\-&:$(TAG)~g")
-	@for arch in $(ARCH_LIST); do ${DOCKER_CMD} manifest annotate --arch $${arch} ${TEST_SERVER_FULL_IMAGE}:${TAG} ${TEST_SERVER_FULL_IMAGE}-$${arch}:${TAG}; done
-	${DOCKER_CMD} manifest push --purge $(TEST_SERVER_FULL_IMAGE):$(TAG)
 
 ## --------------------------------------
 ## Release
