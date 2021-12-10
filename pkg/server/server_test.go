@@ -20,10 +20,13 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"math/rand"
 	"reflect"
 	"testing"
+	"time"
 
 	"github.com/golang/mock/gomock"
+	"github.com/google/uuid"
 	"google.golang.org/grpc/metadata"
 
 	authv1 "k8s.io/api/authentication/v1"
@@ -32,6 +35,7 @@ import (
 	fakeauthenticationv1 "k8s.io/client-go/kubernetes/typed/authentication/v1/fake"
 	k8stesting "k8s.io/client-go/testing"
 
+	client "sigs.k8s.io/apiserver-network-proxy/konnectivity-client/proto/client"
 	agentmock "sigs.k8s.io/apiserver-network-proxy/proto/agent/mocks"
 	"sigs.k8s.io/apiserver-network-proxy/proto/header"
 )
@@ -217,4 +221,73 @@ func TestAddRemoveFrontends(t *testing.T) {
 	if e, a := expectedFrontends, p.frontends; !reflect.DeepEqual(e, a) {
 		t.Errorf("expected %v, got %v", e, a)
 	}
+}
+
+func TestServerProxyNormalClose(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+
+	// prepare the connection to fontend  of proxy-server
+	frontendConn := agentmock.NewMockAgentService_ConnectServer(ctrl)
+	frontendConnMD := metadata.MD{
+		":authority":   []string{"127.0.0.1:8090"},
+		"content-type": []string{"application/grpc"},
+		"user-agent":   []string{"grpc-go/1.42.0"},
+	}
+	frontendConnCtx := metadata.NewIncomingContext(context.Background(), frontendConnMD)
+	frontendConn.EXPECT().Context().Return(frontendConnCtx).AnyTimes()
+
+	// prepare proxy server
+	proxyServer := NewProxyServer(uuid.New().String(), []ProxyStrategy{ProxyStrategyDefault}, 1, &AgentTokenAuthenticationOptions{}, true)
+
+	// prepare the the connection to agent of proxy-server
+	agentConn := agentmock.NewMockAgentService_ConnectServer(ctrl)
+	agentConnMD := metadata.MD{
+		":authority":       []string{"127.0.0.1:8091"},
+		"agentid":          []string{uuid.New().String()},
+		"agentidentifiers": []string{},
+		"content-type":     []string{"application/grpc"},
+		"user-agent":       []string{"grpc-go/1.42.0"},
+	}
+	agentConnCtx := metadata.NewIncomingContext(context.Background(), agentConnMD)
+	agentConn.EXPECT().Context().Return(agentConnCtx).AnyTimes()
+
+	_ = proxyServer.addBackend(uuid.New().String(), agentConn)
+
+	// receive DIAL_REQ from frontend and proxy to backend
+	randomId := rand.Int63()
+	dialReq := &client.Packet{
+		Type: client.PacketType_DIAL_REQ,
+		Payload: &client.Packet_DialRequest{
+			DialRequest: &client.DialRequest{
+				Protocol: "tcp",
+				Address:  "127.0.0.1:8080",
+				Random:   randomId,
+			},
+		},
+	}
+
+	// recevie CLOSE_REQ from frontend and proxy to backend
+	closeReq := &client.Packet{
+		Type: client.PacketType_CLOSE_REQ,
+		Payload: &client.Packet_CloseRequest{
+			CloseRequest: &client.CloseRequest{
+				ConnectID: 1,
+			}},
+	}
+
+	gomock.InOrder(
+		frontendConn.EXPECT().Recv().Return(dialReq, nil).Times(1),
+		frontendConn.EXPECT().Recv().Return(closeReq, nil).Times(1),
+		frontendConn.EXPECT().Recv().Return(nil, io.EOF).Times(1),
+	)
+	gomock.InOrder(
+		agentConn.EXPECT().Send(dialReq).Return(nil).Times(1),
+		agentConn.EXPECT().Send(closeReq).Return(nil).Times(1),
+	)
+
+	proxyServer.Proxy(frontendConn)
+
+	// add a sleep to make sure `serveRecvFrontend` ends after `Proxy` finished.
+	time.Sleep(1 * time.Second)
 }
