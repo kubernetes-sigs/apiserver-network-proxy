@@ -253,7 +253,7 @@ func prepareAgentConnMD(ctrl *gomock.Controller, proxyServer *ProxyServer) *agen
 	return agentConn
 }
 
-func baseTestWithoutBackend(t *testing.T, validate func(*agentmock.MockAgentService_ConnectServer)) {
+func baseServerProxyTestWithoutBackend(t *testing.T, validate func(*agentmock.MockAgentService_ConnectServer)) {
 	ctrl := gomock.NewController(t)
 	defer ctrl.Finish()
 
@@ -267,7 +267,8 @@ func baseTestWithoutBackend(t *testing.T, validate func(*agentmock.MockAgentServ
 	// add a sleep to make sure `serveRecvFrontend` ends after `Proxy` finished.
 	time.Sleep(1 * time.Second)
 }
-func baseTestWithBackend(t *testing.T, validate func(*agentmock.MockAgentService_ConnectServer, *agentmock.MockAgentService_ConnectServer)) {
+
+func baseServerProxyTestWithBackend(t *testing.T, validate func(*agentmock.MockAgentService_ConnectServer, *agentmock.MockAgentService_ConnectServer)) {
 	ctrl := gomock.NewController(t)
 	defer ctrl.Finish()
 
@@ -314,12 +315,12 @@ func TestServerProxyNoBackend(t *testing.T) {
 			frontendConn.EXPECT().Recv().Return(dialReq, nil).Times(1),
 			frontendConn.EXPECT().Recv().Return(nil, io.EOF).Times(1),
 			// NOTE(mainred): `Send` should come before `Recv` io.EOF, but we cannot add wait between
-			// two Recvs, Recv comes before `Send`
+			//                two Recvs, thus `Recv`` comes before `Send`
 			frontendConn.EXPECT().Send(dialResp).Return(nil).Times(1),
 		)
 
 	}
-	baseTestWithoutBackend(t, validate)
+	baseServerProxyTestWithoutBackend(t, validate)
 }
 
 func TestServerProxyNormalClose(t *testing.T) {
@@ -356,5 +357,5 @@ func TestServerProxyNormalClose(t *testing.T) {
 			agentConn.EXPECT().Send(closeReq).Return(nil).Times(1),
 		)
 	}
-	baseTestWithBackend(t, validate)
+	baseServerProxyTestWithBackend(t, validate)
 }
