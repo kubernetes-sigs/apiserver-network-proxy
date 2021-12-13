@@ -171,6 +171,9 @@ type Client struct {
 
 	cs *ClientSet // the clientset that includes this AgentClient.
 
+	serverChannel    chan *client.Packet
+	cleanChannel     sync.Once
+	serverError      error
 	stream           agent.AgentService_ConnectClient
 	agentID          string
 	agentIdentifiers string
@@ -249,9 +252,32 @@ func (a *Client) Connect() (int, error) {
 	}
 	a.conn = conn
 	a.stream = stream
+	a.serverChannel = make(chan *client.Packet, xfrChannelSize)
+	a.serverError = nil
 	a.serverID = serverID
+	go a.writeToKonnServer()
 	klog.V(2).InfoS("Connect to", "server", serverID)
 	return serverCount, nil
+}
+
+func (a *Client) writeToKonnServer() {
+	defer func() {
+		if panicInfo := recover(); panicInfo != nil {
+			klog.V(2).InfoS("Exiting writeToKonnServer with recovery", "panicInfo", panicInfo, "serverID", a.serverID)
+		} else {
+			klog.V(2).InfoS("Exiting writeToKonnServer", "serverID", a.serverID)
+		}
+	}()
+
+	for pkt := range a.serverChannel {
+		klog.V(5).InfoS("writeToKonnServer recevied packet to send to KonnServer", "serverID", a.serverID)
+		err := a.stream.Send(pkt)
+		if err != nil && err != io.EOF {
+			metrics.Metrics.ObserveFailure(metrics.DirectionToServer)
+			a.cs.RemoveClient(a.serverID)
+			a.serverError = err
+		}
+	}
 }
 
 // Close closes the underlying connection.
@@ -270,12 +296,28 @@ func (a *Client) Send(pkt *client.Packet) error {
 	a.sendLock.Lock()
 	defer a.sendLock.Unlock()
 
-	err := a.stream.Send(pkt)
+	/*err := a.stream.Send(pkt)
 	if err != nil && err != io.EOF {
 		metrics.Metrics.ObserveFailure(metrics.DirectionToServer)
 		a.cs.RemoveClient(a.serverID)
+	}*/
+	if a.serverError != nil {
+		// We know the return connection is closed, so return the error.
+		// Failing to return an error here does not mean the send will succeed.
+		// It just means we do not know yet if it will fail.
+		// Slight back-flips here to ensure the write is closing the channel.
+		a.cleanChannel.Do(func() {
+			klog.V(2).InfoS("Data channel to server has errored out", "serverID", a.serverID)
+			close(a.serverChannel)
+		})
+		return a.serverError
 	}
-	return err
+
+	if a.warnOnChannelLimit && len(a.serverChannel) >= xfrChannelSize {
+		klog.V(2).InfoS("Data channel to server on agent is full", "serverID", a.serverID)
+	}
+	a.serverChannel <- pkt
+	return nil
 }
 
 func (a *Client) Recv() (*client.Packet, error) {
@@ -489,9 +531,6 @@ func (a *Client) remoteToProxy(connID int64, ctx *connContext) {
 	defer ctx.cleanup()
 
 	var buf [1 << 12]byte
-	resp := &client.Packet{
-		Type: client.PacketType_DATA,
-	}
 
 	for {
 		n, err := ctx.conn.Read(buf[:])
@@ -505,10 +544,16 @@ func (a *Client) remoteToProxy(connID int64, ctx *connContext) {
 			klog.ErrorS(err, "connection read failure", "connectionID", connID)
 			return
 		} else {
-			resp.Payload = &client.Packet_Data{Data: &client.Data{
-				Data:      buf[:n],
-				ConnectID: connID,
-			}}
+			data := make([]byte, 0, n)
+			data = append(data, buf[:n]...)
+			klog.V(5).InfoS("remoteToProxy set up data to send back", "dataSize", n)
+			resp := &client.Packet{
+				Type: client.PacketType_DATA,
+				Payload: &client.Packet_Data{Data: &client.Data{
+					Data:      data,
+					ConnectID: connID,
+				}},
+			}
 			if err := a.Send(resp); err != nil {
 				klog.ErrorS(err, "stream send failure", "connectionID", connID)
 			}
@@ -531,7 +576,7 @@ func (a *Client) proxyToRemote(connID int64, ctx *connContext) {
 		for {
 			n, err := ctx.conn.Write(d[pos:])
 			if err == nil {
-				klog.V(4).InfoS("write to remote", "connectionID", connID, "lastData", n, "dataSize", len(d))
+				klog.V(4).InfoS("write to remote", "connectionID", connID, "lastData", n)
 				break
 			} else if n > 0 {
 				// https://golang.org/pkg/io/#Writer specifies return non nil error if n < len(d)

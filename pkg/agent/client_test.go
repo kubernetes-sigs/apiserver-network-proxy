@@ -20,13 +20,16 @@ func TestServeData_HTTP(t *testing.T) {
 	var stream agent.AgentService_ConnectClient
 	stopCh := make(chan struct{})
 	testClient := &Client{
-		connManager: newConnectionManager(),
-		stopCh:      stopCh,
+		serverChannel: make(chan *client.Packet, xfrChannelSize),
+		serverError:   nil,
+		connManager:   newConnectionManager(),
+		stopCh:        stopCh,
 	}
 	testClient.stream, stream = pipe()
 
 	// Start agent
 	go testClient.Serve()
+	go testClient.writeToKonnServer()
 	defer close(stopCh)
 
 	// Start test http server as remote service
@@ -44,17 +47,17 @@ func TestServeData_HTTP(t *testing.T) {
 	}
 
 	// Expect receiving DIAL_RSP packet from (Agent) Client
-	pkg, err := stream.Recv()
+	pkt, err := stream.Recv()
 	if err != nil {
 		t.Fatal(err.Error())
 	}
-	if pkg == nil {
+	if pkt == nil {
 		t.Fatal("unexpected nil packet")
 	}
-	if pkg.Type != client.PacketType_DIAL_RSP {
-		t.Errorf("expect PacketType_DIAL_RSP; got %v", pkg.Type)
+	if pkt.Type != client.PacketType_DIAL_RSP {
+		t.Errorf("expect PacketType_DIAL_RSP; got %v", pkt.Type)
 	}
-	dialRsp := pkg.Payload.(*client.Packet_DialResponse)
+	dialRsp := pkt.Payload.(*client.Packet_DialResponse)
 	connID := dialRsp.DialResponse.ConnectID
 	if dialRsp.DialResponse.Random != 111 {
 		t.Errorf("expect random=111; got %v", dialRsp.DialResponse.Random)
@@ -68,14 +71,14 @@ func TestServeData_HTTP(t *testing.T) {
 	}
 
 	// Expect receiving http response via (Agent) Client
-	pkg, _ = stream.Recv()
-	if pkg == nil {
+	pkt, _ = stream.Recv()
+	if pkt == nil {
 		t.Fatal("unexpected nil packet")
 	}
-	if pkg.Type != client.PacketType_DATA {
-		t.Errorf("expect PacketType_DATA; got %v", pkg.Type)
+	if pkt.Type != client.PacketType_DATA {
+		t.Errorf("expect PacketType_DATA; got %v", pkt.Type)
 	}
-	data := pkg.Payload.(*client.Packet_Data).Data.Data
+	data := pkt.Payload.(*client.Packet_Data).Data.Data
 
 	// Verify response data
 	//
@@ -94,14 +97,14 @@ func TestServeData_HTTP(t *testing.T) {
 	ts.Close()
 
 	// Verify receiving CLOSE_RSP
-	pkg, _ = stream.Recv()
-	if pkg == nil {
+	pkt, _ = stream.Recv()
+	if pkt == nil {
 		t.Fatal("unexpected nil packet")
 	}
-	if pkg.Type != client.PacketType_CLOSE_RSP {
-		t.Errorf("expect PacketType_CLOSE_RSP; got %v", pkg.Type)
+	if pkt.Type != client.PacketType_CLOSE_RSP {
+		t.Errorf("expect PacketType_CLOSE_RSP; got %v", pkt.Type)
 	}
-	closeErr := pkg.Payload.(*client.Packet_CloseResponse).CloseResponse.Error
+	closeErr := pkt.Payload.(*client.Packet_CloseResponse).CloseResponse.Error
 	if closeErr != "" {
 		t.Errorf("expect nil closeErr; got %v", closeErr)
 	}
@@ -116,6 +119,8 @@ func TestClose_Client(t *testing.T) {
 	var stream agent.AgentService_ConnectClient
 	stopCh := make(chan struct{})
 	testClient := &Client{
+		serverChannel: make(chan *client.Packet, xfrChannelSize),
+		serverError:   nil,
 		connManager: newConnectionManager(),
 		stopCh:      stopCh,
 	}
@@ -123,6 +128,7 @@ func TestClose_Client(t *testing.T) {
 
 	// Start agent
 	go testClient.Serve()
+	go testClient.writeToKonnServer()
 	defer close(stopCh)
 
 	// Start test http server as remote service
