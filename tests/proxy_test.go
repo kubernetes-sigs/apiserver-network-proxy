@@ -424,7 +424,8 @@ func runGRPCProxyServerWithServerCount(serverCount int) (proxy, *server.ProxySer
 	var err error
 	var lis, lis2 net.Listener
 
-	server := server.NewProxyServer(uuid.New().String(), []server.ProxyStrategy{server.ProxyStrategyDefault}, serverCount, &server.AgentTokenAuthenticationOptions{}, false)
+	grpcMaxIdleTime := 1 * time.Minute
+	server := server.NewProxyServer(uuid.New().String(), []server.ProxyStrategy{server.ProxyStrategyDefault}, serverCount, &server.AgentTokenAuthenticationOptions{}, false, grpcMaxIdleTime)
 	grpcServer := grpc.NewServer()
 	agentServer := grpc.NewServer()
 	cleanup := func() {
@@ -463,7 +464,9 @@ func runGRPCProxyServerWithServerCount(serverCount int) (proxy, *server.ProxySer
 func runHTTPConnProxyServer() (proxy, func(), error) {
 	ctx := context.Background()
 	var proxy proxy
-	s := server.NewProxyServer(uuid.New().String(), []server.ProxyStrategy{server.ProxyStrategyDefault}, 0, &server.AgentTokenAuthenticationOptions{}, false)
+
+	grpcMaxIdleTime := 1 * time.Minute
+	s := server.NewProxyServer(uuid.New().String(), []server.ProxyStrategy{server.ProxyStrategyDefault}, 0, &server.AgentTokenAuthenticationOptions{}, false, grpcMaxIdleTime)
 	agentServer := grpc.NewServer()
 
 	agentproto.RegisterAgentServiceServer(agentServer, s)

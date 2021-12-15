@@ -22,6 +22,7 @@ import (
 	"io"
 	"reflect"
 	"testing"
+	"time"
 
 	"github.com/golang/mock/gomock"
 	"google.golang.org/grpc/metadata"
@@ -159,6 +160,7 @@ func TestAgentTokenAuthenticationErrorsToken(t *testing.T) {
 				conn.EXPECT().Recv().Return(nil, io.EOF)
 			}
 
+			grpcMaxIdleTime := 1 * time.Minute
 			p := NewProxyServer("", []ProxyStrategy{ProxyStrategyDefault}, 1, &AgentTokenAuthenticationOptions{
 				Enabled:             true,
 				KubernetesClient:    kcs,
@@ -166,6 +168,7 @@ func TestAgentTokenAuthenticationErrorsToken(t *testing.T) {
 				AgentServiceAccount: tc.wantServiceAccount,
 			},
 				false,
+				grpcMaxIdleTime,
 			)
 
 			err := p.Connect(conn)
@@ -189,7 +192,8 @@ func TestAddRemoveFrontends(t *testing.T) {
 	agent2ConnID2 := new(ProxyClientConnection)
 	agent3ConnID1 := new(ProxyClientConnection)
 
-	p := NewProxyServer("", []ProxyStrategy{ProxyStrategyDefault}, 1, nil, false)
+	grpcMaxIdleTime := 1 * time.Minute
+	p := NewProxyServer("", []ProxyStrategy{ProxyStrategyDefault}, 1, nil, false, grpcMaxIdleTime)
 	p.addFrontend("agent1", int64(1), agent1ConnID1)
 	p.removeFrontend("agent1", int64(1))
 	expectedFrontends := make(map[string]map[int64]*ProxyClientConnection)
@@ -197,7 +201,7 @@ func TestAddRemoveFrontends(t *testing.T) {
 		t.Errorf("expected %v, got %v", e, a)
 	}
 
-	p = NewProxyServer("", []ProxyStrategy{ProxyStrategyDefault}, 1, nil, false)
+	p = NewProxyServer("", []ProxyStrategy{ProxyStrategyDefault}, 1, nil, false, grpcMaxIdleTime)
 	p.addFrontend("agent1", int64(1), agent1ConnID1)
 	p.addFrontend("agent1", int64(2), agent1ConnID2)
 	p.addFrontend("agent2", int64(1), agent2ConnID1)
