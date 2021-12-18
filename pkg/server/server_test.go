@@ -290,14 +290,14 @@ func baseServerProxyTestWithBackend(t *testing.T, validate func(*agentmock.MockA
 func TestServerProxyNoBackend(t *testing.T) {
 	validate := func(frontendConn *agentmock.MockAgentService_ConnectServer) {
 		// receive DIAL_REQ from frontend and proxy to backend
-		randomId := rand.Int63()
+		randomID := rand.Int63() /* #nosec G404 */
 		dialReq := &client.Packet{
 			Type: client.PacketType_DIAL_REQ,
 			Payload: &client.Packet_DialRequest{
 				DialRequest: &client.DialRequest{
 					Protocol: "tcp",
 					Address:  "127.0.0.1:8080",
-					Random:   randomId,
+					Random:   randomID,
 				},
 			},
 		}
@@ -306,7 +306,7 @@ func TestServerProxyNoBackend(t *testing.T) {
 			Type: client.PacketType_DIAL_RSP,
 			Payload: &client.Packet_DialResponse{
 				DialResponse: &client.DialResponse{
-					Random: randomId,
+					Random: randomID,
 					Error:  (&ErrNotFound{}).Error(),
 				}},
 		}
@@ -326,14 +326,14 @@ func TestServerProxyNoBackend(t *testing.T) {
 func TestServerProxyNormalClose(t *testing.T) {
 	validate := func(frontendConn, agentConn *agentmock.MockAgentService_ConnectServer) {
 		// receive DIAL_REQ from frontend and proxy to backend
-		randomId := rand.Int63()
+		randomID := rand.Int63() /* #nosec G404 */
 		dialReq := &client.Packet{
 			Type: client.PacketType_DIAL_REQ,
 			Payload: &client.Packet_DialRequest{
 				DialRequest: &client.DialRequest{
 					Protocol: "tcp",
 					Address:  "127.0.0.1:8080",
-					Random:   randomId,
+					Random:   randomID,
 				},
 			},
 		}
