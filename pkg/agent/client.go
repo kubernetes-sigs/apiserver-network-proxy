@@ -418,10 +418,12 @@ func (a *Client) Serve() {
 					}
 					close(dataCh)
 					a.connManager.Delete(connID)
+				} else {
+					klog.ErrorS(fmt.Errorf("connection is nil"), "cannot send CLOSE_RESP to nil connection")
 				}
 			}
-			a.connManager.Add(connID, ctx)
 			go func() {
+				a.connManager.Add(connID, ctx)
 				defer close(dialDone)
 				start := time.Now()
 				conn, err := net.DialTimeout(dialReq.Protocol, dialReq.Address, dialTimeout)
