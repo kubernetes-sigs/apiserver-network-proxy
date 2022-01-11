@@ -634,13 +634,13 @@ func (s *ProxyServer) Connect(stream agent.AgentService_ConnectServer) error {
 	if s.AgentAuthenticationOptions.Enabled {
 		if err := s.authenticateAgentViaToken(stream.Context()); err != nil {
 			klog.ErrorS(err, "Client authentication failed", "agentID", agentID)
-			// Before sending metadata header, returning early will close stream from client side and give any empty value
-			// to client call Header(), which is a bit misleading as the client expect to receive server info to continue
-			// or error to break.
+			// Before sending metadata header, returning early will close stream from client-side and give any empty
+			// value to client call Header(), which is a bit misleading as the client expects to receive server info to
+			// continue or error to break.
 			h := metadata.Pairs(header.AuthenticationError, err.Error())
-			err := stream.SendHeader(h)
-			if err != nil {
-				klog.ErrorS(err, "Failed to token authentication failure to backend", "agentID", agentID)
+			errSendHeader := stream.SendHeader(h)
+			if errSendHeader != nil {
+				klog.ErrorS(errSendHeader, "Failed to send token authentication failure to backend", "agentID", agentID)
 			}
 			return err
 		}

@@ -21,9 +21,11 @@ import (
 	"fmt"
 	"io"
 	"reflect"
+	"strconv"
 	"testing"
 
 	"github.com/golang/mock/gomock"
+	"github.com/google/uuid"
 	"google.golang.org/grpc/metadata"
 
 	authv1 "k8s.io/api/authentication/v1"
@@ -153,13 +155,7 @@ func TestAgentTokenAuthenticationErrorsToken(t *testing.T) {
 			conn := agentmock.NewMockAgentService_ConnectServer(stub)
 			conn.EXPECT().Context().AnyTimes().Return(ctx)
 
-			// close agent's connection if no error is expected
-			if !tc.wantError {
-				conn.EXPECT().SendHeader(gomock.Any()).Return(nil)
-				conn.EXPECT().Recv().Return(nil, io.EOF)
-			}
-
-			p := NewProxyServer("", []ProxyStrategy{ProxyStrategyDefault}, 1, &AgentTokenAuthenticationOptions{
+			p := NewProxyServer(uuid.New().String(), []ProxyStrategy{ProxyStrategyDefault}, 1, &AgentTokenAuthenticationOptions{
 				Enabled:             true,
 				KubernetesClient:    kcs,
 				AgentNamespace:      tc.wantNamespace,
@@ -167,6 +163,17 @@ func TestAgentTokenAuthenticationErrorsToken(t *testing.T) {
 			},
 				false,
 			)
+
+			h := metadata.Pairs(header.ServerID, p.serverID, header.ServerCount, strconv.Itoa(p.serverCount))
+			// close agent's connection if no error is expected
+			if !tc.wantError {
+				conn.EXPECT().SendHeader(h).Return(nil)
+				conn.EXPECT().Recv().Return(nil, io.EOF)
+			} else {
+				// instead of iterating over all the error messages in the header, we check the normal header is not
+				// sent in case of agent token authentication failure
+				conn.EXPECT().SendHeader(gomock.Not(h)).Return(nil)
+			}
 
 			err := p.Connect(conn)
 			if tc.wantError {

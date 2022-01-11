@@ -511,7 +511,7 @@ func (a *Client) remoteToProxy(connID int64, ctx *connContext) {
 			return
 		} else if err != nil {
 			// Normal when receive a CLOSE_REQ
-			klog.V(3).InfoS("connection read failure", "connectionID", connID, "err", err)
+			klog.ErrorS(err, "connection read failure", "connectionID", connID)
 			return
 		} else {
 			resp.Payload = &client.Packet_Data{Data: &client.Data{
