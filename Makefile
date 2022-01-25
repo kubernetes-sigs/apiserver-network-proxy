@@ -14,7 +14,7 @@
 
 ARCH ?= amd64
 ARCH_LIST ?= amd64 arm arm64 ppc64le s390x
-RELEASE_ARCH_LIST = amd64
+RELEASE_ARCH_LIST = amd64 arm64
 # The output type could either be docker (local), or registry.
 OUTPUT_TYPE ?= docker
 
