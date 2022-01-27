@@ -410,6 +410,7 @@ func (a *Client) Serve() {
 					}
 
 					closeResp.GetCloseResponse().ConnectID = connID
+					err := ctx.conn.Close()
 					if err != nil {
 						closeResp.GetCloseResponse().Error = err.Error()
 					}
@@ -431,7 +432,7 @@ func (a *Client) Serve() {
 					a.connManager.Delete(connID)
 					dialResp.GetDialResponse().Error = err.Error()
 					if err := a.Send(dialResp); err != nil {
-						klog.ErrorS(err, "could not send stream")
+						klog.ErrorS(err, "could not send dialResp")
 					}
 					return
 				}
@@ -439,7 +440,7 @@ func (a *Client) Serve() {
 				ctx.conn = conn
 				dialResp.GetDialResponse().ConnectID = connID
 				if err := a.Send(dialResp); err != nil {
-					klog.ErrorS(err, "stream send failure")
+					klog.ErrorS(err, "could not send dialResp")
 					return
 				}
 				go a.remoteToProxy(connID, ctx)
