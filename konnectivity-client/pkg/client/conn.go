@@ -113,7 +113,7 @@ func (c *conn) SetWriteDeadline(t time.Time) error {
 // Close closes the connection. It also sends CLOSE_REQ packet over
 // proxy service to notify remote to drop the connection.
 func (c *conn) Close() error {
-	klog.V(4).InfoS("closing connection")
+	klog.V(4).Infoln("closing connection")
 	var req *client.Packet
 	if c.connID != 0 {
 		req = &client.Packet{
