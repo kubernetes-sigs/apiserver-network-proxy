@@ -1,5 +1,5 @@
 # Build the proxy-server binary
-FROM golang:1.17.2 as builder
+FROM golang:1.17.5 as builder
 
 # Copy in the go src
 WORKDIR /go/src/sigs.k8s.io/apiserver-network-proxy
