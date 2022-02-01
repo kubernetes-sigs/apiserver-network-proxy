@@ -394,15 +394,15 @@ func (a *Client) Serve() {
 			connID := atomic.AddInt64(&a.nextConnID, 1)
 			dataCh := make(chan []byte, xfrChannelSize)
 			dialDone := make(chan struct{})
-			ctx := &connContext{
+			connCtx := &connContext{
 				dataCh:    dataCh,
 				dialDone:  dialDone,
 				warnChLim: a.warnOnChannelLimit,
 			}
-			ctx.cleanFunc = func() {
+			connCtx.cleanFunc = func() {
 				// block on purpose
 				<-dialDone
-				if ctx.conn != nil {
+				if connCtx.conn != nil {
 					klog.V(4).InfoS("close connection", "connectionID", connID)
 					closeResp := &client.Packet{
 						Type:    client.PacketType_CLOSE_RSP,
@@ -410,7 +410,7 @@ func (a *Client) Serve() {
 					}
 
 					closeResp.GetCloseResponse().ConnectID = connID
-					err := ctx.conn.Close()
+					err := connCtx.conn.Close()
 					if err != nil {
 						closeResp.GetCloseResponse().Error = err.Error()
 					}
@@ -424,12 +424,10 @@ func (a *Client) Serve() {
 				}
 			}
 			go func() {
-				a.connManager.Add(connID, ctx)
 				defer close(dialDone)
 				start := time.Now()
 				conn, err := net.DialTimeout(dialReq.Protocol, dialReq.Address, dialTimeout)
 				if err != nil {
-					a.connManager.Delete(connID)
 					dialResp.GetDialResponse().Error = err.Error()
 					if err := a.Send(dialResp); err != nil {
 						klog.ErrorS(err, "could not send dialResp")
@@ -437,14 +435,15 @@ func (a *Client) Serve() {
 					return
 				}
 				metrics.Metrics.ObserveDialLatency(time.Since(start))
-				ctx.conn = conn
+				connCtx.conn = conn
+				a.connManager.Add(connID, connCtx)
 				dialResp.GetDialResponse().ConnectID = connID
 				if err := a.Send(dialResp); err != nil {
 					klog.ErrorS(err, "could not send dialResp")
 					return
 				}
-				go a.remoteToProxy(connID, ctx)
-				go a.proxyToRemote(connID, ctx)
+				go a.remoteToProxy(connID, connCtx)
+				go a.proxyToRemote(connID, connCtx)
 			}()
 
 		case client.PacketType_DATA:
