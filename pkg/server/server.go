@@ -26,7 +26,9 @@ import (
 	"sync"
 	"time"
 
+	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/metadata"
+	"google.golang.org/grpc/status"
 	authv1 "k8s.io/api/authentication/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes"
@@ -387,7 +389,12 @@ func (s *ProxyServer) Proxy(stream client.ProxyService_ProxyServer) error {
 				return
 			}
 			if err != nil {
-				klog.ErrorS(err, "Stream read from frontend failure")
+				rpcCode := status.Convert(err).Code()
+				if rpcCode == codes.Canceled {
+					klog.V(2).InfoS("Stream has been canceled", "rpc_code", rpcCode)
+				} else {
+					klog.ErrorS(err, "Stream read from frontend failure")
+				}
 				stopCh <- err
 				close(stopCh)
 				return
@@ -406,9 +413,10 @@ func (s *ProxyServer) Proxy(stream client.ProxyService_ProxyServer) error {
 func (s *ProxyServer) serveRecvFrontend(stream client.ProxyService_ProxyServer, recvCh <-chan *client.Packet) {
 	klog.V(4).Infoln("start serving frontend stream")
 
-	var firstConnID int64
-	// The first packet should be a DIAL_REQ, we will randomly get a
-	// backend from the BackendManger then.
+	var connID int64
+	var closeReqSent bool = false
+	// The first packet should be a DIAL_REQ, then we will get a
+	// backend from the configured BackendMangers.
 	var backend Backend
 	var err error
 
@@ -451,7 +459,7 @@ func (s *ProxyServer) serveRecvFrontend(stream client.ProxyService_ProxyServer, 
 			}
 
 		case client.PacketType_CLOSE_REQ:
-			connID := pkt.GetCloseRequest().ConnectID
+			connID = pkt.GetCloseRequest().ConnectID
 			klog.V(5).InfoS("Received CLOSE_REQ", "connectionID", connID)
 			if backend == nil {
 				klog.V(2).InfoS("Backend has not been initialized for requested connection. Client should send a Dial Request first",
@@ -464,6 +472,8 @@ func (s *ProxyServer) serveRecvFrontend(stream client.ProxyService_ProxyServer, 
 			} else {
 				klog.V(5).InfoS("CLOSE_REQ sent to backend", "serverID", s.serverID, "connectionID", connID)
 			}
+			closeReqSent = true
+			klog.V(5).Infoln("CLOSE_REQ sent to backend", "serverID", s.serverID, "connectionID", connID)
 
 		case client.PacketType_DIAL_CLS:
 			random := pkt.GetCloseDial().Random
@@ -473,15 +483,9 @@ func (s *ProxyServer) serveRecvFrontend(stream client.ProxyService_ProxyServer, 
 			klog.V(5).InfoS("Removing pending dial request", "serverID", s.serverID, "dialID", random)
 
 		case client.PacketType_DATA:
-			connID := pkt.GetData().ConnectID
+			connID = pkt.GetData().ConnectID
 			data := pkt.GetData().Data
 			klog.V(5).InfoS("Received data from connection", "bytes", len(data), "connectionID", connID)
-			if firstConnID == 0 {
-				firstConnID = connID
-			} else if firstConnID != connID {
-				klog.V(5).InfoS("Data does not match first connection id", "fistConnectionID", firstConnID, "connectionID", connID)
-			}
-
 			if backend == nil {
 				klog.V(2).InfoS("Backend has not been initialized for the connection. Client should send a Dial Request first", "connectionID", connID)
 				continue
@@ -495,27 +499,27 @@ func (s *ProxyServer) serveRecvFrontend(stream client.ProxyService_ProxyServer, 
 
 		default:
 			klog.V(5).InfoS("Ignore packet coming from frontend",
-				"type", pkt.Type, "serverID", s.serverID, "connectionID", firstConnID)
+				"type", pkt.Type, "serverID", s.serverID, "connectionID", connID)
 		}
 	}
 
-	klog.V(5).InfoS("Close streaming", "serverID", s.serverID, "connectionID", firstConnID)
-
-	pkt := &client.Packet{
-		Type: client.PacketType_CLOSE_REQ,
-		Payload: &client.Packet_CloseRequest{
-			CloseRequest: &client.CloseRequest{
-				ConnectID: firstConnID,
+	if !closeReqSent {
+		klog.V(5).InfoS("Close streaming", "serverID", s.serverID, "connectionID", connID)
+		pkt := &client.Packet{
+			Type: client.PacketType_CLOSE_REQ,
+			Payload: &client.Packet_CloseRequest{
+				CloseRequest: &client.CloseRequest{
+					ConnectID: connID,
+				},
 			},
-		},
-	}
-
-	if backend == nil {
-		klog.V(2).InfoS("Backend has not been initialized for requested connection. Client should send a Dial Request first", "connectionID", firstConnID)
-		return
-	}
-	if err := backend.Send(pkt); err != nil {
-		klog.ErrorS(err, "CLOSE_REQ to Backend failed", "serverID", s.serverID)
+		}
+		if backend == nil {
+			klog.V(2).InfoS("Backend has not been initialized for requested connection. Client should send a Dial Request first", "connectionID", connID)
+			return
+		}
+		if err := backend.Send(pkt); err != nil {
+			klog.ErrorS(err, "CLOSE_REQ to Backend failed", "serverID", s.serverID)
+		}
 	}
 }
 
@@ -732,7 +736,7 @@ func (s *ProxyServer) serveRecvBackend(backend Backend, stream agent.AgentServic
 					dialErr = true
 				}
 				// Avoid adding the frontend if there was an error dialing the destination
-				if dialErr == true {
+				if dialErr {
 					break
 				}
 				frontend.connectID = resp.ConnectID
