@@ -414,7 +414,7 @@ func (s *ProxyServer) serveRecvFrontend(stream client.ProxyService_ProxyServer, 
 	klog.V(4).Infoln("start serving frontend stream")
 
 	var connID int64
-	var closeReqSent bool = false
+	var closeReqSent bool
 	// The first packet should be a DIAL_REQ, then we will get a
 	// backend from the configured BackendMangers.
 	var backend Backend
