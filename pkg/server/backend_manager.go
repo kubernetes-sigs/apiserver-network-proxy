@@ -24,6 +24,8 @@ import (
 	"sync"
 	"time"
 
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 	"k8s.io/klog/v2"
 	client "sigs.k8s.io/apiserver-network-proxy/konnectivity-client/proto/client"
 	pkgagent "sigs.k8s.io/apiserver-network-proxy/pkg/agent"
@@ -85,7 +87,25 @@ type backend struct {
 func (b *backend) Send(p *client.Packet) error {
 	b.mu.Lock()
 	defer b.mu.Unlock()
-	return b.conn.Send(p)
+	errChan := make(chan error, 1)
+	go func() {
+		err := b.conn.Send(p)
+		errChan <- err
+		close(errChan)
+		if err != nil {
+			klog.ErrorS(err, "SendMsg has exited abnormally")
+		}
+	}()
+	t := time.NewTimer(10 * time.Second)
+	select {
+	case <-t.C:
+		return status.Errorf(codes.DeadlineExceeded, "conn.Send has timed out")
+	case err := <-errChan:
+		if !t.Stop() {
+			<-t.C
+		}
+		return err
+	}
 }
 
 func (b *backend) Context() context.Context {
