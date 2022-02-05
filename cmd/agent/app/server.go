@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/http/pprof"
 	"runtime"
+	"strconv"
 
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"github.com/spf13/cobra"
@@ -93,7 +94,7 @@ func (a *Agent) runHealthServer(o *options.GrpcProxyAgentOptions) error {
 	muxHandler.HandleFunc("/ready", readinessHandler)
 	muxHandler.HandleFunc("/readyz", readinessHandler)
 	healthServer := &http.Server{
-		Addr:           fmt.Sprintf(":%d", o.HealthServerPort),
+		Addr:           net.JoinHostPort(o.HealthServerHost, strconv.Itoa(o.HealthServerPort)),
 		Handler:        muxHandler,
 		MaxHeaderBytes: 1 << 20,
 	}
