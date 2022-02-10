@@ -14,7 +14,7 @@ import (
 	"sigs.k8s.io/apiserver-network-proxy/konnectivity-client/pkg/client"
 )
 
-func TestProxy_Concurrency(t *testing.T) {
+func TestProxy_ConcurrencyGRPC(t *testing.T) {
 	ctx := context.Background()
 	length := 1 << 20
 	chunks := 10
@@ -62,6 +62,55 @@ func TestProxy_Concurrency(t *testing.T) {
 		}
 		defer r.Body.Close()
 
+		if len(data) != length*chunks {
+			t.Errorf("expect data length %d; got %d", length*chunks, len(data))
+		}
+	}
+
+	concurrency := 10
+	wg.Add(concurrency)
+	for i := 0; i < concurrency; i++ {
+		go verify()
+	}
+	wg.Wait()
+}
+
+func TestProxy_ConcurrencyHTTP(t *testing.T) {
+	ctx := context.Background()
+	length := 1 << 20
+	chunks := 10
+	server := httptest.NewServer(newSizedServer(length, chunks))
+	defer server.Close()
+
+	stopCh := make(chan struct{})
+	defer close(stopCh)
+
+	proxy, cleanup, err := runHTTPConnProxyServer()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer cleanup()
+
+	runAgent(proxy.agent, stopCh)
+
+	// Wait for agent to register on proxy server
+	wait.Poll(100*time.Millisecond, 5*time.Second, func() (bool, error) {
+		ready, _ := proxy.server.Readiness.Ready()
+		return ready, nil
+	})
+
+	// run test clients
+	var wg sync.WaitGroup
+	verify := func() {
+		defer wg.Done()
+		tunnel, err := createHTTPConnectClient(ctx, proxy.front, server.URL)
+		if err != nil {
+			t.Error(err)
+		}
+		data, err := clientRequest(tunnel, server.URL)
+		if err != nil {
+			t.Error(err)
+		}
 		if len(data) != length*chunks {
 			t.Errorf("expect data length %d; got %d", length*chunks, len(data))
 		}
