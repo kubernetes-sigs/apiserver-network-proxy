@@ -140,7 +140,7 @@ func TestProxyHandleDialError_GRPC(t *testing.T) {
 	}
 }
 
-func TestProxyHandle_DoneContext_GRPC(t *testing.T) {
+func TestProxyHandle_ContextDeadlineExceeded_GRPC(t *testing.T) {
 	hangingServer := newEchoServer("hello")
 	hangingServer.wchan = make(chan struct{})
 	server := httptest.NewServer(hangingServer)
