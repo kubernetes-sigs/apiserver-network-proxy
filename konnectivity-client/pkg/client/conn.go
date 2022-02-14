@@ -114,6 +114,8 @@ func (c *conn) SetWriteDeadline(t time.Time) error {
 // proxy service to notify remote to drop the connection.
 func (c *conn) Close() error {
 	klog.V(4).Infoln("closing connection")
+	defer close(c.readCh)
+
 	var req *client.Packet
 	if c.connID != 0 {
 		req = &client.Packet{
