@@ -9,7 +9,8 @@ require (
 	github.com/prometheus/client_golang v1.7.1
 	github.com/spf13/cobra v0.0.3
 	github.com/spf13/pflag v1.0.5
-	golang.org/x/net v0.0.0-20201110031124-69a78807bb2b
+	go.uber.org/goleak v1.1.12
+	golang.org/x/net v0.0.0-20210405180319-a5a99cb37ef4
 	google.golang.org/grpc v1.42.0
 	k8s.io/api v0.20.10
 	k8s.io/apimachinery v0.20.10
@@ -40,7 +41,7 @@ require (
 	github.com/prometheus/procfs v0.2.0 // indirect
 	golang.org/x/crypto v0.0.0-20201002170205-7f63de1d35b0 // indirect
 	golang.org/x/oauth2 v0.0.0-20200107190931-bf48bf16ab8d // indirect
-	golang.org/x/sys v0.0.0-20201112073958-5cba982894dd // indirect
+	golang.org/x/sys v0.0.0-20210510120138-977fb7262007 // indirect
 	golang.org/x/text v0.3.4 // indirect
 	golang.org/x/time v0.0.0-20200630173020-3af7569d3a1e // indirect
 	google.golang.org/appengine v1.6.5 // indirect

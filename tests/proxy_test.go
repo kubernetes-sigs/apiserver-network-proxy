@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"go.uber.org/goleak"
 	"google.golang.org/grpc"
 	"sigs.k8s.io/apiserver-network-proxy/konnectivity-client/pkg/client"
 	clientproto "sigs.k8s.io/apiserver-network-proxy/konnectivity-client/proto/client"
@@ -220,6 +221,8 @@ func TestProxyHandle_SlowContext_GRPC(t *testing.T) {
 }
 
 func TestProxyHandle_ContextCancelled_GRPC(t *testing.T) {
+	defer goleak.VerifyNone(t)
+
 	slowServer := newEchoServer("hello")
 	slowServer.wchan = make(chan struct{})
 	server := httptest.NewServer(slowServer)
