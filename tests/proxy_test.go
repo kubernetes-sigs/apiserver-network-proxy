@@ -57,6 +57,8 @@ func (s *testServer) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 }
 
 func TestBasicProxy_GRPC(t *testing.T) {
+	defer goleak.VerifyNone(t, goleak.IgnoreCurrent())
+
 	ctx := context.Background()
 	server := httptest.NewServer(newEchoServer("hello"))
 	defer server.Close()
@@ -103,6 +105,8 @@ func TestBasicProxy_GRPC(t *testing.T) {
 }
 
 func TestProxyHandleDialError_GRPC(t *testing.T) {
+	defer goleak.VerifyNone(t, goleak.IgnoreCurrent())
+
 	ctx := context.Background()
 	invalidServer := httptest.NewServer(newEchoServer("hello"))
 
@@ -142,6 +146,8 @@ func TestProxyHandleDialError_GRPC(t *testing.T) {
 }
 
 func TestProxyHandle_ContextDeadlineExceeded_GRPC(t *testing.T) {
+	defer goleak.VerifyNone(t, goleak.IgnoreCurrent())
+
 	hangingServer := newEchoServer("hello")
 	hangingServer.wchan = make(chan struct{})
 	server := httptest.NewServer(hangingServer)
@@ -171,6 +177,8 @@ func TestProxyHandle_ContextDeadlineExceeded_GRPC(t *testing.T) {
 }
 
 func TestProxyHandle_SlowContext_GRPC(t *testing.T) {
+	defer goleak.VerifyNone(t, goleak.IgnoreCurrent())
+
 	slowServer := newEchoServer("hello")
 	slowServer.wchan = make(chan struct{})
 	server := httptest.NewServer(slowServer)
@@ -221,7 +229,7 @@ func TestProxyHandle_SlowContext_GRPC(t *testing.T) {
 }
 
 func TestProxyHandle_ContextCancelled_GRPC(t *testing.T) {
-	defer goleak.VerifyNone(t)
+	defer goleak.VerifyNone(t, goleak.IgnoreCurrent())
 
 	slowServer := newEchoServer("hello")
 	slowServer.wchan = make(chan struct{})
