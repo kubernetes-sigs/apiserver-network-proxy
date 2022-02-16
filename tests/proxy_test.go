@@ -57,6 +57,7 @@ func (s *testServer) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 }
 
 func TestBasicProxy_GRPC(t *testing.T) {
+	// goleak.IgnoreCurrent is needed since klog always runs a gorountine for flushing logs
 	defer goleak.VerifyNone(t, goleak.IgnoreCurrent())
 
 	ctx := context.Background()
@@ -105,6 +106,7 @@ func TestBasicProxy_GRPC(t *testing.T) {
 }
 
 func TestProxyHandleDialError_GRPC(t *testing.T) {
+	// goleak.IgnoreCurrent is needed since klog always runs a gorountine for flushing logs
 	defer goleak.VerifyNone(t, goleak.IgnoreCurrent())
 
 	ctx := context.Background()
@@ -146,6 +148,7 @@ func TestProxyHandleDialError_GRPC(t *testing.T) {
 }
 
 func TestProxyHandle_ContextDeadlineExceeded_GRPC(t *testing.T) {
+	// goleak.IgnoreCurrent is needed since klog always runs a gorountine for flushing logs
 	defer goleak.VerifyNone(t, goleak.IgnoreCurrent())
 
 	hangingServer := newEchoServer("hello")
@@ -177,6 +180,7 @@ func TestProxyHandle_ContextDeadlineExceeded_GRPC(t *testing.T) {
 }
 
 func TestProxyHandle_SlowContext_GRPC(t *testing.T) {
+	// goleak.IgnoreCurrent is needed since klog always runs a gorountine for flushing logs
 	defer goleak.VerifyNone(t, goleak.IgnoreCurrent())
 
 	slowServer := newEchoServer("hello")
@@ -229,6 +233,7 @@ func TestProxyHandle_SlowContext_GRPC(t *testing.T) {
 }
 
 func TestProxyHandle_ContextCancelled_GRPC(t *testing.T) {
+	// goleak.IgnoreCurrent is needed since klog always runs a gorountine for flushing logs
 	defer goleak.VerifyNone(t, goleak.IgnoreCurrent())
 
 	slowServer := newEchoServer("hello")
@@ -281,6 +286,9 @@ func TestProxyHandle_ContextCancelled_GRPC(t *testing.T) {
 }
 
 func TestProxy_LargeResponse(t *testing.T) {
+	// goleak.IgnoreCurrent is needed since klog always runs a gorountine for flushing logs
+	defer goleak.VerifyNone(t, goleak.IgnoreCurrent())
+
 	ctx := context.Background()
 	length := 1 << 20 // 1M
 	chunks := 10
