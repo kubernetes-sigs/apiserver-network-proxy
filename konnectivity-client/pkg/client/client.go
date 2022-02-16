@@ -161,6 +161,7 @@ func (t *grpcTunnel) serve(c clientConn) {
 			t.connsLock.RUnlock()
 
 			if ok {
+				conn.closed = true
 				close(conn.readCh)
 				conn.closeCh <- resp.Error
 				close(conn.closeCh)

@@ -38,6 +38,7 @@ type conn struct {
 	random  int64
 	readCh  chan []byte
 	closeCh chan string
+	closed  bool
 	rdata   []byte
 }
 
@@ -114,7 +115,15 @@ func (c *conn) SetWriteDeadline(t time.Time) error {
 // proxy service to notify remote to drop the connection.
 func (c *conn) Close() error {
 	klog.V(4).Infoln("closing connection")
-	defer close(c.readCh)
+	defer func() {
+		// We need to close any channels in the case where
+		// the CLOSE_REQ was not sent or the CLOSE_RSP was
+		// not received. This is usually the case when the
+		// transport is already closed.
+		if !c.closed {
+			close(c.readCh)
+		}
+	}()
 
 	var req *client.Packet
 	if c.connID != 0 {
