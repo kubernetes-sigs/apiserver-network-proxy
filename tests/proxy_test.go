@@ -90,10 +90,18 @@ func TestBasicProxy_GRPC(t *testing.T) {
 		},
 	}
 
-	r, err := c.Get(server.URL)
+	req, err := http.NewRequestWithContext(ctx, "GET", server.URL, nil)
 	if err != nil {
 		t.Error(err)
 	}
+	// client needs to Close the connection immediately to pass goroutine leak test
+	req.Close = true
+
+	r, err := c.Do(req)
+	if err != nil {
+		t.Error(err)
+	}
+	defer r.Body.Close()
 
 	data, err := ioutil.ReadAll(r.Body)
 	if err != nil {
@@ -279,6 +287,7 @@ func TestProxyHandle_ContextCancelled_GRPC(t *testing.T) {
 	if err != nil {
 		t.Error(err)
 	}
+
 	_, err = c.Do(req)
 	if err == nil || !strings.Contains(err.Error(), "context canceled") {
 		t.Error("Expected error when context is cancelled, did not receive error")
@@ -321,10 +330,18 @@ func TestProxy_LargeResponse(t *testing.T) {
 		},
 	}
 
-	r, err := c.Get(server.URL)
+	req, err := http.NewRequestWithContext(ctx, "GET", server.URL, nil)
 	if err != nil {
 		t.Error(err)
 	}
+	// client needs to Close the connection immediately to pass goroutine leak test
+	req.Close = true
+
+	r, err := c.Do(req)
+	if err != nil {
+		t.Error(err)
+	}
+	defer r.Body.Close()
 
 	data, err := ioutil.ReadAll(r.Body)
 	if err != nil {
