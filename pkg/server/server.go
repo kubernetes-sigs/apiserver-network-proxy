@@ -425,8 +425,13 @@ func (s *ProxyServer) serveRecvFrontend(stream client.ProxyService_ProxyServer, 
 				klog.ErrorS(err, "Failed to get a backend", "serverID", s.serverID)
 
 				resp := &client.Packet{
-					Type:    client.PacketType_DIAL_RSP,
-					Payload: &client.Packet_DialResponse{DialResponse: &client.DialResponse{Error: err.Error()}},
+					Type: client.PacketType_DIAL_RSP,
+					Payload: &client.Packet_DialResponse{
+						DialResponse: &client.DialResponse{
+							Error:  err.Error(),
+							Random: pkt.GetDialRequest().Random,
+						},
+					},
 				}
 				if err := stream.Send(resp); err != nil {
 					klog.V(5).Infoln("Failed to send DIAL_RSP for no backend", "error", err, "serverID", s.serverID)

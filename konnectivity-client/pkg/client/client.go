@@ -27,7 +27,7 @@ import (
 	"time"
 
 	"google.golang.org/grpc"
-	"k8s.io/klog/v2"
+	klog "k8s.io/klog/v2"
 	"sigs.k8s.io/apiserver-network-proxy/konnectivity-client/proto/client"
 )
 
@@ -114,7 +114,11 @@ func (t *grpcTunnel) serve(c clientConn) {
 			t.pendingDialLock.RUnlock()
 
 			if !ok {
-				klog.V(1).InfoS("DialResp not recognized; dropped", "connectionID", resp.ConnectID, "dialID", resp.Random)
+				klog.V(1).InfoS("DialResp not recognized; dropped", "connectionID", resp.ConnectID, "dialID", resp.Random, "error", resp.Error)
+				ch <- dialResult{
+					err:    resp.Error,
+					connid: resp.ConnectID,
+				}
 				return
 			} else {
 				result := dialResult{
