@@ -73,7 +73,7 @@ func (a *Agent) runProxyConnection(o *options.GrpcProxyAgentOptions, stopCh <-ch
 		}),
 	}
 	cc := o.ClientSetConfig(dialOptions...)
-	cs := cc.NewAgentClientSet(stopCh)
+	cs := cc.NewAgentSet(stopCh)
 	cs.Serve()
 
 	return nil

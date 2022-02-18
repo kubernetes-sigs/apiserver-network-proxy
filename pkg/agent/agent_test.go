@@ -19,7 +19,7 @@ func TestServeData_HTTP(t *testing.T) {
 	var err error
 	var stream agent.AgentService_ConnectClient
 	stopCh := make(chan struct{})
-	testClient := &Client{
+	testClient := &Agent{
 		connManager: newConnectionManager(),
 		stopCh:      stopCh,
 	}
@@ -115,7 +115,7 @@ func TestServeData_HTTP(t *testing.T) {
 func TestClose_Client(t *testing.T) {
 	var stream agent.AgentService_ConnectClient
 	stopCh := make(chan struct{})
-	testClient := &Client{
+	testClient := &Agent{
 		connManager: newConnectionManager(),
 		stopCh:      stopCh,
 	}

@@ -163,14 +163,14 @@ func GenAgentIdentifiers(addrs string) (Identifiers, error) {
 	return agentIDs, nil
 }
 
-// Client runs on the node network side. It connects to proxy server and establishes
+// Agent runs on the node network side. It connects to proxy server and establishes
 // a stream connection from which it sends and receives network traffic.
-type Client struct {
+type Agent struct {
 	nextConnID int64
 
 	connManager *connectionManager
 
-	cs *ClientSet // the clientset that includes this AgentClient.
+	cs *AgentSet // the clientset that includes this AgentClient.
 
 	stream           agent.AgentService_ConnectClient
 	agentID          string
@@ -194,8 +194,8 @@ type Client struct {
 	warnOnChannelLimit bool
 }
 
-func newAgentClient(address, agentID, agentIdentifiers string, cs *ClientSet, opts ...grpc.DialOption) (*Client, int, error) {
-	a := &Client{
+func newAgentClient(address, agentID, agentIdentifiers string, cs *AgentSet, opts ...grpc.DialOption) (*Agent, int, error) {
+	a := &Agent{
 		cs:                      cs,
 		address:                 address,
 		agentID:                 agentID,
@@ -216,7 +216,7 @@ func newAgentClient(address, agentID, agentIdentifiers string, cs *ClientSet, op
 
 // Connect makes the grpc dial to the proxy server. It returns the serverID
 // it connects to.
-func (a *Client) Connect() (int, error) {
+func (a *Agent) Connect() (int, error) {
 	conn, err := grpc.Dial(a.address, a.opts...)
 	if err != nil {
 		return 0, err
@@ -256,7 +256,7 @@ func (a *Client) Connect() (int, error) {
 }
 
 // Close closes the underlying connection.
-func (a *Client) Close() {
+func (a *Agent) Close() {
 	if a.conn == nil {
 		klog.Errorln("Unexpected empty AgentClient.conn")
 	}
@@ -267,19 +267,19 @@ func (a *Client) Close() {
 	close(a.stopCh)
 }
 
-func (a *Client) Send(pkt *client.Packet) error {
+func (a *Agent) Send(pkt *client.Packet) error {
 	a.sendLock.Lock()
 	defer a.sendLock.Unlock()
 
 	err := a.stream.Send(pkt)
 	if err != nil && err != io.EOF {
 		metrics.Metrics.ObserveFailure(metrics.DirectionToServer)
-		a.cs.RemoveClient(a.serverID)
+		a.cs.RemoveAgent(a.serverID)
 	}
 	return err
 }
 
-func (a *Client) Recv() (*client.Packet, error) {
+func (a *Agent) Recv() (*client.Packet, error) {
 	a.recvLock.Lock()
 	defer a.recvLock.Unlock()
 
@@ -316,7 +316,7 @@ func serverID(stream agent.AgentService_ConnectClient) (string, error) {
 	return sids[0], nil
 }
 
-func (a *Client) initializeAuthContext(ctx context.Context) (context.Context, error) {
+func (a *Agent) initializeAuthContext(ctx context.Context) (context.Context, error) {
 	var err error
 	var b []byte
 
@@ -343,10 +343,10 @@ func (a *Client) initializeAuthContext(ctx context.Context) (context.Context, er
 // gRPC stream. Successful Connect is required before Serve. The
 // The requests include things like opening a connection to a server,
 // streaming data and close the connection.
-func (a *Client) Serve() {
-	defer a.cs.RemoveClient(a.serverID)
+func (a *Agent) Serve() {
+	defer a.cs.RemoveAgent(a.serverID)
 	defer func() {
-		// close all of conns with remote when Client exits
+		// close all of conns with remote when Agent exits
 		for _, connCtx := range a.connManager.List() {
 			connCtx.cleanup()
 		}
@@ -484,7 +484,7 @@ func (a *Client) Serve() {
 	}
 }
 
-func (a *Client) remoteToProxy(connID int64, ctx *connContext) {
+func (a *Agent) remoteToProxy(connID int64, ctx *connContext) {
 	defer func() {
 		if panicInfo := recover(); panicInfo != nil {
 			klog.V(2).InfoS("Exiting remoteToProxy with recovery", "panicInfo", panicInfo, "connectionID", connID)
@@ -526,7 +526,7 @@ func (a *Client) remoteToProxy(connID int64, ctx *connContext) {
 	}
 }
 
-func (a *Client) proxyToRemote(connID int64, ctx *connContext) {
+func (a *Agent) proxyToRemote(connID int64, ctx *connContext) {
 	defer func() {
 		if panicInfo := recover(); panicInfo != nil {
 			klog.V(2).InfoS("Exiting proxyToRemote with recovery", "panicInfo", panicInfo, "connectionID", connID)
@@ -555,7 +555,7 @@ func (a *Client) proxyToRemote(connID int64, ctx *connContext) {
 	}
 }
 
-func (a *Client) probe() {
+func (a *Agent) probe() {
 	for {
 		select {
 		case <-a.stopCh:
@@ -570,7 +570,7 @@ func (a *Client) probe() {
 			}
 		}
 		klog.V(1).InfoS("Removing client used for server connection", "state", a.conn.GetState(), "serverID", a.serverID)
-		a.cs.RemoveClient(a.serverID)
+		a.cs.RemoveAgent(a.serverID)
 		return
 	}
 }

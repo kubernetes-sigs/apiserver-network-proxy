@@ -512,11 +512,11 @@ func runHTTPConnProxyServer() (proxy, func(), error) {
 	return proxy, cleanup, nil
 }
 
-func runAgent(addr string, stopCh <-chan struct{}) *agent.ClientSet {
+func runAgent(addr string, stopCh <-chan struct{}) *agent.AgentSet {
 	return runAgentWithID(uuid.New().String(), addr, stopCh)
 }
 
-func runAgentWithID(agentID, addr string, stopCh <-chan struct{}) *agent.ClientSet {
+func runAgentWithID(agentID, addr string, stopCh <-chan struct{}) *agent.AgentSet {
 	cc := agent.ClientSetConfig{
 		Address:       addr,
 		AgentID:       agentID,
@@ -524,7 +524,7 @@ func runAgentWithID(agentID, addr string, stopCh <-chan struct{}) *agent.ClientS
 		ProbeInterval: 100 * time.Millisecond,
 		DialOptions:   []grpc.DialOption{grpc.WithInsecure()},
 	}
-	client := cc.NewAgentClientSet(stopCh)
+	client := cc.NewAgentSet(stopCh)
 	client.Serve()
 	return client
 }

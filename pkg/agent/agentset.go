@@ -27,16 +27,16 @@ import (
 	"k8s.io/klog/v2"
 )
 
-// ClientSet consists of clients connected to each instance of an HA proxy server.
-type ClientSet struct {
-	mu      sync.Mutex         //protects the clients.
-	clients map[string]*Client // map between serverID and the client
+// AgentSet consists of agents connected to each instance of an HA proxy server.
+type AgentSet struct {
+	mu     sync.Mutex        //protects the agents.
+	agents map[string]*Agent // map between serverID and the client
 	// connects to this server.
 
 	agentID     string // ID of this agent
 	address     string // proxy server address. Assuming HA proxy server
 	serverCount int    // number of proxy server instances, should be 1
-	// unless it is an HA server. Initialized when the ClientSet creates
+	// unless it is an HA server. Initialized when the AgentSet creates
 	// the first client. When syncForever is set, it will be the most recently seen.
 	syncInterval time.Duration // The interval by which the agent
 	// periodically checks that it has connections to all instances of the
@@ -60,17 +60,17 @@ type ClientSet struct {
 	syncForever bool // Continue syncing (support dynamic server count).
 }
 
-func (cs *ClientSet) ClientsCount() int {
+func (cs *AgentSet) AgentsCount() int {
 	cs.mu.Lock()
 	defer cs.mu.Unlock()
-	return len(cs.clients)
+	return len(cs.agents)
 }
 
-func (cs *ClientSet) HealthyClientsCount() int {
+func (cs *AgentSet) HealthyAgentsCount() int {
 	cs.mu.Lock()
 	defer cs.mu.Unlock()
 	var count int
-	for _, c := range cs.clients {
+	for _, c := range cs.agents {
 		if c.conn.GetState() == connectivity.Ready {
 			count++
 		}
@@ -79,12 +79,12 @@ func (cs *ClientSet) HealthyClientsCount() int {
 
 }
 
-func (cs *ClientSet) hasIDLocked(serverID string) bool {
-	_, ok := cs.clients[serverID]
+func (cs *AgentSet) hasIDLocked(serverID string) bool {
+	_, ok := cs.agents[serverID]
 	return ok
 }
 
-func (cs *ClientSet) HasID(serverID string) bool {
+func (cs *AgentSet) HasID(serverID string) bool {
 	cs.mu.Lock()
 	defer cs.mu.Unlock()
 	return cs.hasIDLocked(serverID)
@@ -98,29 +98,29 @@ func (dse *DuplicateServerError) Error() string {
 	return "duplicate server: " + dse.ServerID
 }
 
-func (cs *ClientSet) addClientLocked(serverID string, c *Client) error {
+func (cs *AgentSet) addAgentLocked(serverID string, c *Agent) error {
 	if cs.hasIDLocked(serverID) {
 		return &DuplicateServerError{ServerID: serverID}
 	}
-	cs.clients[serverID] = c
+	cs.agents[serverID] = c
 	return nil
 
 }
 
-func (cs *ClientSet) AddClient(serverID string, c *Client) error {
+func (cs *AgentSet) AddAgent(serverID string, c *Agent) error {
 	cs.mu.Lock()
 	defer cs.mu.Unlock()
-	return cs.addClientLocked(serverID, c)
+	return cs.addAgentLocked(serverID, c)
 }
 
-func (cs *ClientSet) RemoveClient(serverID string) {
+func (cs *AgentSet) RemoveAgent(serverID string) {
 	cs.mu.Lock()
 	defer cs.mu.Unlock()
-	if cs.clients[serverID] == nil {
+	if cs.agents[serverID] == nil {
 		return
 	}
-	cs.clients[serverID].Close()
-	delete(cs.clients, serverID)
+	cs.agents[serverID].Close()
+	delete(cs.agents, serverID)
 }
 
 type ClientSetConfig struct {
@@ -136,9 +136,9 @@ type ClientSetConfig struct {
 	SyncForever             bool
 }
 
-func (cc *ClientSetConfig) NewAgentClientSet(stopCh <-chan struct{}) *ClientSet {
-	return &ClientSet{
-		clients:                 make(map[string]*Client),
+func (cc *ClientSetConfig) NewAgentSet(stopCh <-chan struct{}) *AgentSet {
+	return &AgentSet{
+		agents:                  make(map[string]*Agent),
 		agentID:                 cc.AgentID,
 		agentIdentifiers:        cc.AgentIdentifiers,
 		address:                 cc.Address,
@@ -153,11 +153,11 @@ func (cc *ClientSetConfig) NewAgentClientSet(stopCh <-chan struct{}) *ClientSet 
 	}
 }
 
-func (cs *ClientSet) newAgentClient() (*Client, int, error) {
+func (cs *AgentSet) newAgent() (*Agent, int, error) {
 	return newAgentClient(cs.address, cs.agentID, cs.agentIdentifiers, cs, cs.dialOptions...)
 }
 
-func (cs *ClientSet) resetBackoff() *wait.Backoff {
+func (cs *AgentSet) resetBackoff() *wait.Backoff {
 	return &wait.Backoff{
 		Steps:    math.MaxInt32,
 		Jitter:   0.1,
@@ -167,16 +167,16 @@ func (cs *ClientSet) resetBackoff() *wait.Backoff {
 	}
 }
 
-// sync makes sure that #clients >= #proxy servers
-func (cs *ClientSet) sync() {
+// sync makes sure that #agents >= #proxy servers
+func (cs *AgentSet) sync() {
 	defer cs.shutdown()
 	backoff := cs.resetBackoff()
 	var duration time.Duration
 	for {
 		if err := cs.connectOnce(); err != nil {
 			if dse, ok := err.(*DuplicateServerError); ok {
-				klog.V(4).InfoS("duplicate server", "serverID", dse.ServerID, "serverCount", cs.serverCount, "clientsCount", cs.ClientsCount())
-				if cs.serverCount != 0 && cs.ClientsCount() >= cs.serverCount {
+				klog.V(4).InfoS("duplicate server", "serverID", dse.ServerID, "serverCount", cs.serverCount, "agentsCount", cs.AgentsCount())
+				if cs.serverCount != 0 && cs.AgentsCount() >= cs.serverCount {
 					duration = backoff.Step()
 				}
 			} else {
@@ -196,11 +196,11 @@ func (cs *ClientSet) sync() {
 	}
 }
 
-func (cs *ClientSet) connectOnce() error {
-	if !cs.syncForever && cs.serverCount != 0 && cs.ClientsCount() >= cs.serverCount {
+func (cs *AgentSet) connectOnce() error {
+	if !cs.syncForever && cs.serverCount != 0 && cs.AgentsCount() >= cs.serverCount {
 		return nil
 	}
-	c, serverCount, err := cs.newAgentClient()
+	c, serverCount, err := cs.newAgent()
 	if err != nil {
 		return err
 	}
@@ -210,29 +210,29 @@ func (cs *ClientSet) connectOnce() error {
 
 	}
 	cs.serverCount = serverCount
-	if err := cs.AddClient(c.serverID, c); err != nil {
+	if err := cs.AddAgent(c.serverID, c); err != nil {
 		if dse, ok := err.(*DuplicateServerError); ok {
 			klog.V(4).InfoS("closing connection to duplicate server", "serverID", dse.ServerID)
 		} else {
-			klog.ErrorS(err, "closing connection failure when adding a client")
+			klog.ErrorS(err, "closing connection failure when adding an agent")
 		}
 		c.Close()
 		return err
 	}
-	klog.V(2).InfoS("sync added client connecting to proxy server", "serverID", c.serverID)
+	klog.V(2).InfoS("sync added agent connecting to proxy server", "serverID", c.serverID)
 	go c.Serve()
 	return nil
 }
 
-func (cs *ClientSet) Serve() {
+func (cs *AgentSet) Serve() {
 	go cs.sync()
 }
 
-func (cs *ClientSet) shutdown() {
+func (cs *AgentSet) shutdown() {
 	cs.mu.Lock()
 	defer cs.mu.Unlock()
-	for serverID, client := range cs.clients {
+	for serverID, client := range cs.agents {
 		client.Close()
-		delete(cs.clients, serverID)
+		delete(cs.agents, serverID)
 	}
 }

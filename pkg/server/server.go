@@ -615,7 +615,7 @@ func (s *ProxyServer) authenticateAgentViaToken(ctx context.Context) error {
 		return fmt.Errorf("Failed to validate authentication token, err:%v", err)
 	}
 
-	klog.V(2).Infoln("Client successfully authenticated via token")
+	klog.V(2).Infoln("Agent successfully authenticated via token")
 	return nil
 }
 
@@ -633,7 +633,7 @@ func (s *ProxyServer) Connect(stream agent.AgentService_ConnectServer) error {
 
 	if s.AgentAuthenticationOptions.Enabled {
 		if err := s.authenticateAgentViaToken(stream.Context()); err != nil {
-			klog.ErrorS(err, "Client authentication failed", "agentID", agentID)
+			klog.ErrorS(err, "Agent authentication failed", "agentID", agentID)
 			return err
 		}
 	}

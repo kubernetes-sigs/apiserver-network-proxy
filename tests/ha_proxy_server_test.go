@@ -129,7 +129,7 @@ func TestBasicHAProxyServer_GRPC(t *testing.T) {
 	var hc, cc int
 	for i := 0; i < 3; i++ {
 		time.Sleep(1 * time.Second)
-		hc, cc = clientset.HealthyClientsCount(), clientset.ClientsCount()
+		hc, cc = clientset.HealthyAgentsCount(), clientset.AgentsCount()
 		t.Logf("got %d clients, %d of them are healthy", hc, cc)
 		if hc == 3 && cc == 3 {
 			ready = true
@@ -167,7 +167,7 @@ func TestBasicHAProxyServer_GRPC(t *testing.T) {
 	ready = false
 	for i := 0; i < 3; i++ {
 		time.Sleep(1 * time.Second)
-		hc, cc = clientset.HealthyClientsCount(), clientset.ClientsCount()
+		hc, cc = clientset.HealthyAgentsCount(), clientset.AgentsCount()
 		t.Logf("got %d clients, %d of them are healthy", hc, cc)
 		if hc == 3 && (cc == 3 || cc == 4) {
 			ready = true
