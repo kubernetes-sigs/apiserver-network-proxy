@@ -27,6 +27,7 @@ import (
 	"k8s.io/klog/v2"
 )
 
+// nolint: golint
 // AgentSet consists of agents connected to each instance of an HA proxy server.
 type AgentSet struct {
 	mu     sync.Mutex        //protects the agents.
