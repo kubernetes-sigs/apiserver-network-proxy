@@ -9,12 +9,13 @@ import (
 	"runtime"
 	"strconv"
 
+	"github.com/kubermatic/benchmate"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"github.com/spf13/cobra"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials"
 	"google.golang.org/grpc/keepalive"
-	"k8s.io/klog/v2"
+	klog "k8s.io/klog/v2"
 
 	"sigs.k8s.io/apiserver-network-proxy/cmd/agent/app/options"
 	"sigs.k8s.io/apiserver-network-proxy/pkg/util"
@@ -124,6 +125,8 @@ func (a *Agent) runAdminServer(o *options.GrpcProxyAgentOptions) error {
 	if o.EnableProfiling {
 		muxHandler.HandleFunc("/debug/pprof", util.RedirectTo("/debug/pprof/"))
 		muxHandler.HandleFunc("/debug/pprof/", pprof.Index)
+		muxHandler.HandleFunc("/benchmate/throughput", benchmate.ThroughputHandler)
+		muxHandler.HandleFunc("/benchmate/latency", benchmate.LatencyHandler)
 		if o.EnableContentionProfiling {
 			runtime.SetBlockProfileRate(1)
 		}
