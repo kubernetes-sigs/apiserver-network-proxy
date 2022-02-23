@@ -460,8 +460,9 @@ func (s *ProxyServer) serveRecvFrontend(stream client.ProxyService_ProxyServer, 
 			if err := backend.Send(pkt); err != nil {
 				// TODO: retry with other backends connecting to this agent.
 				klog.ErrorS(err, "CLOSE_REQ to Backend failed", "serverID", s.serverID, "connectionID", connID)
+			} else {
+				klog.V(5).Infoln("CLOSE_REQ sent to backend", "serverID", s.serverID, "connectionID", connID)
 			}
-			klog.V(5).Infoln("CLOSE_REQ sent to backend", "serverID", s.serverID, "connectionID", connID)
 
 		case client.PacketType_DIAL_CLS:
 			random := pkt.GetCloseDial().Random
