@@ -125,8 +125,12 @@ func (t *grpcTunnel) serve(c clientConn) {
 				select {
 				case ch <- result:
 				default:
-					klog.ErrorS(fmt.Errorf("blocked pending channel"), "Received second dial response for connection request", "connectionID", resp.ConnectID, "dialID", resp.Random)
-					// On multiple dial responses, avoid leaking serve goroutine.
+					// If there are no readers of the pending dial channel above, it means one of two things:
+					//   1. There was a second DIAL_RSP for the connection request (this is very unlikely but possible)
+					//   2. grpcTunnel.DialContext() returned early due to a dial timeout or the client canceling the context
+					//
+					// In either scenario, we should return here as this tunnel is no longer needed.
+					klog.V(1).InfoS("DialResp has no receiver; dropped", "connectionID", resp.ConnectID, "dialID", resp.Random)
 					return
 				}
 			}
@@ -183,7 +187,8 @@ func (t *grpcTunnel) DialContext(ctx context.Context, protocol, address string) 
 	}
 
 	random := rand.Int63() /* #nosec G404 */
-	resCh := make(chan dialResult, 1)
+	// This channel MUST NOT be buffered. The sender needs to know when we are not receiving things, so they can abort.
+	resCh := make(chan dialResult)
 	t.pendingDialLock.Lock()
 	t.pendingDial[random] = resCh
 	t.pendingDialLock.Unlock()
@@ -226,8 +231,10 @@ func (t *grpcTunnel) DialContext(ctx context.Context, protocol, address string) 
 		t.conns[res.connid] = c
 		t.connsLock.Unlock()
 	case <-time.After(30 * time.Second):
+		klog.V(5).InfoS("Timed out waiting for DialResp", "dialID", random)
 		return nil, errors.New("dial timeout, backstop")
 	case <-ctx.Done():
+		klog.V(5).InfoS("Context canceled waiting for DialResp", "ctxErr", ctx.Err(), "dialID", random)
 		return nil, errors.New("dial timeout, context")
 	}
 
