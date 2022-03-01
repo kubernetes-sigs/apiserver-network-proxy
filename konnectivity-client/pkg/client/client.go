@@ -231,8 +231,10 @@ func (t *grpcTunnel) DialContext(ctx context.Context, protocol, address string) 
 		t.conns[res.connid] = c
 		t.connsLock.Unlock()
 	case <-time.After(30 * time.Second):
+		klog.V(5).InfoS("Timed out waiting for DialResp", "dialID", random)
 		return nil, errors.New("dial timeout, backstop")
 	case <-ctx.Done():
+		klog.V(5).InfoS("Context canceled waiting for DialResp", "ctxErr", ctx.Err(), "dialID", random)
 		return nil, errors.New("dial timeout, context")
 	}
 
