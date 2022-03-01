@@ -125,8 +125,11 @@ func (t *grpcTunnel) serve(c clientConn) {
 				select {
 				case ch <- result:
 				default:
-					klog.ErrorS(fmt.Errorf("blocked pending channel"), "Received second dial response for connection request", "connectionID", resp.ConnectID, "dialID", resp.Random)
-					// On multiple dial responses, avoid leaking serve goroutine.
+					// If there are no readers of the pending dial channel above, it means one of two things:
+					//   1. There was a second DIAL_RSP for the connection request (this is very unlikely but possible)
+					//   2. grpcTunnel.DialContext() returned early due to a dial timeout or the client canceling the context
+					//
+					// In either scenario, we should return here as this tunnel is no longer needed.
 					return
 				}
 			}
@@ -183,7 +186,7 @@ func (t *grpcTunnel) DialContext(ctx context.Context, protocol, address string) 
 	}
 
 	random := rand.Int63() /* #nosec G404 */
-	resCh := make(chan dialResult, 1)
+	resCh := make(chan dialResult)
 	t.pendingDialLock.Lock()
 	t.pendingDial[random] = resCh
 	t.pendingDialLock.Unlock()
