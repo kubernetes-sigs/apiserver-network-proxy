@@ -186,6 +186,7 @@ func (t *grpcTunnel) DialContext(ctx context.Context, protocol, address string) 
 	}
 
 	random := rand.Int63() /* #nosec G404 */
+	// This channel MUST NOT be buffered. The sender needs to know when we are not receiving things, so they can abort.
 	resCh := make(chan dialResult)
 	t.pendingDialLock.Lock()
 	t.pendingDial[random] = resCh
