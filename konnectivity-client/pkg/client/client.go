@@ -130,6 +130,7 @@ func (t *grpcTunnel) serve(c clientConn) {
 					//   2. grpcTunnel.DialContext() returned early due to a dial timeout or the client canceling the context
 					//
 					// In either scenario, we should return here as this tunnel is no longer needed.
+					klog.V(1).InfoS("DialResp has no receiver; dropped", "connectionID", resp.ConnectID, "dialID", resp.Random)
 					return
 				}
 			}
