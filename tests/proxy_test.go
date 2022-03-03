@@ -183,8 +183,7 @@ func TestProxyHandle_DoneContext_GRPC(t *testing.T) {
 }
 
 func TestProxyHandle_SlowContext_GRPC(t *testing.T) {
-	// TODO: enable goleak validation after https://github.com/kubernetes-sigs/apiserver-network-proxy/issues/340
-	// defer goleak.VerifyNone(t, goleak.IgnoreCurrent())
+	defer goleak.VerifyNone(t, goleak.IgnoreCurrent())
 
 	slowServer := newEchoServer("hello")
 	slowServer.wchan = make(chan struct{})
