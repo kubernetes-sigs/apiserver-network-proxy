@@ -23,12 +23,15 @@ import (
 	"testing"
 	"time"
 
+	"go.uber.org/goleak"
 	"google.golang.org/grpc"
 	"k8s.io/klog/v2"
 	"sigs.k8s.io/apiserver-network-proxy/konnectivity-client/proto/client"
 )
 
 func TestDial(t *testing.T) {
+	defer goleak.VerifyNone(t, goleak.IgnoreCurrent())
+
 	ctx := context.Background()
 	s, ps := pipe()
 	ts := testServer(ps, 100)
@@ -62,6 +65,8 @@ func TestDial(t *testing.T) {
 // TestDialRace exercises the scenario where serve() observes and handles DIAL_RSP
 // before DialContext() does any work after sending the DIAL_REQ.
 func TestDialRace(t *testing.T) {
+	defer goleak.VerifyNone(t, goleak.IgnoreCurrent())
+
 	ctx := context.Background()
 	s, ps := pipe()
 	ts := testServer(ps, 100)
@@ -109,6 +114,8 @@ func (s fakeSlowSend) Send(p *client.Packet) error {
 }
 
 func TestData(t *testing.T) {
+	defer goleak.VerifyNone(t, goleak.IgnoreCurrent())
+
 	ctx := context.Background()
 	s, ps := pipe()
 	ts := testServer(ps, 100)
@@ -167,6 +174,8 @@ func TestData(t *testing.T) {
 }
 
 func TestClose(t *testing.T) {
+	defer goleak.VerifyNone(t, goleak.IgnoreCurrent())
+
 	ctx := context.Background()
 	s, ps := pipe()
 	ts := testServer(ps, 100)
@@ -197,6 +206,18 @@ func TestClose(t *testing.T) {
 	}
 	if ts.packets[1].GetCloseRequest().ConnectID != 100 {
 		t.Errorf("expect connectID=100; got %d", ts.packets[1].GetCloseRequest().ConnectID)
+	}
+}
+
+func TestCreateSingleUseGrpcTunnel_NoLeakOnFailure(t *testing.T) {
+	defer goleak.VerifyNone(t, goleak.IgnoreCurrent())
+
+	tunnel, err := CreateSingleUseGrpcTunnel(context.Background(), "127.0.0.1:12345", grpc.WithInsecure())
+	if tunnel != nil {
+		t.Fatal("expected nil tunnel when calling CreateSingleUseGrpcTunnel")
+	}
+	if err == nil {
+		t.Fatal("expected error when calling CreateSingleUseGrpcTunnel")
 	}
 }
 

@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"go.uber.org/goleak"
 	"google.golang.org/grpc"
 	"sigs.k8s.io/apiserver-network-proxy/konnectivity-client/pkg/client"
 	clientproto "sigs.k8s.io/apiserver-network-proxy/konnectivity-client/proto/client"
@@ -56,6 +57,8 @@ func (s *testServer) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 }
 
 func TestBasicProxy_GRPC(t *testing.T) {
+	defer goleak.VerifyNone(t, goleak.IgnoreCurrent())
+
 	ctx := context.Background()
 	server := httptest.NewServer(newEchoServer("hello"))
 	defer server.Close()
@@ -86,7 +89,13 @@ func TestBasicProxy_GRPC(t *testing.T) {
 		},
 	}
 
-	r, err := c.Get(server.URL)
+	req, err := http.NewRequest("GET", server.URL, nil)
+	if err != nil {
+		t.Error(err)
+	}
+	req.Close = true
+
+	r, err := c.Do(req)
 	if err != nil {
 		t.Error(err)
 	}
@@ -102,6 +111,8 @@ func TestBasicProxy_GRPC(t *testing.T) {
 }
 
 func TestProxyHandleDialError_GRPC(t *testing.T) {
+	defer goleak.VerifyNone(t, goleak.IgnoreCurrent())
+
 	ctx := context.Background()
 	invalidServer := httptest.NewServer(newEchoServer("hello"))
 
@@ -141,6 +152,8 @@ func TestProxyHandleDialError_GRPC(t *testing.T) {
 }
 
 func TestProxyHandle_DoneContext_GRPC(t *testing.T) {
+	defer goleak.VerifyNone(t, goleak.IgnoreCurrent())
+
 	hangingServer := newEchoServer("hello")
 	hangingServer.wchan = make(chan struct{})
 	server := httptest.NewServer(hangingServer)
@@ -170,6 +183,9 @@ func TestProxyHandle_DoneContext_GRPC(t *testing.T) {
 }
 
 func TestProxyHandle_SlowContext_GRPC(t *testing.T) {
+	// TODO: enable goleak validation after https://github.com/kubernetes-sigs/apiserver-network-proxy/issues/340
+	// defer goleak.VerifyNone(t, goleak.IgnoreCurrent())
+
 	slowServer := newEchoServer("hello")
 	slowServer.wchan = make(chan struct{})
 	server := httptest.NewServer(slowServer)
@@ -213,6 +229,7 @@ func TestProxyHandle_SlowContext_GRPC(t *testing.T) {
 	if err != nil {
 		t.Error(err)
 	}
+
 	_, err = c.Do(req)
 	if err == nil || !strings.Contains(err.Error(), "context deadline exceeded") {
 		t.Error("Expected error when context is cancelled, did not receive error")
@@ -220,6 +237,8 @@ func TestProxyHandle_SlowContext_GRPC(t *testing.T) {
 }
 
 func TestProxy_LargeResponse(t *testing.T) {
+	defer goleak.VerifyNone(t, goleak.IgnoreCurrent())
+
 	ctx := context.Background()
 	length := 1 << 20 // 1M
 	chunks := 10
@@ -252,7 +271,13 @@ func TestProxy_LargeResponse(t *testing.T) {
 		},
 	}
 
-	r, err := c.Get(server.URL)
+	req, err := http.NewRequest("GET", server.URL, nil)
+	if err != nil {
+		t.Error(err)
+	}
+	req.Close = true
+
+	r, err := c.Do(req)
 	if err != nil {
 		t.Error(err)
 	}
@@ -268,6 +293,8 @@ func TestProxy_LargeResponse(t *testing.T) {
 }
 
 func TestBasicProxy_HTTPCONN(t *testing.T) {
+	defer goleak.VerifyNone(t, goleak.IgnoreCurrent())
+
 	server := httptest.NewServer(newEchoServer("hello"))
 	defer server.Close()
 
@@ -338,6 +365,8 @@ func TestBasicProxy_HTTPCONN(t *testing.T) {
 }
 
 func TestFailedDial_HTTPCONN(t *testing.T) {
+	defer goleak.VerifyNone(t, goleak.IgnoreCurrent())
+
 	server := httptest.NewServer(newEchoServer("hello"))
 	server.Close() // cleanup immediately so connections will fail
 
