@@ -30,6 +30,8 @@ import (
 )
 
 func TestDial(t *testing.T) {
+	defer goleak.VerifyNone(t, goleak.IgnoreCurrent())
+
 	ctx := context.Background()
 	s, ps := pipe()
 	ts := testServer(ps, 100)
@@ -63,6 +65,8 @@ func TestDial(t *testing.T) {
 // TestDialRace exercises the scenario where serve() observes and handles DIAL_RSP
 // before DialContext() does any work after sending the DIAL_REQ.
 func TestDialRace(t *testing.T) {
+	defer goleak.VerifyNone(t, goleak.IgnoreCurrent())
+
 	ctx := context.Background()
 	s, ps := pipe()
 	ts := testServer(ps, 100)
@@ -110,6 +114,8 @@ func (s fakeSlowSend) Send(p *client.Packet) error {
 }
 
 func TestData(t *testing.T) {
+	defer goleak.VerifyNone(t, goleak.IgnoreCurrent())
+
 	ctx := context.Background()
 	s, ps := pipe()
 	ts := testServer(ps, 100)
@@ -168,6 +174,8 @@ func TestData(t *testing.T) {
 }
 
 func TestClose(t *testing.T) {
+	defer goleak.VerifyNone(t, goleak.IgnoreCurrent())
+
 	ctx := context.Background()
 	s, ps := pipe()
 	ts := testServer(ps, 100)
