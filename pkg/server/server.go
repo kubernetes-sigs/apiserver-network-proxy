@@ -446,7 +446,7 @@ func (s *ProxyServer) serveRecvFrontend(stream client.ProxyService_ProxyServer, 
 			if err := backend.Send(pkt); err != nil {
 				klog.ErrorS(err, "DIAL_REQ to Backend failed", "serverID", s.serverID)
 			} else {
-				klog.V(5).Infoln("DIAL_REQ sent to backend") // got this. but backend didn't receive anything.
+				klog.V(5).Infoln("DIAL_REQ sent to backend")
 			}
 
 		case client.PacketType_CLOSE_REQ:
