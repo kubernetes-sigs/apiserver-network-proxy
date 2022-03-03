@@ -29,10 +29,10 @@ type DestHostBackendManager struct {
 
 var _ BackendManager = &DestHostBackendManager{}
 
-func NewDestHostBackendManager() *DestHostBackendManager {
+func NewDestHostBackendManager(proxyStrategies []ProxyStrategy) *DestHostBackendManager {
 	return &DestHostBackendManager{
 		DefaultBackendStorage: NewDefaultBackendStorage(
-			[]agent.IdentifierType{agent.IPv4, agent.IPv6, agent.Host})}
+			[]agent.IdentifierType{agent.IPv4, agent.IPv6, agent.Host}, proxyStrategies)}
 }
 
 // Backend tries to get a backend associating to the request destination host.

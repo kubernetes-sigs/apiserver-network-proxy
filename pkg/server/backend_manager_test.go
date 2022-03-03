@@ -35,7 +35,7 @@ func TestAddRemoveBackends(t *testing.T) {
 	conn22 := new(fakeAgentServiceConnectServer)
 	conn3 := new(fakeAgentServiceConnectServer)
 
-	p := NewDefaultBackendManager()
+	p := NewDefaultBackendManager([]ProxyStrategy{ProxyStrategyDefault})
 
 	p.AddBackend("agent1", pkgagent.UID, conn1)
 	p.RemoveBackend("agent1", pkgagent.UID, conn1)
@@ -48,7 +48,7 @@ func TestAddRemoveBackends(t *testing.T) {
 		t.Errorf("expected %v, got %v", e, a)
 	}
 
-	p = NewDefaultBackendManager()
+	p = NewDefaultBackendManager([]ProxyStrategy{ProxyStrategyDefault})
 	p.AddBackend("agent1", pkgagent.UID, conn1)
 	p.AddBackend("agent1", pkgagent.UID, conn12)
 	// Adding the same connection again should be a no-op.
@@ -81,7 +81,7 @@ func TestAddRemoveBackendsWithDefaultRoute(t *testing.T) {
 	conn22 := new(fakeAgentServiceConnectServer)
 	conn3 := new(fakeAgentServiceConnectServer)
 
-	p := NewDefaultRouteBackendManager()
+	p := NewDefaultBackendManager([]ProxyStrategy{ProxyStrategyDefaultRoute})
 
 	p.AddBackend("agent1", pkgagent.DefaultRoute, conn1)
 	p.RemoveBackend("agent1", pkgagent.DefaultRoute, conn1)
@@ -97,7 +97,7 @@ func TestAddRemoveBackendsWithDefaultRoute(t *testing.T) {
 		t.Errorf("expected %v, got %v", e, a)
 	}
 
-	p = NewDefaultRouteBackendManager()
+	p = NewDefaultBackendManager([]ProxyStrategy{ProxyStrategyDefaultRoute})
 	p.AddBackend("agent1", pkgagent.DefaultRoute, conn1)
 	p.AddBackend("agent1", pkgagent.DefaultRoute, conn12)
 	// Adding the same connection again should be a no-op.

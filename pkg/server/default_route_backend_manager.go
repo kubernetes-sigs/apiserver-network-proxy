@@ -29,10 +29,10 @@ type DefaultRouteBackendManager struct {
 
 var _ BackendManager = &DefaultRouteBackendManager{}
 
-func NewDefaultRouteBackendManager() *DefaultRouteBackendManager {
+func NewDefaultRouteBackendManager(proxyStrategies []ProxyStrategy) *DefaultRouteBackendManager {
 	return &DefaultRouteBackendManager{
 		DefaultBackendStorage: NewDefaultBackendStorage(
-			[]agent.IdentifierType{agent.DefaultRoute})}
+			[]agent.IdentifierType{agent.DefaultRoute}, proxyStrategies)}
 }
 
 // Backend tries to get a backend associating to the request destination host.

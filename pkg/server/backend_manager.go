@@ -128,9 +128,33 @@ type DefaultBackendManager struct {
 	*DefaultBackendStorage
 }
 
-func (dbm *DefaultBackendManager) Backend(_ context.Context) (Backend, error) {
-	klog.V(5).InfoS("Get a random backend through the DefaultBackendManager")
-	return dbm.DefaultBackendStorage.GetRandomBackend()
+func (dbm *DefaultBackendManager) Backend(ctx context.Context) (Backend, error) {
+	var backend Backend
+	var err error
+out:
+	for _, strategy := range dbm.proxyStrategies {
+		switch strategy {
+		case ProxyStrategyDestHost:
+			klog.V(5).InfoS("Get a backend based on DestHost strategy")
+			backend, err = dbm.GetBackendDestHost(ctx)
+			if err == nil {
+				break out
+			}
+		case ProxyStrategyDefaultRoute:
+			klog.V(5).InfoS("Get a backend based on DefaultRoute strategy")
+			backend, err = dbm.DefaultBackendStorage.GetBackendDefaultRoute()
+			if err == nil {
+				break out
+			}
+		default:
+			klog.V(5).InfoS("Get a random backend")
+			backend, err = dbm.DefaultBackendStorage.GetRandomBackend()
+			if err == nil {
+				break out
+			}
+		}
+	}
+	return backend, err
 }
 
 // DefaultBackendStorage is the default backend storage.
@@ -154,22 +178,37 @@ type DefaultBackendStorage struct {
 	// types of identifiers when associating to a specific BackendManager,
 	// e.g., when associating to the DestHostBackendManager, it can only use the
 	// identifiers of types, IPv4, IPv6 and Host.
-	idTypes []pkgagent.IdentifierType
+	idTypes         []pkgagent.IdentifierType
+	proxyStrategies []ProxyStrategy
 }
 
 // NewDefaultBackendManager returns a DefaultBackendManager.
-func NewDefaultBackendManager() *DefaultBackendManager {
+func NewDefaultBackendManager(proxyStrategies []ProxyStrategy) *DefaultBackendManager {
+	var idTypes []pkgagent.IdentifierType
+	for _, ps := range proxyStrategies {
+		switch ps {
+		case ProxyStrategyDestHost:
+			idTypes = append(idTypes, pkgagent.IPv4, pkgagent.IPv6, pkgagent.Host)
+		case ProxyStrategyDefault:
+			idTypes = append(idTypes, pkgagent.UID)
+		case ProxyStrategyDefaultRoute:
+			idTypes = append(idTypes, pkgagent.DefaultRoute)
+		default:
+			klog.V(4).InfoS("Unknonw proxy strategy", "strategy", ps)
+		}
+	}
 	return &DefaultBackendManager{
-		DefaultBackendStorage: NewDefaultBackendStorage(
-			[]pkgagent.IdentifierType{pkgagent.UID})}
+		DefaultBackendStorage: NewDefaultBackendStorage(idTypes, proxyStrategies),
+	}
 }
 
 // NewDefaultBackendStorage returns a DefaultBackendStorage
-func NewDefaultBackendStorage(idTypes []pkgagent.IdentifierType) *DefaultBackendStorage {
+func NewDefaultBackendStorage(idTypes []pkgagent.IdentifierType, proxyStrategies []ProxyStrategy) *DefaultBackendStorage {
 	return &DefaultBackendStorage{
-		backends: make(map[string][]*backend),
-		random:   rand.New(rand.NewSource(time.Now().UnixNano())),
-		idTypes:  idTypes,
+		backends:        make(map[string][]*backend),
+		random:          rand.New(rand.NewSource(time.Now().UnixNano())),
+		idTypes:         idTypes,
+		proxyStrategies: proxyStrategies,
 	} /* #nosec G404 */
 }
 
@@ -289,6 +328,39 @@ func ignoreNotFound(err error) error {
 		return nil
 	}
 	return err
+}
+
+// GetBackendDestHost tries to get a backend associating to the request destination host/address.
+func (dibm *DefaultBackendStorage) GetBackendDestHost(ctx context.Context) (Backend, error) {
+	dibm.mu.RLock()
+	defer dibm.mu.RUnlock()
+	if len(dibm.backends) == 0 {
+		return nil, &ErrNotFound{}
+	}
+	destHost := ctx.Value(destHost).(string)
+	if destHost != "" {
+		bes, exist := dibm.backends[destHost]
+		if exist && len(bes) > 0 {
+			klog.V(5).InfoS("Get the backend through the DestHostBackendManager", "destHost", destHost)
+			return dibm.backends[destHost][0], nil
+		}
+	}
+	return nil, &ErrNotFound{}
+}
+
+// Backend tries to get a backend associating to the request destination host.
+func (dibm *DefaultBackendStorage) GetBackendDefaultRoute() (Backend, error) {
+	dibm.mu.RLock()
+	defer dibm.mu.RUnlock()
+	if len(dibm.backends) == 0 {
+		return nil, &ErrNotFound{}
+	}
+	if len(dibm.defaultRouteAgentIDs) == 0 {
+		return nil, &ErrNotFound{}
+	}
+	agentID := dibm.defaultRouteAgentIDs[dibm.random.Intn(len(dibm.defaultRouteAgentIDs))]
+	klog.V(4).InfoS("Picked agent as backend", "agentID", agentID)
+	return dibm.backends[agentID][0], nil
 }
 
 // GetRandomBackend returns a random backend connection from all connected agents.

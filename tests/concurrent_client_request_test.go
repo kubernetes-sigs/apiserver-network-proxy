@@ -124,7 +124,7 @@ func TestConcurrentClientRequest(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer cleanup()
-	ps.BackendManagers = []server.BackendManager{newSingleTimeGetter(server.NewDefaultBackendManager())}
+	ps.BackendManager = newSingleTimeGetter(server.NewDefaultBackendManager([]server.ProxyStrategy{server.ProxyStrategyDefault}))
 
 	stopCh := make(chan struct{})
 	defer close(stopCh)
