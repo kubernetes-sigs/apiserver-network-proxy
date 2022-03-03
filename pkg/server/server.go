@@ -434,8 +434,9 @@ func (s *ProxyServer) serveRecvFrontend(stream client.ProxyService_ProxyServer, 
 				// The Dial is failing; no reason to keep this goroutine.
 				return
 			}
+			random := pkt.GetDialRequest().Random
 			s.PendingDial.Add(
-				pkt.GetDialRequest().Random,
+				random,
 				&ProxyClientConnection{
 					Mode:      "grpc",
 					Grpc:      stream,
@@ -444,9 +445,9 @@ func (s *ProxyServer) serveRecvFrontend(stream client.ProxyService_ProxyServer, 
 					backend:   backend,
 				})
 			if err := backend.Send(pkt); err != nil {
-				klog.ErrorS(err, "DIAL_REQ to Backend failed", "serverID", s.serverID)
+				klog.ErrorS(err, "DIAL_REQ to Backend failed", "serverID", s.serverID, "dialID", random)
 			} else {
-				klog.V(5).Infoln("DIAL_REQ sent to backend")
+				klog.V(5).InfoS("DIAL_REQ sent to backend", "serverID", s.serverID, "dialID", random)
 			}
 
 		case client.PacketType_CLOSE_REQ:
