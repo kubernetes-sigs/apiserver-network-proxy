@@ -62,7 +62,7 @@ type singleTimeManager struct {
 	used     map[string]struct{}
 }
 
-func (s *singleTimeManager) AddBackend(agentID string, _ pkgagent.IdentifierType, conn agent.AgentService_ConnectServer) server.Backend {
+func (s *singleTimeManager) AddBackend(agentID string, _ pkgagent.Identifiers, conn agent.AgentService_ConnectServer) server.Backend {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.backends[agentID] = conn

@@ -37,7 +37,7 @@ func TestAddRemoveBackends(t *testing.T) {
 
 	p := NewDefaultBackendManager([]ProxyStrategy{ProxyStrategyDefault})
 
-	p.AddBackend("agent1", pkgagent.UID, conn1)
+	p.AddBackend("agent1", pkgagent.Identifiers{}, conn1)
 	p.RemoveBackend("agent1", pkgagent.UID, conn1)
 	expectedBackends := make(map[string][]*backend)
 	expectedAgentIDs := []string{}
@@ -49,13 +49,13 @@ func TestAddRemoveBackends(t *testing.T) {
 	}
 
 	p = NewDefaultBackendManager([]ProxyStrategy{ProxyStrategyDefault})
-	p.AddBackend("agent1", pkgagent.UID, conn1)
-	p.AddBackend("agent1", pkgagent.UID, conn12)
+	p.AddBackend("agent1", pkgagent.Identifiers{}, conn1)
+	p.AddBackend("agent1", pkgagent.Identifiers{}, conn12)
 	// Adding the same connection again should be a no-op.
-	p.AddBackend("agent1", pkgagent.UID, conn12)
-	p.AddBackend("agent2", pkgagent.UID, conn2)
-	p.AddBackend("agent2", pkgagent.UID, conn22)
-	p.AddBackend("agent3", pkgagent.UID, conn3)
+	p.AddBackend("agent1", pkgagent.Identifiers{}, conn12)
+	p.AddBackend("agent2", pkgagent.Identifiers{}, conn2)
+	p.AddBackend("agent2", pkgagent.Identifiers{}, conn22)
+	p.AddBackend("agent3", pkgagent.Identifiers{}, conn3)
 	p.RemoveBackend("agent2", pkgagent.UID, conn22)
 	p.RemoveBackend("agent2", pkgagent.UID, conn2)
 	p.RemoveBackend("agent1", pkgagent.UID, conn1)
@@ -83,7 +83,7 @@ func TestAddRemoveBackendsWithDefaultRoute(t *testing.T) {
 
 	p := NewDefaultBackendManager([]ProxyStrategy{ProxyStrategyDefaultRoute})
 
-	p.AddBackend("agent1", pkgagent.DefaultRoute, conn1)
+	p.AddBackend("agent1", pkgagent.Identifiers{DefaultRoute: true}, conn1)
 	p.RemoveBackend("agent1", pkgagent.DefaultRoute, conn1)
 	expectedBackends := make(map[string][]*backend)
 	expectedAgentIDs := []string{}
@@ -98,13 +98,13 @@ func TestAddRemoveBackendsWithDefaultRoute(t *testing.T) {
 	}
 
 	p = NewDefaultBackendManager([]ProxyStrategy{ProxyStrategyDefaultRoute})
-	p.AddBackend("agent1", pkgagent.DefaultRoute, conn1)
-	p.AddBackend("agent1", pkgagent.DefaultRoute, conn12)
+	p.AddBackend("agent1", pkgagent.Identifiers{DefaultRoute: true}, conn1)
+	p.AddBackend("agent1", pkgagent.Identifiers{DefaultRoute: true}, conn12)
 	// Adding the same connection again should be a no-op.
-	p.AddBackend("agent1", pkgagent.DefaultRoute, conn12)
-	p.AddBackend("agent2", pkgagent.DefaultRoute, conn2)
-	p.AddBackend("agent2", pkgagent.DefaultRoute, conn22)
-	p.AddBackend("agent3", pkgagent.DefaultRoute, conn3)
+	p.AddBackend("agent1", pkgagent.Identifiers{DefaultRoute: true}, conn12)
+	p.AddBackend("agent2", pkgagent.Identifiers{DefaultRoute: true}, conn2)
+	p.AddBackend("agent2", pkgagent.Identifiers{DefaultRoute: true}, conn22)
+	p.AddBackend("agent3", pkgagent.Identifiers{DefaultRoute: true}, conn3)
 	p.RemoveBackend("agent2", pkgagent.DefaultRoute, conn22)
 	p.RemoveBackend("agent2", pkgagent.DefaultRoute, conn2)
 	p.RemoveBackend("agent1", pkgagent.DefaultRoute, conn1)
