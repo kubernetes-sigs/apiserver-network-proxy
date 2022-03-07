@@ -218,36 +218,12 @@ func containIDType(idTypes []pkgagent.IdentifierType, idType pkgagent.Identifier
 			return true
 		}
 	}
+	klog.V(4).InfoS("Identifier type is not supported", "error", "error", &ErrWrongIDType{idType, idTypes})
 	return false
 }
 
 // AddBackend adds a backend.
 func (s *DefaultBackendStorage) AddBackend(agentID string, agentIdentifiers pkgagent.Identifiers, conn agent.AgentService_ConnectServer) Backend {
-	// if the agents has any identifier which is not supported by the BackendStorage, return nil
-	if len(agentIdentifiers.Host) > 0 {
-		if !containIDType(s.idTypes, pkgagent.Host) {
-			klog.V(4).InfoS("fail to add backend", "backend", agentID, "error", &ErrWrongIDType{pkgagent.Host, s.idTypes})
-			return nil
-		}
-	}
-	if len(agentIdentifiers.IPv4) > 0 {
-		if !containIDType(s.idTypes, pkgagent.IPv4) {
-			klog.V(4).InfoS("fail to add backend", "backend", agentID, "error", &ErrWrongIDType{pkgagent.IPv4, s.idTypes})
-			return nil
-		}
-	}
-	if len(agentIdentifiers.IPv6) > 0 {
-		if !containIDType(s.idTypes, pkgagent.IPv6) {
-			klog.V(4).InfoS("fail to add backend", "backend", agentID, "error", &ErrWrongIDType{pkgagent.IPv6, s.idTypes})
-			return nil
-		}
-	}
-	if agentIdentifiers.DefaultRoute {
-		if !containIDType(s.idTypes, pkgagent.DefaultRoute) {
-			klog.V(4).InfoS("fail to add backend", "backend", agentID, "error", &ErrWrongIDType{pkgagent.DefaultRoute, s.idTypes})
-			return nil
-		}
-	}
 	klog.V(2).InfoS("Register backend for agent", "connection", conn, "agentID", agentID)
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -266,55 +242,61 @@ func (s *DefaultBackendStorage) AddBackend(agentID string, agentIdentifiers pkga
 	} else {
 		s.backends[agentID] = []*backend{addedBackend}
 		s.agentIDs = append(s.agentIDs, agentID)
-		if agentIdentifiers.DefaultRoute {
+		if agentIdentifiers.DefaultRoute && containIDType(s.idTypes, pkgagent.DefaultRoute) {
 			s.defaultRouteAgentIDs = append(s.defaultRouteAgentIDs, agentID)
 		}
 	}
 
 	// populate the backends according for DestHost proxy strategy
-	for _, ipv4 := range agentIdentifiers.IPv4 {
-		klog.V(5).InfoS("Add the agent to BackendManager", "agentIdentifier", ipv4, "agentID", agentID)
-		_, ok := s.backends[ipv4]
-		if ok {
-			for _, v := range s.backends[ipv4] {
-				if v.conn == conn {
-					klog.V(1).InfoS("This should not happen. Adding existing backend for agent", "connection", conn, "agentID", ipv4)
-					return v
+	if len(agentIdentifiers.IPv4) > 0 && containIDType(s.idTypes, pkgagent.IPv4) {
+		for _, ipv4 := range agentIdentifiers.IPv4 {
+			klog.V(5).InfoS("Add the agent to BackendManager", "agentIdentifier", ipv4, "agentID", agentID)
+			_, ok := s.backends[ipv4]
+			if ok {
+				for _, v := range s.backends[ipv4] {
+					if v.conn == conn {
+						klog.V(1).InfoS("This should not happen. Adding existing backend for agent", "connection", conn, "agentID", ipv4)
+						return v
+					}
 				}
+				s.backends[ipv4] = append(s.backends[ipv4], addedBackend)
+			} else {
+				s.backends[ipv4] = []*backend{addedBackend}
 			}
-			s.backends[ipv4] = append(s.backends[ipv4], addedBackend)
-		} else {
-			s.backends[ipv4] = []*backend{addedBackend}
 		}
 	}
-	for _, ipv6 := range agentIdentifiers.IPv6 {
-		klog.V(5).InfoS("Add the agent to BackendManager", "agentIdentifier", ipv6, "agentID", agentID)
-		_, ok := s.backends[ipv6]
-		if ok {
-			for _, v := range s.backends[ipv6] {
-				if v.conn == conn {
-					klog.V(1).InfoS("This should not happen. Adding existing backend for agent", "connection", conn, "agentID", ipv6)
-					return v
+	if len(agentIdentifiers.IPv6) > 0 && containIDType(s.idTypes, pkgagent.IPv6) {
+		for _, ipv6 := range agentIdentifiers.IPv6 {
+			klog.V(5).InfoS("Add the agent to BackendManager", "agentIdentifier", ipv6, "agentID", agentID)
+			_, ok := s.backends[ipv6]
+			if ok {
+				for _, v := range s.backends[ipv6] {
+					if v.conn == conn {
+						klog.V(1).InfoS("This should not happen. Adding existing backend for agent", "connection", conn, "agentID", ipv6)
+						return v
+					}
 				}
+				s.backends[ipv6] = append(s.backends[ipv6], addedBackend)
+			} else {
+				s.backends[ipv6] = []*backend{addedBackend}
 			}
-			s.backends[ipv6] = append(s.backends[ipv6], addedBackend)
-		} else {
-			s.backends[ipv6] = []*backend{addedBackend}
 		}
 	}
-	for _, host := range agentIdentifiers.Host {
-		klog.V(5).InfoS("Add the agent to BackendManager", "agentIdentifier", host, "agentID", agentID)
-		_, ok := s.backends[host]
-		if ok {
-			for _, v := range s.backends[host] {
-				if v.conn == conn {
-					klog.V(1).InfoS("This should not happen. Adding existing backend for agent", "connection", conn, "agentID", host)
-					return v
+	if len(agentIdentifiers.Host) > 0 && containIDType(s.idTypes, pkgagent.Host) {
+		for _, host := range agentIdentifiers.Host {
+			klog.V(5).InfoS("Add the agent to BackendManager", "agentIdentifier", host, "agentID", agentID)
+			_, ok := s.backends[host]
+			if ok {
+				for _, v := range s.backends[host] {
+					if v.conn == conn {
+						klog.V(1).InfoS("This should not happen. Adding existing backend for agent", "connection", conn, "agentID", host)
+						return v
+					}
 				}
+				s.backends[host] = append(s.backends[host], addedBackend)
+			} else {
+				s.backends[host] = []*backend{addedBackend}
 			}
-			s.backends[host] = append(s.backends[host], addedBackend)
-		} else {
-			s.backends[host] = []*backend{addedBackend}
 		}
 	}
 	metrics.Metrics.SetBackendCount(len(s.backends))
@@ -412,7 +394,7 @@ func (dibm *DefaultBackendStorage) GetBackendDestHost(ctx context.Context) (Back
 		bes, exist := dibm.backends[destHost]
 		if exist && len(bes) > 0 {
 			klog.V(5).InfoS("Get the backend through the DestHostBackendManager", "destHost", destHost)
-			return dibm.backends[destHost][0], nil
+			return dibm.backends[destHost][dibm.random.Intn(len(bes))], nil
 		}
 	}
 	return nil, &ErrNotFound{}
