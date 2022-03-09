@@ -394,7 +394,7 @@ func (dibm *DefaultBackendStorage) GetBackendDestHost(ctx context.Context) (Back
 		bes, exist := dibm.backends[destHost]
 		if exist && len(bes) > 0 {
 			klog.V(5).InfoS("Get the backend through the DestHostBackendManager", "destHost", destHost)
-			return dibm.backends[destHost][dibm.random.Intn(len(bes))], nil
+			return dibm.backends[destHost][0], nil
 		}
 	}
 	return nil, &ErrNotFound{}
