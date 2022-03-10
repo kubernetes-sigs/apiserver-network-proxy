@@ -383,36 +383,36 @@ func ignoreNotFound(err error) error {
 }
 
 // GetBackendDestHost tries to get a backend associating to the request destination host/address.
-func (dibm *DefaultBackendStorage) GetBackendDestHost(ctx context.Context) (Backend, error) {
-	dibm.mu.RLock()
-	defer dibm.mu.RUnlock()
-	if len(dibm.backends) == 0 {
+func (s *DefaultBackendStorage) GetBackendDestHost(ctx context.Context) (Backend, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	if len(s.backends) == 0 {
 		return nil, &ErrNotFound{}
 	}
 	destHost := ctx.Value(destHost).(string)
 	if destHost != "" {
-		bes, exist := dibm.backends[destHost]
+		bes, exist := s.backends[destHost]
 		if exist && len(bes) > 0 {
 			klog.V(5).InfoS("Get the backend through the DestHostBackendManager", "destHost", destHost)
-			return dibm.backends[destHost][0], nil
+			return s.backends[destHost][0], nil
 		}
 	}
 	return nil, &ErrNotFound{}
 }
 
 // Backend tries to get a backend associating to the request destination host.
-func (dibm *DefaultBackendStorage) GetBackendDefaultRoute() (Backend, error) {
-	dibm.mu.RLock()
-	defer dibm.mu.RUnlock()
-	if len(dibm.backends) == 0 {
+func (s *DefaultBackendStorage) GetBackendDefaultRoute() (Backend, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	if len(s.backends) == 0 {
 		return nil, &ErrNotFound{}
 	}
-	if len(dibm.defaultRouteAgentIDs) == 0 {
+	if len(s.defaultRouteAgentIDs) == 0 {
 		return nil, &ErrNotFound{}
 	}
-	agentID := dibm.defaultRouteAgentIDs[dibm.random.Intn(len(dibm.defaultRouteAgentIDs))]
+	agentID := s.defaultRouteAgentIDs[s.random.Intn(len(s.defaultRouteAgentIDs))]
 	klog.V(4).InfoS("Picked agent as backend", "agentID", agentID)
-	return dibm.backends[agentID][0], nil
+	return s.backends[agentID][0], nil
 }
 
 // GetRandomBackend returns a random backend connection from all connected agents.
