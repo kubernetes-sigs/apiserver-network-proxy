@@ -224,25 +224,25 @@ func (t *grpcTunnel) serve(tunnelCtx context.Context) {
 				// In either scenario, we should return here and close the tunnel as it is no longer needed.
 				klog.V(1).InfoS("DialResp not recognized; dropped", "connectionID", resp.ConnectID, "dialID", resp.Random)
 				return
-			} else {
-				result := dialResult{connid: resp.ConnectID}
-				if resp.Error != "" {
-					result.err = &dialFailure{resp.Error, DialFailureEndpoint}
-				}
-				select {
-				// try to send to the result channel
-				case pendingDial.resultCh <- result:
-				// unblock if the cancel channel is closed
-				case <-pendingDial.cancelCh:
-					// Note: this condition can only be hit by a race condition where the
-					// DialContext() returns early (timeout) after the pendingDial is already
-					// fetched here, but before the result is sent.
-					klog.V(1).InfoS("Pending dial has been cancelled; dropped", "connectionID", resp.ConnectID, "dialID", resp.Random)
-					return
-				case <-tunnelCtx.Done():
-					klog.V(1).InfoS("Tunnel has been closed; dropped", "connectionID", resp.ConnectID, "dialID", resp.Random)
-					return
-				}
+			}
+
+			result := dialResult{connid: resp.ConnectID}
+			if resp.Error != "" {
+				result.err = &dialFailure{resp.Error, DialFailureEndpoint}
+			}
+			select {
+			// try to send to the result channel
+			case pendingDial.resultCh <- result:
+			// unblock if the cancel channel is closed
+			case <-pendingDial.cancelCh:
+				// Note: this condition can only be hit by a race condition where the
+				// DialContext() returns early (timeout) after the pendingDial is already
+				// fetched here, but before the result is sent.
+				klog.V(1).InfoS("Pending dial has been cancelled; dropped", "connectionID", resp.ConnectID, "dialID", resp.Random)
+				return
+			case <-tunnelCtx.Done():
+				klog.V(1).InfoS("Tunnel has been closed; dropped", "connectionID", resp.ConnectID, "dialID", resp.Random)
+				return
 			}
 
 			if resp.Error != "" {
