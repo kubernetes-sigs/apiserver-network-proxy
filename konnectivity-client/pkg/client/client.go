@@ -300,14 +300,15 @@ func (t *grpcTunnel) serve(tunnelCtx context.Context) {
 			resp := pkt.GetCloseResponse()
 			conn, ok := t.conns.get(resp.ConnectID)
 
-			if ok {
-				close(conn.readCh)
-				conn.closeCh <- resp.Error
-				close(conn.closeCh)
-				t.conns.remove(resp.ConnectID)
-				return
+			if !ok {
+				klog.V(1).InfoS("Connection not recognized", "connectionID", resp.ConnectID)
+				continue
 			}
-			klog.V(1).InfoS("connection not recognized", "connectionID", resp.ConnectID)
+			close(conn.readCh)
+			conn.closeCh <- resp.Error
+			close(conn.closeCh)
+			t.conns.remove(resp.ConnectID)
+			return
 		}
 	}
 }
