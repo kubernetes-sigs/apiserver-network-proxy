@@ -281,19 +281,19 @@ func (t *grpcTunnel) serve(tunnelCtx context.Context) {
 			// TODO: flow control
 			conn, ok := t.conns.get(resp.ConnectID)
 
-			if ok {
-				timer := time.NewTimer((time.Duration)(t.readTimeoutSeconds) * time.Second)
-				select {
-				case conn.readCh <- resp.Data:
-					timer.Stop()
-				case <-timer.C:
-					klog.ErrorS(fmt.Errorf("timeout"), "readTimeout has been reached, the grpc connection to the proxy server will be closed", "connectionID", conn.connID, "readTimeoutSeconds", t.readTimeoutSeconds)
-					return
-				case <-tunnelCtx.Done():
-					klog.V(1).InfoS("Tunnel has been closed, the grpc connection to the proxy server will be closed", "connectionID", conn.connID)
-				}
-			} else {
-				klog.V(1).InfoS("connection not recognized", "connectionID", resp.ConnectID)
+			if !ok {
+				klog.V(1).InfoS("Connection not recognized", "connectionID", resp.ConnectID)
+				continue
+			}
+			timer := time.NewTimer((time.Duration)(t.readTimeoutSeconds) * time.Second)
+			select {
+			case conn.readCh <- resp.Data:
+				timer.Stop()
+			case <-timer.C:
+				klog.ErrorS(fmt.Errorf("timeout"), "readTimeout has been reached, the grpc connection to the proxy server will be closed", "connectionID", conn.connID, "readTimeoutSeconds", t.readTimeoutSeconds)
+				return
+			case <-tunnelCtx.Done():
+				klog.V(1).InfoS("Tunnel has been closed, the grpc connection to the proxy server will be closed", "connectionID", conn.connID)
 			}
 
 		case client.PacketType_CLOSE_RSP:
