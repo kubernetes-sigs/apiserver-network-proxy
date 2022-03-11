@@ -18,6 +18,7 @@ package server
 
 import (
 	"context"
+	"strings"
 
 	"k8s.io/klog/v2"
 	"sigs.k8s.io/apiserver-network-proxy/pkg/agent"
@@ -48,6 +49,18 @@ func (dibm *DestHostBackendManager) Backend(ctx context.Context) (Backend, error
 		if exist && len(bes) > 0 {
 			klog.V(5).InfoS("Get the backend through the DestHostBackendManager", "destHost", destHost)
 			return dibm.backends[destHost][0], nil
+		}
+
+		for backend := range dibm.backends {
+			// Ignore backends that do not have a leading dot after stripping a leading *, we don't want foo.com to match for barfoo.com
+			if !strings.HasPrefix(backend, ".") {
+				continue
+			}
+			klog.V(5).Infof("Checking for wildcard match", "backend", backend, "destHost", destHost)
+			if strings.HasSuffix(destHost, backend) && len(dibm.backends[backend]) > 0 {
+				klog.V(5).InfoS("Get the backend through wildcardmatching in the DestHostBackendManager", "destHost", destHost, "backend", backend)
+				return dibm.backends[backend][0], nil
+			}
 		}
 	}
 	return nil, &ErrNotFound{}
