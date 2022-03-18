@@ -11,3 +11,5 @@ FROM registry.ci.openshift.org/ocp/4.11:base
 
 COPY --from=builder /go/src/sigs.k8s.io/apiserver-network-proxy/proxy-server /usr/bin/proxy-server
 COPY --from=builder /go/src/sigs.k8s.io/apiserver-network-proxy/proxy-agent /usr/bin/proxy-agent
+
+LABEL io.openshift.release.operator=true
