@@ -6,8 +6,11 @@ reviewers:
   - enxebre
   - csrwng
   - relyt0925
+  - alvaroaleman
 approvers:
   - ironcladlou
   - sjenning
   - enxebre
   - csrwng
+  - alvaroaleman
+component: hypershift
