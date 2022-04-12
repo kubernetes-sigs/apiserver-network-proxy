@@ -242,6 +242,7 @@ func (t *grpcTunnel) DialContext(ctx context.Context, protocol, address string) 
 		c.connID = res.connid
 		c.readCh = make(chan []byte, 10)
 		c.closeCh = make(chan string, 1)
+		c.finishedCh = make(chan bool, 1)
 		t.connsLock.Lock()
 		t.conns[res.connid] = c
 		t.connsLock.Unlock()

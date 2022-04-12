@@ -209,6 +209,53 @@ func TestClose(t *testing.T) {
 	}
 }
 
+func TestCloseTimeout(t *testing.T) {
+	ctx := context.Background()
+	s, ps := pipe()
+	ts := testCloseTimeoutServer(ps, 100)
+
+	defer ps.Close()
+	defer s.Close()
+
+	tunnel := &grpcTunnel{
+		stream:      s,
+		pendingDial: make(map[int64]pendingDial),
+		conns:       make(map[int64]*conn),
+	}
+
+	go tunnel.serve(&fakeConn{})
+	go ts.serve()
+
+	conn, err := tunnel.DialContext(ctx, "tcp", "127.0.0.1:80")
+	if err != nil {
+		t.Fatalf("expect nil; got %v", err)
+	}
+
+	closed := false
+	go func() {
+		if err := conn.Close(); err != errConnCloseTimeout {
+			t.Errorf("expected %v but got %v", errConnCloseTimeout, err)
+		}
+		closed = true
+	}()
+
+	buf := make([]byte, 10)
+	_, err = conn.Read(buf)
+	if err != errConnCloseForcibly {
+		t.Errorf("expected %v: got %v", errConnCloseForcibly, err)
+	}
+	if !closed {
+		t.Error("conn is not closed due to timeout")
+	}
+
+	if ts.packets[1].Type != client.PacketType_CLOSE_REQ {
+		t.Fatalf("expect packet.type %v; got %v", client.PacketType_CLOSE_REQ, ts.packets[1].Type)
+	}
+	if ts.packets[1].GetCloseRequest().ConnectID != 100 {
+		t.Errorf("expect connectID=100; got %d", ts.packets[1].GetCloseRequest().ConnectID)
+	}
+}
+
 func TestCreateSingleUseGrpcTunnel_NoLeakOnFailure(t *testing.T) {
 	defer goleak.VerifyNone(t, goleak.IgnoreCurrent())
 
@@ -273,12 +320,13 @@ func (s *fakeStream) Close() {
 }
 
 type proxyServer struct {
-	t        testing.T
-	s        client.ProxyService_ProxyClient
-	handlers map[client.PacketType]handler
-	connid   int64
-	data     bytes.Buffer
-	packets  []*client.Packet
+	t             testing.T
+	s             client.ProxyService_ProxyClient
+	handlers      map[client.PacketType]handler
+	connid        int64
+	data          bytes.Buffer
+	shouldTimeout bool
+	packets       []*client.Packet
 }
 
 func testServer(s client.ProxyService_ProxyClient, connid int64) *proxyServer {
@@ -287,6 +335,22 @@ func testServer(s client.ProxyService_ProxyClient, connid int64) *proxyServer {
 		connid:   connid,
 		handlers: make(map[client.PacketType]handler),
 		packets:  []*client.Packet{},
+	}
+
+	server.handlers[client.PacketType_CLOSE_REQ] = server.handleClose
+	server.handlers[client.PacketType_DIAL_REQ] = server.handleDial
+	server.handlers[client.PacketType_DATA] = server.handleData
+
+	return server
+}
+
+func testCloseTimeoutServer(s client.ProxyService_ProxyClient, connid int64) *proxyServer {
+	server := &proxyServer{
+		s:             s,
+		connid:        connid,
+		handlers:      make(map[client.PacketType]handler),
+		packets:       []*client.Packet{},
+		shouldTimeout: true,
 	}
 
 	server.handlers[client.PacketType_CLOSE_REQ] = server.handleClose
@@ -339,6 +403,11 @@ func (s *proxyServer) handleDial(pkt *client.Packet) *client.Packet {
 
 func (s *proxyServer) handleClose(pkt *client.Packet) *client.Packet {
 	s.packets = append(s.packets, pkt)
+	if s.shouldTimeout {
+		time.Sleep(CloseTimeout * 2)
+		s.t.Fatal("timeout exceeded")
+		return nil
+	}
 	return &client.Packet{
 		Type: client.PacketType_CLOSE_RSP,
 		Payload: &client.Packet_CloseResponse{

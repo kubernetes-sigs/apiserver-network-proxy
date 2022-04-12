@@ -18,6 +18,7 @@ package client
 
 import (
 	"errors"
+	"fmt"
 	"io"
 	"net"
 	"time"
@@ -33,15 +34,19 @@ const CloseTimeout = 10 * time.Second
 // conn is an implementation of net.Conn, where the data is transported
 // over an established tunnel defined by a gRPC service ProxyService.
 type conn struct {
-	stream  client.ProxyService_ProxyClient
-	connID  int64
-	random  int64
-	readCh  chan []byte
-	closeCh chan string
-	rdata   []byte
+	stream     client.ProxyService_ProxyClient
+	connID     int64
+	random     int64
+	finishedCh chan bool
+	readCh     chan []byte
+	closeCh    chan string
+	rdata      []byte
 }
 
 var _ net.Conn = &conn{}
+
+var errConnCloseForcibly = fmt.Errorf("channel closed forcibly")
+var errConnCloseTimeout = errors.New("close timeout")
 
 // Write sends the data thru the connection over proxy service
 func (c *conn) Write(data []byte) (n int, err error) {
@@ -71,7 +76,13 @@ func (c *conn) Read(b []byte) (n int, err error) {
 	if c.rdata != nil {
 		data = c.rdata
 	} else {
-		data = <-c.readCh
+		select {
+		case data = <-c.readCh:
+			break
+		case <-c.finishedCh:
+			// channel already closed
+			return 0, errConnCloseForcibly
+		}
 	}
 
 	if data == nil {
@@ -114,6 +125,7 @@ func (c *conn) SetWriteDeadline(t time.Time) error {
 // proxy service to notify remote to drop the connection.
 func (c *conn) Close() error {
 	klog.V(4).Infoln("closing connection")
+	defer close(c.finishedCh)
 	var req *client.Packet
 	if c.connID != 0 {
 		req = &client.Packet{
@@ -151,5 +163,5 @@ func (c *conn) Close() error {
 	case <-time.After(CloseTimeout):
 	}
 
-	return errors.New("close timeout")
+	return errConnCloseTimeout
 }
