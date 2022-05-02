@@ -183,8 +183,7 @@ func TestProxyHandle_DoneContext_GRPC(t *testing.T) {
 }
 
 func TestProxyHandle_SlowContext_GRPC(t *testing.T) {
-	// TODO: enable goleak validation after https://github.com/kubernetes-sigs/apiserver-network-proxy/issues/340
-	// defer goleak.VerifyNone(t, goleak.IgnoreCurrent())
+	defer goleak.VerifyNone(t, goleak.IgnoreCurrent())
 
 	slowServer := newEchoServer("hello")
 	slowServer.wchan = make(chan struct{})
@@ -232,6 +231,59 @@ func TestProxyHandle_SlowContext_GRPC(t *testing.T) {
 
 	_, err = c.Do(req)
 	if err == nil || !strings.Contains(err.Error(), "context deadline exceeded") {
+		t.Error("Expected error when context is cancelled, did not receive error")
+	}
+}
+
+func TestProxyHandle_ContextCancelled_GRPC(t *testing.T) {
+	defer goleak.VerifyNone(t, goleak.IgnoreCurrent())
+
+	slowServer := newEchoServer("hello")
+	slowServer.wchan = make(chan struct{})
+	server := httptest.NewServer(slowServer)
+	defer server.Close()
+
+	stopCh := make(chan struct{})
+	defer close(stopCh)
+
+	proxy, cleanup, err := runGRPCProxyServer()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer cleanup()
+
+	runAgent(proxy.agent, stopCh)
+
+	// Wait for agent to register on proxy server
+	time.Sleep(time.Second)
+
+	// run test client
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	tunnel, err := client.CreateSingleUseGrpcTunnel(ctx, proxy.front, grpc.WithInsecure())
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	go func() {
+		time.Sleep(1 * time.Second)
+		cancel()
+		close(slowServer.wchan)
+	}()
+
+	c := &http.Client{
+		Transport: &http.Transport{
+			DialContext: tunnel.DialContext,
+		},
+	}
+
+	// TODO: handle case where there is no context on the request.
+	req, err := http.NewRequestWithContext(ctx, "GET", server.URL, nil)
+	if err != nil {
+		t.Error(err)
+	}
+
+	_, err = c.Do(req)
+	if err == nil || !strings.Contains(err.Error(), "context canceled") {
 		t.Error("Expected error when context is cancelled, did not receive error")
 	}
 }

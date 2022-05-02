@@ -20,6 +20,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"io"
 	"testing"
 	"time"
 
@@ -207,6 +208,50 @@ func TestClose(t *testing.T) {
 	if ts.packets[1].GetCloseRequest().ConnectID != 100 {
 		t.Errorf("expect connectID=100; got %d", ts.packets[1].GetCloseRequest().ConnectID)
 	}
+}
+
+func TestCloseTimeout(t *testing.T) {
+	defer goleak.VerifyNone(t, goleak.IgnoreCurrent())
+
+	ctx := context.Background()
+	s, ps := pipe()
+	ts := testServer(ps, 100)
+
+	// sending a nil response for close handler should trigger the timeout
+	// since we never receive CLOSE_RSP
+	ts.handlers[client.PacketType_CLOSE_REQ] = func(pkt *client.Packet) *client.Packet {
+		return nil
+	}
+
+	defer ps.Close()
+	defer s.Close()
+
+	tunnel := &grpcTunnel{
+		stream:      s,
+		pendingDial: make(map[int64]pendingDial),
+		conns:       make(map[int64]*conn),
+	}
+
+	go tunnel.serve(&fakeConn{})
+	go ts.serve()
+
+	conn, err := tunnel.DialContext(ctx, "tcp", "127.0.0.1:80")
+	if err != nil {
+		t.Fatalf("expect nil; got %v", err)
+	}
+
+	go func() {
+		buf := make([]byte, 10)
+		_, err = conn.Read(buf)
+		if err != io.EOF {
+			t.Errorf("expected %v: got %v", io.EOF, err)
+		}
+	}()
+
+	if err := conn.Close(); err != errConnCloseTimeout {
+		t.Errorf("expected %v but got %v", errConnCloseTimeout, err)
+	}
+
 }
 
 func TestCreateSingleUseGrpcTunnel_NoLeakOnFailure(t *testing.T) {
