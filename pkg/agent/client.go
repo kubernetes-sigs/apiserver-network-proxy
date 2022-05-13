@@ -507,9 +507,10 @@ func (a *Client) remoteToProxy(connID int64, ctx *connContext) {
 			klog.V(2).InfoS("connection EOF", "connectionID", connID)
 			return
 		} else if err != nil {
+			// "use of closed network connection" errors are expected upon receiving CLOSE_REQ
+			// If connID doesn't exist in connManager, we assume the connection was meant to be closed.
 			if _, ok := a.connManager.Get(connID); !ok {
-				// Normal when receive a CLOSE_REQ
-				klog.V(5).InfoS("read from a normally closed connection", "connectionID", connID, "err", err)
+				klog.V(5).InfoS("reading to a closed connection", "connectionID", connID, "err", err)
 			} else {
 				klog.ErrorS(err, "connection read failure", "connectionID", connID)
 			}
@@ -548,7 +549,14 @@ func (a *Client) proxyToRemote(connID int64, ctx *connContext) {
 				klog.ErrorS(err, "write to remote with failure", "connectionID", connID, "lastData", n)
 				pos += n
 			} else {
-				klog.ErrorS(err, "conn write failure", "connectionID", connID)
+				// "use of closed network connection" errors are expected upon receiving CLOSE_REQ
+				// If connID doesn't exist in connManager, we assume the connection was meant to be closed.
+				if _, ok := a.connManager.Get(connID); !ok {
+					klog.V(5).InfoS("writing to a closed connection", "connectionID", connID, "err", err)
+				} else {
+					klog.ErrorS(err, "conn write failure", "connectionID", connID)
+				}
+
 				return
 			}
 		}
