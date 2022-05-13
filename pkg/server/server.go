@@ -416,25 +416,30 @@ func (s *ProxyServer) serveRecvFrontend(stream client.ProxyService_ProxyServer, 
 		switch pkt.Type {
 		case client.PacketType_DIAL_REQ:
 			klog.V(5).Infoln("Received DIAL_REQ")
+			random := pkt.GetDialRequest().Random
 			// TODO: if we track what agent has historically served
 			// the address, then we can send the Dial_REQ to the
 			// same agent. That way we save the agent from creating
 			// a new connection to the address.
 			backend, err = s.getBackend(pkt.GetDialRequest().Address)
 			if err != nil {
-				klog.ErrorS(err, "Failed to get a backend", "serverID", s.serverID)
+				klog.ErrorS(err, "Failed to get a backend", "serverID", s.serverID, "dialID", random)
 
 				resp := &client.Packet{
-					Type:    client.PacketType_DIAL_RSP,
-					Payload: &client.Packet_DialResponse{DialResponse: &client.DialResponse{Error: err.Error()}},
+					Type: client.PacketType_DIAL_RSP,
+					Payload: &client.Packet_DialResponse{
+						DialResponse: &client.DialResponse{
+							Random: random,
+							Error:  err.Error(),
+						},
+					},
 				}
 				if err := stream.Send(resp); err != nil {
-					klog.V(5).InfoS("Failed to send DIAL_RSP for no backend", "error", err, "serverID", s.serverID)
+					klog.V(5).InfoS("Failed to send DIAL_RSP for no backend", "error", err, "serverID", s.serverID, "dialID", random)
 				}
 				// The Dial is failing; no reason to keep this goroutine.
 				return
 			}
-			random := pkt.GetDialRequest().Random
 			s.PendingDial.Add(
 				random,
 				&ProxyClientConnection{

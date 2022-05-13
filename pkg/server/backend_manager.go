@@ -272,7 +272,7 @@ type ErrNotFound struct{}
 
 // Error returns the error message.
 func (e *ErrNotFound) Error() string {
-	return "No backend available"
+	return "No agent available"
 }
 
 type ErrWrongIDType struct {
