@@ -426,7 +426,7 @@ func (a *Client) Serve() {
 			go func() {
 				defer close(dialDone)
 				start := time.Now()
-				conn, err := net.DialTimeout(dialReq.Protocol, dialReq.Address, dialTimeout)
+				conn, err := dial(dialReq.Protocol, dialReq.Address, dialTimeout)
 				if err != nil {
 					dialResp.GetDialResponse().Error = err.Error()
 					if err := a.Send(dialResp); err != nil {
