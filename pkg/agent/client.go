@@ -409,7 +409,7 @@ func (a *Client) Serve() {
 			go runpprof.Do(context.Background(), labels, func(context.Context) {
 				defer close(dialDone)
 				start := time.Now()
-				conn, err := net.DialTimeout(dialReq.Protocol, dialReq.Address, dialTimeout)
+				conn, err := dial(dialReq.Protocol, dialReq.Address, dialTimeout)
 				if err != nil {
 					reason := metrics.DialFailureUnknown
 					if neterr, ok := err.(net.Error); ok && neterr.Timeout() {
