@@ -46,7 +46,7 @@ func TestDial(t *testing.T) {
 		conns:       make(map[int64]*conn),
 	}
 
-	go tunnel.serve(&fakeConn{})
+	go tunnel.serve(ctx, &fakeConn{})
 	go ts.serve()
 
 	_, err := tunnel.DialContext(ctx, "tcp", "127.0.0.1:80")
@@ -82,7 +82,7 @@ func TestDialRace(t *testing.T) {
 		conns:       make(map[int64]*conn),
 	}
 
-	go tunnel.serve(&fakeConn{})
+	go tunnel.serve(ctx, &fakeConn{})
 	go ts.serve()
 
 	_, err := tunnel.DialContext(ctx, "tcp", "127.0.0.1:80")
@@ -130,7 +130,7 @@ func TestData(t *testing.T) {
 		conns:       make(map[int64]*conn),
 	}
 
-	go tunnel.serve(&fakeConn{})
+	go tunnel.serve(ctx, &fakeConn{})
 	go ts.serve()
 
 	conn, err := tunnel.DialContext(ctx, "tcp", "127.0.0.1:80")
@@ -190,7 +190,7 @@ func TestClose(t *testing.T) {
 		conns:       make(map[int64]*conn),
 	}
 
-	go tunnel.serve(&fakeConn{})
+	go tunnel.serve(ctx, &fakeConn{})
 	go ts.serve()
 
 	conn, err := tunnel.DialContext(ctx, "tcp", "127.0.0.1:80")
@@ -232,7 +232,7 @@ func TestCloseTimeout(t *testing.T) {
 		conns:       make(map[int64]*conn),
 	}
 
-	go tunnel.serve(&fakeConn{})
+	go tunnel.serve(ctx, &fakeConn{})
 	go ts.serve()
 
 	conn, err := tunnel.DialContext(ctx, "tcp", "127.0.0.1:80")
@@ -266,13 +266,55 @@ func TestCreateSingleUseGrpcTunnel_NoLeakOnFailure(t *testing.T) {
 	}
 }
 
+func TestCreateSingleUseGrpcTunnelWithContext_NoLeakOnFailure(t *testing.T) {
+	defer goleak.VerifyNone(t, goleak.IgnoreCurrent())
+
+	tunnel, err := CreateSingleUseGrpcTunnelWithContext(context.Background(), context.Background(), "127.0.0.1:12345", grpc.WithInsecure())
+	if tunnel != nil {
+		t.Fatal("expected nil tunnel when calling CreateSingleUseGrpcTunnelWithContext")
+	}
+	if err == nil {
+		t.Fatal("expected error when calling CreateSingleUseGrpcTunnelWithContext")
+	}
+}
+
+func TestDialAfterTunnelCancelled(t *testing.T) {
+	defer goleak.VerifyNone(t, goleak.IgnoreCurrent())
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	s, ps := pipeWithContext(ctx)
+	ts := testServer(ps, 100)
+
+	defer ps.Close()
+	defer s.Close()
+
+	tunnel := &grpcTunnel{
+		stream:      s,
+		pendingDial: make(map[int64]pendingDial),
+		conns:       make(map[int64]*conn),
+	}
+
+	go tunnel.serve(ctx, &fakeConn{})
+	go ts.serve()
+
+	_, err := tunnel.DialContext(ctx, "tcp", "127.0.0.1:80")
+	if err == nil {
+		t.Fatalf("expect err when dialing after tunnel closed")
+	}
+
+	// try to avoid race with deferred Close()
+	time.Sleep(time.Second)
+}
+
 // TODO: Move to common testing library
 
 // fakeStream implements ProxyService_ProxyClient
 type fakeStream struct {
 	grpc.ClientStream
-	r <-chan *client.Packet
-	w chan<- *client.Packet
+	r    <-chan *client.Packet
+	w    chan<- *client.Packet
+	done <-chan struct{}
 }
 
 type fakeConn struct {
@@ -287,8 +329,12 @@ var _ clientConn = &fakeConn{}
 var _ client.ProxyService_ProxyClient = &fakeStream{}
 
 func pipe() (*fakeStream, *fakeStream) {
+	return pipeWithContext(context.Background())
+}
+
+func pipeWithContext(context context.Context) (*fakeStream, *fakeStream) {
 	r, w := make(chan *client.Packet, 2), make(chan *client.Packet, 2)
-	s1, s2 := &fakeStream{}, &fakeStream{}
+	s1, s2 := &fakeStream{done: context.Done()}, &fakeStream{done: context.Done()}
 	s1.r, s1.w = r, w
 	s2.r, s2.w = w, r
 	return s1, s2
@@ -299,12 +345,18 @@ func (s *fakeStream) Send(packet *client.Packet) error {
 	if packet == nil {
 		return nil
 	}
-	s.w <- packet
-	return nil
+	select {
+	case <-s.done:
+		return errors.New("Send on cancelled stream")
+	case s.w <- packet:
+		return nil
+	}
 }
 
 func (s *fakeStream) Recv() (*client.Packet, error) {
 	select {
+	case <-s.done:
+		return nil, errors.New("Recv on cancelled stream")
 	case pkt := <-s.r:
 		klog.V(4).InfoS("[DEBUG] recv", "packet", pkt)
 		return pkt, nil
