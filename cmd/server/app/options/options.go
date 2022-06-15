@@ -31,12 +31,20 @@ type ProxyRunOptions struct {
 	DeleteUDSFile bool
 	// Port we listen for server connections on.
 	ServerPort uint
+	// Bind address for the server.
+	ServerBindAddress string
 	// Port we listen for agent connections on.
 	AgentPort uint
+	// Bind address for the agent.
+	AgentBindAddress string
 	// Port we listen for admin connections on.
 	AdminPort uint
+	// Bind address for the admin connections.
+	AdminBindAddress string
 	// Port we listen for health connections on.
 	HealthPort uint
+	// Bind address for the health connections.
+	HealthBindAddress string
 	// After a duration of this time if the server doesn't see any activity it
 	// pings the client to see if the transport is still alive.
 	KeepaliveTime         time.Duration
@@ -99,9 +107,13 @@ func (o *ProxyRunOptions) Flags() *pflag.FlagSet {
 	flags.StringVar(&o.UdsName, "uds-name", o.UdsName, "uds-name should be empty for TCP traffic. For UDS set to its name.")
 	flags.BoolVar(&o.DeleteUDSFile, "delete-existing-uds-file", o.DeleteUDSFile, "If true and if file UdsName already exists, delete the file before listen on that UDS file")
 	flags.UintVar(&o.ServerPort, "server-port", o.ServerPort, "Port we listen for server connections on. Set to 0 for UDS.")
+	flags.StringVar(&o.ServerBindAddress, "server-bind-address", o.ServerBindAddress, "Bind address for server connections. If empty, we will bind to all interfaces.")
 	flags.UintVar(&o.AgentPort, "agent-port", o.AgentPort, "Port we listen for agent connections on.")
+	flags.StringVar(&o.AgentBindAddress, "agent-bind-address", o.AgentBindAddress, "Bind address for agent connections. If empty, we will bind to all interfaces.")
 	flags.UintVar(&o.AdminPort, "admin-port", o.AdminPort, "Port we listen for admin connections on.")
+	flags.StringVar(&o.AdminBindAddress, "admin-bind-address", o.AdminBindAddress, "Bind address for admin connections. If empty, we will bind to all interfaces.")
 	flags.UintVar(&o.HealthPort, "health-port", o.HealthPort, "Port we listen for health connections on.")
+	flags.StringVar(&o.HealthBindAddress, "health-bind-address", o.HealthBindAddress, "Bind address for health connections. If empty, we will bind to all interfaces.")
 	flags.DurationVar(&o.KeepaliveTime, "keepalive-time", o.KeepaliveTime, "Time for gRPC agent server keepalive.")
 	flags.DurationVar(&o.FrontendKeepaliveTime, "frontend-keepalive-time", o.FrontendKeepaliveTime, "Time for gRPC frontend server keepalive.")
 	flags.BoolVar(&o.EnableProfiling, "enable-profiling", o.EnableProfiling, "enable pprof at host:admin-port/debug/pprof")
@@ -131,9 +143,13 @@ func (o *ProxyRunOptions) Print() {
 	klog.V(1).Infof("UDSName set to %q.\n", o.UdsName)
 	klog.V(1).Infof("DeleteUDSFile set to %v.\n", o.DeleteUDSFile)
 	klog.V(1).Infof("Server port set to %d.\n", o.ServerPort)
+	klog.V(1).Infof("Server bind address set to %q.\n", o.ServerBindAddress)
 	klog.V(1).Infof("Agent port set to %d.\n", o.AgentPort)
+	klog.V(1).Infof("Agent bind address set to %q.\n", o.AgentBindAddress)
 	klog.V(1).Infof("Admin port set to %d.\n", o.AdminPort)
+	klog.V(1).Infof("Admin bind address set to %q.\n", o.AdminBindAddress)
 	klog.V(1).Infof("Health port set to %d.\n", o.HealthPort)
+	klog.V(1).Infof("Health bind address set to %q.\n", o.HealthBindAddress)
 	klog.V(1).Infof("Keepalive time set to %v.\n", o.KeepaliveTime)
 	klog.V(1).Infof("Frontend keepalive time set to %v.\n", o.FrontendKeepaliveTime)
 	klog.V(1).Infof("EnableProfiling set to %v.\n", o.EnableProfiling)
@@ -305,9 +321,13 @@ func NewProxyRunOptions() *ProxyRunOptions {
 		UdsName:                   "",
 		DeleteUDSFile:             false,
 		ServerPort:                8090,
+		ServerBindAddress:         "",
 		AgentPort:                 8091,
+		AgentBindAddress:          "",
 		HealthPort:                8092,
+		HealthBindAddress:         "",
 		AdminPort:                 8095,
+		AdminBindAddress:          "127.0.0.1",
 		KeepaliveTime:             1 * time.Hour,
 		FrontendKeepaliveTime:     1 * time.Hour,
 		EnableProfiling:           false,
