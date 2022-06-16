@@ -408,17 +408,15 @@ func (a *Client) Serve() {
 						Type:    client.PacketType_CLOSE_RSP,
 						Payload: &client.Packet_CloseResponse{CloseResponse: &client.CloseResponse{}},
 					}
-
 					closeResp.GetCloseResponse().ConnectID = connID
-					err := connCtx.conn.Close()
-					if err != nil {
-						closeResp.GetCloseResponse().Error = err.Error()
-					}
 					if err := a.Send(closeResp); err != nil {
 						klog.ErrorS(err, "close response failure")
 					}
 					close(dataCh)
 					a.connManager.Delete(connID)
+					if err := connCtx.conn.Close(); err != nil {
+						klog.ErrorS(err, "failed to close connection")
+					}
 				} else {
 					klog.ErrorS(fmt.Errorf("connection is nil"), "cannot send CLOSE_RESP to nil connection")
 				}
@@ -442,6 +440,7 @@ func (a *Client) Serve() {
 					klog.ErrorS(err, "could not send dialResp")
 					return
 				}
+				klog.V(3).InfoS("Proxying new connection", "connectionID", connID)
 				go a.remoteToProxy(connID, connCtx)
 				go a.proxyToRemote(connID, connCtx)
 			}()
@@ -489,7 +488,7 @@ func (a *Client) remoteToProxy(connID int64, ctx *connContext) {
 		if panicInfo := recover(); panicInfo != nil {
 			klog.V(2).InfoS("Exiting remoteToProxy with recovery", "panicInfo", panicInfo, "connectionID", connID)
 		} else {
-			klog.V(2).InfoS("Exiting remoteToProxy", "connectionID", connID)
+			klog.V(3).InfoS("Exiting remoteToProxy", "connectionID", connID)
 		}
 	}()
 	defer ctx.cleanup()
@@ -510,7 +509,7 @@ func (a *Client) remoteToProxy(connID int64, ctx *connContext) {
 			// "use of closed network connection" errors are expected upon receiving CLOSE_REQ
 			// If connID doesn't exist in connManager, we assume the connection was meant to be closed.
 			if _, ok := a.connManager.Get(connID); !ok {
-				klog.V(5).InfoS("reading to a closed connection", "connectionID", connID, "err", err)
+				klog.V(5).InfoS("reading from a closed connection", "connectionID", connID, "err", err)
 			} else {
 				klog.ErrorS(err, "connection read failure", "connectionID", connID)
 			}
@@ -532,7 +531,7 @@ func (a *Client) proxyToRemote(connID int64, ctx *connContext) {
 		if panicInfo := recover(); panicInfo != nil {
 			klog.V(2).InfoS("Exiting proxyToRemote with recovery", "panicInfo", panicInfo, "connectionID", connID)
 		} else {
-			klog.V(2).InfoS("Exiting proxyToRemote", "connectionID", connID)
+			klog.V(3).InfoS("Exiting proxyToRemote", "connectionID", connID)
 		}
 	}()
 	defer ctx.cleanup()
