@@ -26,7 +26,9 @@ import (
 	"sync"
 	"time"
 
+	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/metadata"
+	"google.golang.org/grpc/status"
 	authv1 "k8s.io/api/authentication/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes"
@@ -387,7 +389,11 @@ func (s *ProxyServer) Proxy(stream client.ProxyService_ProxyServer) error {
 				return
 			}
 			if err != nil {
-				klog.ErrorS(err, "Stream read from frontend failure")
+				if status.Code(err) == codes.Canceled {
+					klog.V(2).InfoS("Stream read from frontend cancelled", "userAgent", userAgent, "serverID", s.serverID)
+				} else {
+					klog.ErrorS(err, "Stream read from frontend failure", "userAgent", userAgent, "serverID", s.serverID)
+				}
 				stopCh <- err
 				close(stopCh)
 				return
@@ -766,7 +772,8 @@ func (s *ProxyServer) serveRecvBackend(backend Backend, stream agent.AgentServic
 			klog.V(5).InfoS("Received CLOSE_RSP", "serverID", s.serverID, "agentID", agentID, "connectionID", resp.ConnectID)
 			frontend, err := s.getFrontend(agentID, resp.ConnectID)
 			if err != nil {
-				klog.ErrorS(err, "could not get frontend client", "serverID", s.serverID, "agentID", agentID, "connectionID", resp.ConnectID)
+				// assuming it is already closed, just log it
+				klog.V(3).InfoS("could not get frontend client for closing", "serverID", s.serverID, "agentID", agentID, "connectionID", resp.ConnectID, "err", err)
 				break
 			}
 			if err := frontend.send(pkt); err != nil {
