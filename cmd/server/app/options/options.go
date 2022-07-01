@@ -30,19 +30,19 @@ type ProxyRunOptions struct {
 	// If file UdsName already exists, delete the file before listen on that UDS file.
 	DeleteUDSFile bool
 	// Port we listen for server connections on.
-	ServerPort uint
+	ServerPort int
 	// Bind address for the server.
 	ServerBindAddress string
 	// Port we listen for agent connections on.
-	AgentPort uint
+	AgentPort int
 	// Bind address for the agent.
 	AgentBindAddress string
 	// Port we listen for admin connections on.
-	AdminPort uint
+	AdminPort int
 	// Bind address for the admin connections.
 	AdminBindAddress string
 	// Port we listen for health connections on.
-	HealthPort uint
+	HealthPort int
 	// Bind address for the health connections.
 	HealthBindAddress string
 	// After a duration of this time if the server doesn't see any activity it
@@ -106,13 +106,13 @@ func (o *ProxyRunOptions) Flags() *pflag.FlagSet {
 	flags.StringVar(&o.Mode, "mode", o.Mode, "mode can be either 'grpc' or 'http-connect'.")
 	flags.StringVar(&o.UdsName, "uds-name", o.UdsName, "uds-name should be empty for TCP traffic. For UDS set to its name.")
 	flags.BoolVar(&o.DeleteUDSFile, "delete-existing-uds-file", o.DeleteUDSFile, "If true and if file UdsName already exists, delete the file before listen on that UDS file")
-	flags.UintVar(&o.ServerPort, "server-port", o.ServerPort, "Port we listen for server connections on. Set to 0 for UDS.")
+	flags.IntVar(&o.ServerPort, "server-port", o.ServerPort, "Port we listen for server connections on. Set to 0 for UDS.")
 	flags.StringVar(&o.ServerBindAddress, "server-bind-address", o.ServerBindAddress, "Bind address for server connections. If empty, we will bind to all interfaces.")
-	flags.UintVar(&o.AgentPort, "agent-port", o.AgentPort, "Port we listen for agent connections on.")
+	flags.IntVar(&o.AgentPort, "agent-port", o.AgentPort, "Port we listen for agent connections on.")
 	flags.StringVar(&o.AgentBindAddress, "agent-bind-address", o.AgentBindAddress, "Bind address for agent connections. If empty, we will bind to all interfaces.")
-	flags.UintVar(&o.AdminPort, "admin-port", o.AdminPort, "Port we listen for admin connections on.")
+	flags.IntVar(&o.AdminPort, "admin-port", o.AdminPort, "Port we listen for admin connections on.")
 	flags.StringVar(&o.AdminBindAddress, "admin-bind-address", o.AdminBindAddress, "Bind address for admin connections. If empty, we will bind to all interfaces.")
-	flags.UintVar(&o.HealthPort, "health-port", o.HealthPort, "Port we listen for health connections on.")
+	flags.IntVar(&o.HealthPort, "health-port", o.HealthPort, "Port we listen for health connections on.")
 	flags.StringVar(&o.HealthBindAddress, "health-bind-address", o.HealthBindAddress, "Bind address for health connections. If empty, we will bind to all interfaces.")
 	flags.DurationVar(&o.KeepaliveTime, "keepalive-time", o.KeepaliveTime, "Time for gRPC agent server keepalive.")
 	flags.DurationVar(&o.FrontendKeepaliveTime, "frontend-keepalive-time", o.FrontendKeepaliveTime, "Time for gRPC frontend server keepalive.")

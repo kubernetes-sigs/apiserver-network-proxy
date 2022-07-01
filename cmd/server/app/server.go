@@ -13,6 +13,7 @@ import (
 	"os/signal"
 	"path/filepath"
 	"runtime"
+	"strconv"
 	"strings"
 	"sync"
 	"syscall"
@@ -268,7 +269,7 @@ func (p *Proxy) runMTLSFrontendServer(ctx context.Context, o *options.ProxyRunOp
 		return nil, err
 	}
 
-	addr := fmt.Sprintf("%s:%d", o.ServerBindAddress, o.ServerPort)
+	addr := net.JoinHostPort(o.ServerBindAddress, strconv.Itoa(o.ServerPort))
 
 	if o.Mode == "grpc" {
 		frontendServerOptions := []grpc.ServerOption{
@@ -317,7 +318,7 @@ func (p *Proxy) runAgentServer(o *options.ProxyRunOptions, server *server.ProxyS
 		return err
 	}
 
-	addr := fmt.Sprintf("%s:%d", o.AgentBindAddress, o.AgentPort)
+	addr := net.JoinHostPort(o.AgentBindAddress, strconv.Itoa(o.AgentPort))
 	agentServerOptions := []grpc.ServerOption{
 		grpc.Creds(credentials.NewTLS(tlsConfig)),
 		grpc.KeepaliveParams(keepalive.ServerParameters{Time: o.KeepaliveTime}),
@@ -344,7 +345,7 @@ func (p *Proxy) runAdminServer(o *options.ProxyRunOptions, server *server.ProxyS
 		}
 	}
 	adminServer := &http.Server{
-		Addr:           fmt.Sprintf("%s:%d", o.AdminBindAddress, o.AdminPort),
+		Addr:           net.JoinHostPort(o.AdminBindAddress, strconv.Itoa(o.AdminPort)),
 		Handler:        muxHandler,
 		MaxHeaderBytes: 1 << 20,
 	}
@@ -381,7 +382,7 @@ func (p *Proxy) runHealthServer(o *options.ProxyRunOptions, server *server.Proxy
 	muxHandler.HandleFunc("/ready", readinessHandler)
 	muxHandler.HandleFunc("/readyz", readinessHandler)
 	healthServer := &http.Server{
-		Addr:           fmt.Sprintf("%s:%d", o.HealthBindAddress, o.HealthPort),
+		Addr:           net.JoinHostPort(o.HealthBindAddress, strconv.Itoa(o.HealthPort)),
 		Handler:        muxHandler,
 		MaxHeaderBytes: 1 << 20,
 	}
