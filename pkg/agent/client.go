@@ -534,7 +534,18 @@ func (a *Client) proxyToRemote(connID int64, ctx *connContext) {
 			klog.V(3).InfoS("Exiting proxyToRemote", "connectionID", connID)
 		}
 	}()
-	defer ctx.cleanup()
+	// Not safe to call cleanup here, as cleanup() closes the dataCh 
+	// and we are the receiver for the dataCh. Also we now have a later
+	// defer which will block until dataCh is closed.
+	defer func() {
+		// As the read side of the dataCh channel, we cannot close it.
+		// However serve() may be blocked writing to the channel,
+		// so we need to consume the channel until it is closed. 
+		for range ctx.dataCh {
+			// Ignore values as this indicates there was a problem
+			// with the remote connection.
+		}
+	}()
 
 	for d := range ctx.dataCh {
 		pos := 0
