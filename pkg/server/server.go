@@ -399,7 +399,10 @@ func (s *ProxyServer) Proxy(stream client.ProxyService_ProxyServer) error {
 			case recvCh <- in: // Send didn't block, carry on.
 			default: // Send blocked; record it and try again.
 				klog.V(2).InfoS("Receive channel on Proxy is full", "userAgent", userAgent, "serverID", s.serverID)
+				fullRecvChannelMetric := metrics.Metrics.FullRecvChannel(metrics.Proxy)
+				fullRecvChannelMetric.Inc()
 				recvCh <- in
+				fullRecvChannelMetric.Dec()
 			}
 		}
 	}()
@@ -688,7 +691,10 @@ func (s *ProxyServer) Connect(stream agent.AgentService_ConnectServer) error {
 			case recvCh <- in: // Send didn't block, carry on.
 			default: // Send blocked; record it and try again.
 				klog.V(2).InfoS("Receive channel on Connect is full", "agentID", agentID, "serverID", s.serverID)
+				fullRecvChannelMetric := metrics.Metrics.FullRecvChannel(metrics.Connect)
+				fullRecvChannelMetric.Inc()
 				recvCh <- in
+				fullRecvChannelMetric.Dec()
 			}
 		}
 	}()

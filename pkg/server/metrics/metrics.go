@@ -49,6 +49,7 @@ type ServerMetrics struct {
 	httpConnections   prometheus.Gauge
 	backend           *prometheus.GaugeVec
 	pendingDials      *prometheus.GaugeVec
+	fullRecvChannels  *prometheus.GaugeVec
 }
 
 // newServerMetrics create a new ServerMetrics, configured with default metric names.
@@ -110,6 +111,17 @@ func newServerMetrics() *ServerMetrics {
 		},
 		[]string{},
 	)
+	fullRecvChannels := prometheus.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Namespace: namespace,
+			Subsystem: subsystem,
+			Name:      "full_receive_channels",
+			Help:      "Number of current connections blocked by a full receive channel, partitioned by service method.",
+		},
+		[]string{
+			"service_method",
+		},
+	)
 
 	prometheus.MustRegister(latencies)
 	prometheus.MustRegister(frontendLatencies)
@@ -117,6 +129,7 @@ func newServerMetrics() *ServerMetrics {
 	prometheus.MustRegister(httpConnections)
 	prometheus.MustRegister(backend)
 	prometheus.MustRegister(pendingDials)
+	prometheus.MustRegister(fullRecvChannels)
 	return &ServerMetrics{
 		latencies:         latencies,
 		frontendLatencies: frontendLatencies,
@@ -124,6 +137,7 @@ func newServerMetrics() *ServerMetrics {
 		httpConnections:   httpConnections,
 		backend:           backend,
 		pendingDials:      pendingDials,
+		fullRecvChannels:  fullRecvChannels,
 	}
 }
 
@@ -167,4 +181,9 @@ func (a *ServerMetrics) SetBackendCount(count int) {
 // SetPendingDialCount sets the number of pending dials.
 func (a *ServerMetrics) SetPendingDialCount(count int) {
 	a.pendingDials.WithLabelValues().Set(float64(count))
+}
+
+// FullRecvChannel retrieves the metric for counting full receive channels.
+func (a *ServerMetrics) FullRecvChannel(serviceMethod string) prometheus.Gauge {
+	return a.fullRecvChannels.With(prometheus.Labels{"service_method": serviceMethod})
 }
