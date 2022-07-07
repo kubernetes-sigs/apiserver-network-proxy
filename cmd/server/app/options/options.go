@@ -72,13 +72,6 @@ type ProxyRunOptions struct {
 	// it will use the default backend manager to choose a random backend.
 	ProxyStrategies string
 
-	// This controls if we attempt to push onto a "full" transfer channel.
-	// However checking that the transfer channel is full is not safe.
-	// It violates our race condition checking. Adding locks around a potentially
-	// blocking call has its own problems, so it cannot easily be made race condition safe.
-	// The check is an "unlocked" read but is still use at your own peril.
-	WarnOnChannelLimit bool
-
 	// Cipher suites used by the server.
 	// If empty, the default suite will be used from tls.CipherSuites(),
 	// also checks if given comma separated list contains cipher from tls.InsecureCipherSuites().
@@ -115,8 +108,11 @@ func (o *ProxyRunOptions) Flags() *pflag.FlagSet {
 	flags.IntVar(&o.KubeconfigBurst, "kubeconfig-burst", o.KubeconfigBurst, "Maximum client burst (proxy server uses this client to authenticate agent tokens).")
 	flags.StringVar(&o.AuthenticationAudience, "authentication-audience", o.AuthenticationAudience, "Expected agent's token authentication audience (used with agent-namespace, agent-service-account, kubeconfig).")
 	flags.StringVar(&o.ProxyStrategies, "proxy-strategies", o.ProxyStrategies, "The list of proxy strategies used by the server to pick a backend/tunnel, available strategies are: default, destHost.")
-	flags.BoolVar(&o.WarnOnChannelLimit, "warn-on-channel-limit", o.WarnOnChannelLimit, "Turns on a warning if the system is going to push to a full channel. The check involves an unsafe read.")
 	flags.StringVar(&o.CipherSuites, "cipher-suites", o.CipherSuites, "The comma separated list of allowed cipher suites. Has no effect on TLS1.3. Empty means allow default list.")
+
+	flags.Bool("warn-on-channel-limit", true, "This behavior is now thread safe and always on. This flag will be removed in a future release.")
+	flags.MarkDeprecated("warn-on-channel-limit", "This behavior is now thread safe and always on. This flag will be removed in a future release.")
+
 	return flags
 }
 
@@ -147,7 +143,6 @@ func (o *ProxyRunOptions) Print() {
 	klog.V(1).Infof("KubeconfigQPS set to %f.\n", o.KubeconfigQPS)
 	klog.V(1).Infof("KubeconfigBurst set to %d.\n", o.KubeconfigBurst)
 	klog.V(1).Infof("ProxyStrategies set to %q.\n", o.ProxyStrategies)
-	klog.V(1).Infof("WarnOnChannelLimit set to %t.\n", o.WarnOnChannelLimit)
 	klog.V(1).Infof("CipherSuites set to %q.\n", o.CipherSuites)
 }
 
@@ -321,7 +316,6 @@ func NewProxyRunOptions() *ProxyRunOptions {
 		KubeconfigBurst:           0,
 		AuthenticationAudience:    "",
 		ProxyStrategies:           "default",
-		WarnOnChannelLimit:        false,
 		CipherSuites:              "",
 	}
 	return &o
