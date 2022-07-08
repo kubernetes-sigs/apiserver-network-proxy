@@ -21,20 +21,24 @@ import (
 	"fmt"
 	"io"
 	"reflect"
+	"sync"
 	"testing"
 	"time"
 
 	"github.com/golang/mock/gomock"
 	"github.com/google/uuid"
+	dto "github.com/prometheus/client_model/go"
 	"google.golang.org/grpc/metadata"
 
 	authv1 "k8s.io/api/authentication/v1"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/util/wait"
 	k8sfake "k8s.io/client-go/kubernetes/fake"
 	fakeauthenticationv1 "k8s.io/client-go/kubernetes/typed/authentication/v1/fake"
 	k8stesting "k8s.io/client-go/testing"
 
 	client "sigs.k8s.io/apiserver-network-proxy/konnectivity-client/proto/client"
+	"sigs.k8s.io/apiserver-network-proxy/pkg/server/metrics"
 	agentmock "sigs.k8s.io/apiserver-network-proxy/proto/agent/mocks"
 	"sigs.k8s.io/apiserver-network-proxy/proto/header"
 )
@@ -333,32 +337,144 @@ func TestServerProxyNormalClose(t *testing.T) {
 			},
 		}
 
-		// recevie CLOSE_REQ from frontend and proxy to backend
-		closeReq := &client.Packet{
-			Type: client.PacketType_CLOSE_REQ,
-			Payload: &client.Packet_CloseRequest{
-				CloseRequest: &client.CloseRequest{
-					ConnectID: 1,
-				}},
-		}
-		// This extra close is unwanted and should be removed; see
-		// https://github.com/kubernetes-sigs/apiserver-network-proxy/pull/307
-		extraCloseReq := &client.Packet{
-			Type: client.PacketType_CLOSE_REQ,
-			Payload: &client.Packet_CloseRequest{
-				CloseRequest: &client.CloseRequest{}},
-		}
-
 		gomock.InOrder(
 			frontendConn.EXPECT().Recv().Return(dialReq, nil).Times(1),
-			frontendConn.EXPECT().Recv().Return(closeReq, nil).Times(1),
+			frontendConn.EXPECT().Recv().Return(closePacket(1), nil).Times(1),
 			frontendConn.EXPECT().Recv().Return(nil, io.EOF).Times(1),
 		)
 		gomock.InOrder(
 			agentConn.EXPECT().Send(dialReq).Return(nil).Times(1),
-			agentConn.EXPECT().Send(closeReq).Return(nil).Times(1),
-			agentConn.EXPECT().Send(extraCloseReq).Return(nil).Times(1),
+			agentConn.EXPECT().Send(closePacket(1)).Return(nil).Times(1),
+			// This extra close is unwanted and should be removed; see
+			// https://github.com/kubernetes-sigs/apiserver-network-proxy/pull/307
+			agentConn.EXPECT().Send(closePacket(0)).Return(nil).Times(1),
 		)
 	}
 	baseServerProxyTestWithBackend(t, validate)
+}
+
+func TestServerProxyRecvChanFull(t *testing.T) {
+	validate := func(frontendConn, agentConn *agentmock.MockAgentService_ConnectServer) {
+		// receive DIAL_REQ from frontend and proxy to backend
+		dialReq := &client.Packet{
+			Type: client.PacketType_DIAL_REQ,
+			Payload: &client.Packet_DialRequest{
+				DialRequest: &client.DialRequest{
+					Protocol: "tcp",
+					Address:  "127.0.0.1:8080",
+					Random:   111,
+				},
+			},
+		}
+
+		data := &client.Packet{
+			Type: client.PacketType_DATA,
+			Payload: &client.Packet_Data{
+				Data: &client.Data{
+					ConnectID: 1,
+					Data:      []byte("hello world"),
+				},
+			},
+		}
+
+		const defaultTimeout = 5 * time.Minute
+		deadline := time.Now().Add(defaultTimeout)
+		if testDeadline, ok := t.Deadline(); ok && testDeadline.Before(deadline) {
+			deadline = testDeadline.Add(-1 * time.Second)
+		}
+
+		readMetric := func() (*float64, error) {
+			// Check for metric increment
+			metric := dto.Metric{}
+			if err := metrics.Metrics.FullRecvChannel(metrics.Proxy).Write(&metric); err != nil {
+				return nil, fmt.Errorf("error reading FulRecvChannel metric: %w", err)
+			}
+			if metric.Gauge == nil || metric.Gauge.Value == nil {
+				return nil, nil // Metric not ready.
+			}
+			return metric.Gauge.Value, nil
+		}
+
+		deadlineCh := make(chan struct{})
+		waitForMetricVal := func(expected float64) {
+			err := wait.PollUntil(10*time.Millisecond, func() (bool, error) {
+				val, err := readMetric()
+				if err != nil {
+					return false, err
+				}
+				return val != nil && *val == expected, nil
+			}, deadlineCh)
+			if err != nil {
+				t.Fatalf("Failed to observe expected metric: %v", err)
+			}
+		}
+
+		expectMetricVal := func(expected float64) {
+			val, err := readMetric()
+			if err != nil {
+				t.Fatalf("Failed to read metric: %v", err)
+			}
+			if val == nil {
+				t.Error("Missing expected metric")
+			} else if *val != expected {
+				t.Errorf("Unexpected metric value: %v (expected %v)", *val, expected)
+			}
+		}
+
+		// WaitGroups for coordinating test stages.
+		recvWG := sync.WaitGroup{}
+		recvWG.Add(1)
+		sendWG := sync.WaitGroup{}
+		sendWG.Add(1)
+
+		gomock.InOrder(
+			frontendConn.EXPECT().Recv().Return(dialReq, nil),
+			// First packet goes through to agentConn.Send
+			frontendConn.EXPECT().Recv().Return(data, nil),
+			// Next xfrChannelSize packets fill the channel.
+			frontendConn.EXPECT().Recv().DoAndReturn(func() (*client.Packet, error) {
+				// Wait for initial packet send before filling the channel.
+				recvWG.Wait()
+				return data, nil
+			}),
+			frontendConn.EXPECT().Recv().Return(data, nil).Times(xfrChannelSize-1),
+			// Last packet should trigger channel full condition.
+			frontendConn.EXPECT().Recv().DoAndReturn(func() (*client.Packet, error) {
+				// Verify that the full channel condition hasn't triggered yet.
+				expectMetricVal(0)
+				return data, nil
+			}),
+
+			frontendConn.EXPECT().Recv().Return(closePacket(1), nil),
+			frontendConn.EXPECT().Recv().Return(nil, io.EOF),
+		)
+		gomock.InOrder(
+			agentConn.EXPECT().Send(dialReq).Return(nil),
+			agentConn.EXPECT().Send(data).DoAndReturn(func(_ *client.Packet) error {
+				// Channel should not be full at this point.
+				expectMetricVal(0)
+				recvWG.Done() // Proceed to fill the channel.
+
+				// Block the send from completing until the full channel condition is detected.
+				waitForMetricVal(1)
+				return nil
+			}),
+			agentConn.EXPECT().Send(data).Return(nil).Times(xfrChannelSize+1), // Expect the remaining packets to be sent.
+			agentConn.EXPECT().Send(closePacket(1)).Return(nil),
+			// This extra close is unwanted and should be removed; see
+			// https://github.com/kubernetes-sigs/apiserver-network-proxy/pull/307
+			agentConn.EXPECT().Send(closePacket(1)).Return(nil),
+		)
+	}
+	baseServerProxyTestWithBackend(t, validate)
+}
+
+func closePacket(connectID int64) *client.Packet {
+	return &client.Packet{
+		Type: client.PacketType_CLOSE_REQ,
+		Payload: &client.Packet_CloseRequest{
+			CloseRequest: &client.CloseRequest{
+				ConnectID: connectID,
+			}},
+	}
 }
