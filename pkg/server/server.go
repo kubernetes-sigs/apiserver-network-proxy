@@ -371,7 +371,7 @@ func (s *ProxyServer) Proxy(stream client.ProxyService_ProxyServer) error {
 	go s.serveRecvFrontend(stream, recvCh)
 
 	defer func() {
-		klog.V(2).InfoS("Receive channel on Proxy is stopping", "userAgent", userAgent, "serverID", s.serverID)
+		klog.V(2).InfoS("Receive channel from frontend is stopping", "userAgent", userAgent, "serverID", s.serverID)
 		close(recvCh)
 	}()
 
@@ -380,7 +380,7 @@ func (s *ProxyServer) Proxy(stream client.ProxyService_ProxyServer) error {
 		for {
 			in, err := stream.Recv()
 			if err == io.EOF {
-				klog.V(2).InfoS("Stream closed on Proxy", "userAgent", userAgent, "serverID", s.serverID)
+				klog.V(2).InfoS("Receive stream from frontend closed", "userAgent", userAgent, "serverID", s.serverID)
 				close(stopCh)
 				return
 			}
@@ -398,7 +398,7 @@ func (s *ProxyServer) Proxy(stream client.ProxyService_ProxyServer) error {
 			select {
 			case recvCh <- in: // Send didn't block, carry on.
 			default: // Send blocked; record it and try again.
-				klog.V(2).InfoS("Receive channel on Proxy is full", "userAgent", userAgent, "serverID", s.serverID)
+				klog.V(2).InfoS("Receive channel from frontend is full", "userAgent", userAgent, "serverID", s.serverID)
 				fullRecvChannelMetric := metrics.Metrics.FullRecvChannel(metrics.Proxy)
 				fullRecvChannelMetric.Inc()
 				recvCh <- in
@@ -667,7 +667,7 @@ func (s *ProxyServer) Connect(stream agent.AgentService_ConnectServer) error {
 	go s.serveRecvBackend(backend, stream, agentID, recvCh)
 
 	defer func() {
-		klog.V(2).InfoS("Receive channel on Connect is stopping", "agentID", agentID, "serverID", s.serverID)
+		klog.V(2).InfoS("Receive channel from agent is stopping", "agentID", agentID, "serverID", s.serverID)
 		close(recvCh)
 	}()
 
@@ -676,12 +676,12 @@ func (s *ProxyServer) Connect(stream agent.AgentService_ConnectServer) error {
 		for {
 			in, err := stream.Recv()
 			if err == io.EOF {
-				klog.V(2).InfoS("Stream closed on Connect", "agentID", agentID, "serverID", s.serverID)
+				klog.V(2).InfoS("Receive stream from agent is closed", "agentID", agentID, "serverID", s.serverID)
 				close(stopCh)
 				return
 			}
 			if err != nil {
-				klog.ErrorS(err, "stream read failure")
+				klog.ErrorS(err, "Receive stream from agent read failure")
 				stopCh <- err
 				close(stopCh)
 				return
@@ -690,7 +690,7 @@ func (s *ProxyServer) Connect(stream agent.AgentService_ConnectServer) error {
 			select {
 			case recvCh <- in: // Send didn't block, carry on.
 			default: // Send blocked; record it and try again.
-				klog.V(2).InfoS("Receive channel on Connect is full", "agentID", agentID, "serverID", s.serverID)
+				klog.V(2).InfoS("Receive channel from agent is full", "agentID", agentID, "serverID", s.serverID)
 				fullRecvChannelMetric := metrics.Metrics.FullRecvChannel(metrics.Connect)
 				fullRecvChannelMetric.Inc()
 				recvCh <- in
