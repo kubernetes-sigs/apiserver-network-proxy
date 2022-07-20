@@ -1,4 +1,4 @@
-FROM registry.ci.openshift.org/ocp/builder:rhel-8-golang-1.18-openshift-4.12 AS builder
+FROM registry.ci.openshift.org/ocp/builder:rhel-8-golang-1.18-openshift-4.11 AS builder
 
 WORKDIR /go/src/sigs.k8s.io/apiserver-network-proxy
 
@@ -7,7 +7,7 @@ COPY . .
 RUN go build -o proxy-server sigs.k8s.io/apiserver-network-proxy/cmd/server
 RUN go build -o proxy-agent sigs.k8s.io/apiserver-network-proxy/cmd/agent
 
-FROM registry.ci.openshift.org/ocp/4.12:base
+FROM registry.ci.openshift.org/ocp/4.11:base
 
 COPY --from=builder /go/src/sigs.k8s.io/apiserver-network-proxy/proxy-server /usr/bin/proxy-server
 COPY --from=builder /go/src/sigs.k8s.io/apiserver-network-proxy/proxy-agent /usr/bin/proxy-agent
