@@ -45,6 +45,11 @@ func (lb *tcpLB) serve(stopCh chan struct{}) string {
 	}
 
 	go func() {
+		<-stopCh
+		ln.Close()
+	}()
+
+	go func() {
 		for {
 			select {
 			case <-stopCh:
