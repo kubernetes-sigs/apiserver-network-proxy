@@ -134,21 +134,7 @@ func TestBasicHAProxyServer_GRPC(t *testing.T) {
 	lbAddr := lb.serve(stopCh)
 
 	clientset := runAgent(lbAddr, stopCh)
-
-	var ready bool
-	var hc, cc int
-	for i := 0; i < 3; i++ {
-		time.Sleep(1 * time.Second)
-		hc, cc = clientset.HealthyClientsCount(), clientset.ClientsCount()
-		t.Logf("got %d clients, %d of them are healthy", hc, cc)
-		if hc == 3 && cc == 3 {
-			ready = true
-			break
-		}
-	}
-	if !ready {
-		t.Fatalf("expected to get 3 clients, got %d clients, %d healthy clients", hc, cc)
-	}
+	waitForHealthyClients(t, 3, clientset)
 
 	// run test client
 	testProxyServer(t, proxy[0].front, server.URL)
@@ -161,6 +147,9 @@ func TestBasicHAProxyServer_GRPC(t *testing.T) {
 	lb.removeBackend(proxy[0].agent)
 	cleanups[0]()
 
+	// give the agent some time to detect the disconnection
+	waitForHealthyClients(t, 2, clientset)
+
 	proxy4, _, cleanup4, err := runGRPCProxyServerWithServerCount(haServerCount)
 	if err != nil {
 		t.Fatal(err)
@@ -171,22 +160,10 @@ func TestBasicHAProxyServer_GRPC(t *testing.T) {
 		cleanups[2]()
 		cleanup4()
 	}()
-	// give the agent some time to detect the disconnection
-	time.Sleep(1 * time.Second)
 
-	ready = false
-	for i := 0; i < 3; i++ {
-		time.Sleep(1 * time.Second)
-		hc, cc = clientset.HealthyClientsCount(), clientset.ClientsCount()
-		t.Logf("got %d clients, %d of them are healthy", hc, cc)
-		if hc == 3 && (cc == 3 || cc == 4) {
-			ready = true
-			break
-		}
-	}
-	if !ready {
-		t.Fatalf("expected to get 3 clients, got %d clients, %d healthy clients", hc, cc)
-	}
+	// wait for the new server to be connected.
+	waitForHealthyClients(t, 3, clientset)
+
 	// run test client
 	testProxyServer(t, proxy[1].front, server.URL)
 	testProxyServer(t, proxy[2].front, server.URL)

@@ -4,7 +4,6 @@ import (
 	"context"
 	"net"
 	"testing"
-	"time"
 
 	"google.golang.org/grpc"
 	"k8s.io/klog/v2"
@@ -56,10 +55,8 @@ func TestEchoServer(t *testing.T) {
 	}
 	defer cleanup()
 
-	runAgent(proxy.agent, stopCh)
-
-	// Wait for agent to register on proxy server
-	time.Sleep(time.Second)
+	clientset := runAgent(proxy.agent, stopCh)
+	waitForHealthyClients(t, 1, clientset)
 
 	// run test client
 	tunnel, err := client.CreateSingleUseGrpcTunnel(ctx, proxy.front, grpc.WithInsecure())

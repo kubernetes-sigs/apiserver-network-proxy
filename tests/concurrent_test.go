@@ -7,10 +7,8 @@ import (
 	"net/http/httptest"
 	"sync"
 	"testing"
-	"time"
 
 	"google.golang.org/grpc"
-	"k8s.io/apimachinery/pkg/util/wait"
 	"sigs.k8s.io/apiserver-network-proxy/konnectivity-client/pkg/client"
 )
 
@@ -30,10 +28,8 @@ func TestProxy_ConcurrencyGRPC(t *testing.T) {
 	}
 	defer cleanup()
 
-	runAgent(proxy.agent, stopCh)
-
-	// Wait for agent to register on proxy server
-	time.Sleep(time.Second)
+	clientset := runAgent(proxy.agent, stopCh)
+	waitForHealthyClients(t, 1, clientset)
 
 	// run test client
 	tunnel, err := client.CreateSingleUseGrpcTunnel(ctx, proxy.front, grpc.WithInsecure())
@@ -91,13 +87,8 @@ func TestProxy_ConcurrencyHTTP(t *testing.T) {
 	}
 	defer cleanup()
 
-	runAgent(proxy.agent, stopCh)
-
-	// Wait for agent to register on proxy server
-	wait.Poll(100*time.Millisecond, 5*time.Second, func() (bool, error) {
-		ready, _ := proxy.server.Readiness.Ready()
-		return ready, nil
-	})
+	clientset := runAgent(proxy.agent, stopCh)
+	waitForHealthyClients(t, 1, clientset)
 
 	// run test clients
 	var wg sync.WaitGroup
@@ -162,17 +153,15 @@ func TestAgent_MultipleConn(t *testing.T) {
 			}
 			defer cleanup()
 
-			runAgentWithID("multipleAgentConn", proxy.agent, stopCh)
+			cs1 := runAgentWithID("multipleAgentConn", proxy.agent, stopCh)
+			waitForHealthyClients(t, 1, cs1)
 			defer close(stopCh)
-
-			// Wait for agent to register on proxy server
-			wait.Poll(100*time.Millisecond, 5*time.Second, func() (bool, error) {
-				ready, _ := proxy.server.Readiness.Ready()
-				return ready, nil
-			})
 
 			// run test client
 			c, err := tc.clientFunction(ctx, proxy.front, server.URL)
+			if err != nil {
+				t.Fatal(err)
+			}
 
 			fcnStopCh := make(chan struct{})
 
@@ -187,10 +176,11 @@ func TestAgent_MultipleConn(t *testing.T) {
 			// Running an agent with the same ID simulates a second connection from the same agent.
 			// This simulates the scenario where a proxy agent established connections with HA proxy server
 			// and creates multiple connections with the same proxy server
-			runAgentWithID("multipleAgentConn", proxy.agent, stopCh2)
+			cs2 := runAgentWithID("multipleAgentConn", proxy.agent, stopCh2)
+			waitForHealthyClients(t, 1, cs2)
 			close(stopCh2)
 			// Wait for the server to run cleanup routine
-			time.Sleep(1 * time.Second)
+			waitForBackends(t, 1, proxy.server)
 			close(echoServer.wchan)
 
 			<-fcnStopCh

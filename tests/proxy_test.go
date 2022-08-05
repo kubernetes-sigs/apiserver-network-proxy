@@ -17,6 +17,7 @@ import (
 	"github.com/google/uuid"
 	"go.uber.org/goleak"
 	"google.golang.org/grpc"
+	"k8s.io/apimachinery/pkg/util/wait"
 	"sigs.k8s.io/apiserver-network-proxy/konnectivity-client/pkg/client"
 	clientproto "sigs.k8s.io/apiserver-network-proxy/konnectivity-client/proto/client"
 	"sigs.k8s.io/apiserver-network-proxy/pkg/agent"
@@ -72,10 +73,8 @@ func TestBasicProxy_GRPC(t *testing.T) {
 	}
 	defer cleanup()
 
-	runAgent(proxy.agent, stopCh)
-
-	// Wait for agent to register on proxy server
-	time.Sleep(time.Second)
+	clientset := runAgent(proxy.agent, stopCh)
+	waitForHealthyClients(t, 1, clientset)
 
 	// run test client
 	tunnel, err := client.CreateSingleUseGrpcTunnel(ctx, proxy.front, grpc.WithInsecure())
@@ -125,10 +124,8 @@ func TestProxyHandleDialError_GRPC(t *testing.T) {
 	}
 	defer cleanup()
 
-	runAgent(proxy.agent, stopCh)
-
-	// Wait for agent to register on proxy server
-	time.Sleep(time.Second)
+	clientset := runAgent(proxy.agent, stopCh)
+	waitForHealthyClients(t, 1, clientset)
 
 	// run test client
 	tunnel, err := client.CreateSingleUseGrpcTunnel(ctx, proxy.front, grpc.WithInsecure())
@@ -168,10 +165,8 @@ func TestProxyHandle_DoneContext_GRPC(t *testing.T) {
 	}
 	defer cleanup()
 
-	runAgent(proxy.agent, stopCh)
-
-	// Wait for agent to register on proxy server
-	time.Sleep(time.Second)
+	clientset := runAgent(proxy.agent, stopCh)
+	waitForHealthyClients(t, 1, clientset)
 
 	// run test client
 	ctx, cancel := context.WithTimeout(context.Background(), -time.Second)
@@ -199,10 +194,8 @@ func TestProxyHandle_SlowContext_GRPC(t *testing.T) {
 	}
 	defer cleanup()
 
-	runAgent(proxy.agent, stopCh)
-
-	// Wait for agent to register on proxy server
-	time.Sleep(time.Second)
+	clientset := runAgent(proxy.agent, stopCh)
+	waitForHealthyClients(t, 1, clientset)
 
 	// run test client
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
@@ -252,10 +245,8 @@ func TestProxyHandle_ContextCancelled_GRPC(t *testing.T) {
 	}
 	defer cleanup()
 
-	runAgent(proxy.agent, stopCh)
-
-	// Wait for agent to register on proxy server
-	time.Sleep(time.Second)
+	clientset := runAgent(proxy.agent, stopCh)
+	waitForHealthyClients(t, 1, clientset)
 
 	// run test client
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
@@ -306,10 +297,8 @@ func TestProxy_LargeResponse(t *testing.T) {
 	}
 	defer cleanup()
 
-	runAgent(proxy.agent, stopCh)
-
-	// Wait for agent to register on proxy server
-	time.Sleep(time.Second)
+	clientset := runAgent(proxy.agent, stopCh)
+	waitForHealthyClients(t, 1, clientset)
 
 	// run test client
 	tunnel, err := client.CreateSingleUseGrpcTunnel(ctx, proxy.front, grpc.WithInsecure())
@@ -359,10 +348,8 @@ func TestBasicProxy_HTTPCONN(t *testing.T) {
 	}
 	defer cleanup()
 
-	runAgent(proxy.agent, stopCh)
-
-	// Wait for agent to register on proxy server
-	time.Sleep(time.Second)
+	clientset := runAgent(proxy.agent, stopCh)
+	waitForHealthyClients(t, 1, clientset)
 
 	conn, err := net.Dial("tcp", proxy.front)
 	if err != nil {
@@ -431,10 +418,8 @@ func TestFailedDial_HTTPCONN(t *testing.T) {
 	}
 	defer cleanup()
 
-	runAgent(proxy.agent, stopCh)
-
-	// Wait for agent to register on proxy server
-	time.Sleep(time.Second)
+	clientset := runAgent(proxy.agent, stopCh)
+	waitForHealthyClients(t, 1, clientset)
 
 	conn, err := net.Dial("tcp", proxy.front)
 	if err != nil {
@@ -608,4 +593,35 @@ func runAgentWithID(agentID, addr string, stopCh <-chan struct{}) *agent.ClientS
 	client := cc.NewAgentClientSet(stopCh)
 	client.Serve()
 	return client
+}
+
+func waitForHealthyClients(t *testing.T, expectedClientCount int, clientset *agent.ClientSet) {
+	err := wait.Poll(100*time.Millisecond, wait.ForeverTestTimeout, func() (bool, error) {
+		hc := clientset.HealthyClientsCount()
+		if hc == expectedClientCount {
+			return true, nil
+		}
+		cc := clientset.ClientsCount()
+		t.Logf("got %d clients, %d of them are healthy", cc, hc)
+		return false, nil
+	})
+	if err != nil {
+		t.Fatalf("Error waiting for healthy clients: %v", err)
+	}
+}
+
+// waitForBackends waits for the proxy server to have the expected number of registered backends.
+// This assumes the ProxyServer is using a single ProxyStrategy.
+func waitForBackends(t *testing.T, expectedBackendCount int, proxy *server.ProxyServer) {
+	err := wait.Poll(100*time.Millisecond, wait.ForeverTestTimeout, func() (bool, error) {
+		count := proxy.BackendManagers[0].NumBackends()
+		if count == expectedBackendCount {
+			return true, nil
+		}
+		t.Logf("got %d backends", count)
+		return false, nil
+	})
+	if err != nil {
+		t.Fatalf("Error waiting for backend count: %v", err)
+	}
 }

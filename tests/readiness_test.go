@@ -2,7 +2,6 @@ package tests
 
 import (
 	"testing"
-	"time"
 )
 
 func TestReadiness(t *testing.T) {
@@ -20,10 +19,8 @@ func TestReadiness(t *testing.T) {
 		t.Fatalf("expected not ready")
 	}
 
-	runAgent(proxy.agent, stopCh)
-
-	// Wait for agent to register on proxy server
-	time.Sleep(time.Second)
+	clientset := runAgent(proxy.agent, stopCh)
+	waitForHealthyClients(t, 1, clientset)
 
 	ready, _ = server.Readiness.Ready()
 	if !ready {
