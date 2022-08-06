@@ -29,7 +29,6 @@ import (
 type testServer struct {
 	echo   []byte
 	chunks int
-	wchan  chan struct{}
 }
 
 func newEchoServer(echo string) *testServer {
@@ -48,13 +47,26 @@ func newSizedServer(length, chunks int) *testServer {
 
 func (s *testServer) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 	for i := 0; i < s.chunks; i++ {
-		// Wait before sending the last chunk if test requires it
-		if i == (s.chunks-1) && s.wchan != nil {
-			<-s.wchan
-		}
-
 		w.Write(s.echo)
 	}
+}
+
+type waitingServer struct {
+	requestReceivedCh chan struct{} // channel is closed when the server receives a request
+	respondCh         chan struct{} // server responds when this channel is closed
+}
+
+func newWaitingServer() *waitingServer {
+	return &waitingServer{
+		requestReceivedCh: make(chan struct{}),
+		respondCh:         make(chan struct{}),
+	}
+}
+
+func (s *waitingServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	close(s.requestReceivedCh)
+	<-s.respondCh // Wait for permission to respond.
+	w.Write([]byte("hello"))
 }
 
 func TestBasicProxy_GRPC(t *testing.T) {
@@ -151,9 +163,7 @@ func TestProxyHandleDialError_GRPC(t *testing.T) {
 func TestProxyHandle_DoneContext_GRPC(t *testing.T) {
 	defer goleak.VerifyNone(t, goleak.IgnoreCurrent())
 
-	hangingServer := newEchoServer("hello")
-	hangingServer.wchan = make(chan struct{})
-	server := httptest.NewServer(hangingServer)
+	server := httptest.NewServer(newEchoServer("hello"))
 	defer server.Close()
 
 	stopCh := make(chan struct{})
@@ -180,8 +190,7 @@ func TestProxyHandle_DoneContext_GRPC(t *testing.T) {
 func TestProxyHandle_SlowContext_GRPC(t *testing.T) {
 	defer goleak.VerifyNone(t, goleak.IgnoreCurrent())
 
-	slowServer := newEchoServer("hello")
-	slowServer.wchan = make(chan struct{})
+	slowServer := newWaitingServer()
 	server := httptest.NewServer(slowServer)
 	defer server.Close()
 
@@ -206,8 +215,8 @@ func TestProxyHandle_SlowContext_GRPC(t *testing.T) {
 	}
 
 	go func() {
-		time.Sleep(3 * time.Second)
-		close(slowServer.wchan)
+		<-ctx.Done() // Wait for context to time out.
+		close(slowServer.respondCh)
 	}()
 
 	c := &http.Client{
@@ -231,8 +240,7 @@ func TestProxyHandle_SlowContext_GRPC(t *testing.T) {
 func TestProxyHandle_ContextCancelled_GRPC(t *testing.T) {
 	defer goleak.VerifyNone(t, goleak.IgnoreCurrent())
 
-	slowServer := newEchoServer("hello")
-	slowServer.wchan = make(chan struct{})
+	slowServer := newWaitingServer()
 	server := httptest.NewServer(slowServer)
 	defer server.Close()
 
@@ -256,9 +264,9 @@ func TestProxyHandle_ContextCancelled_GRPC(t *testing.T) {
 	}
 
 	go func() {
-		time.Sleep(1 * time.Second)
+		<-slowServer.requestReceivedCh // Wait for server to receive request.
 		cancel()
-		close(slowServer.wchan)
+		close(slowServer.respondCh) // Unblock server response.
 	}()
 
 	c := &http.Client{

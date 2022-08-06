@@ -139,9 +139,8 @@ func TestAgent_MultipleConn(t *testing.T) {
 	for _, tc := range testcases {
 		t.Run(tc.name, func(t *testing.T) {
 			ctx := context.Background()
-			echoServer := newEchoServer("hello")
-			echoServer.wchan = make(chan struct{})
-			server := httptest.NewServer(echoServer)
+			waitServer := newWaitingServer()
+			server := httptest.NewServer(waitServer)
 			defer server.Close()
 
 			stopCh := make(chan struct{})
@@ -172,6 +171,7 @@ func TestAgent_MultipleConn(t *testing.T) {
 				}
 				close(fcnStopCh)
 			}()
+			<-waitServer.requestReceivedCh
 
 			// Running an agent with the same ID simulates a second connection from the same agent.
 			// This simulates the scenario where a proxy agent established connections with HA proxy server
@@ -181,7 +181,7 @@ func TestAgent_MultipleConn(t *testing.T) {
 			close(stopCh2)
 			// Wait for the server to run cleanup routine
 			waitForBackends(t, 1, proxy.server)
-			close(echoServer.wchan)
+			close(waitServer.respondCh)
 
 			<-fcnStopCh
 		})
