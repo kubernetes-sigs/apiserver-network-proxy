@@ -9,9 +9,9 @@ import (
 	"net/http/httptest"
 	"sync"
 	"testing"
-	"time"
 
 	"google.golang.org/grpc"
+	"k8s.io/apimachinery/pkg/util/wait"
 	"sigs.k8s.io/apiserver-network-proxy/konnectivity-client/pkg/client"
 	pkgagent "sigs.k8s.io/apiserver-network-proxy/pkg/agent"
 	"sigs.k8s.io/apiserver-network-proxy/pkg/server"
@@ -51,7 +51,7 @@ func getTestClient(front string, t *testing.T) *http.Client {
 		Transport: &http.Transport{
 			DialContext: tunnel.DialContext,
 		},
-		Timeout: 2 * time.Second,
+		Timeout: wait.ForeverTestTimeout,
 	}
 }
 
@@ -129,8 +129,10 @@ func TestConcurrentClientRequest(t *testing.T) {
 	stopCh := make(chan struct{})
 	defer close(stopCh)
 	// Run two agents
-	runAgent(proxy.agent, stopCh)
-	runAgent(proxy.agent, stopCh)
+	cs1 := runAgent(proxy.agent, stopCh)
+	cs2 := runAgent(proxy.agent, stopCh)
+	waitForHealthyClients(t, 1, cs1)
+	waitForHealthyClients(t, 1, cs2)
 
 	client1 := getTestClient(proxy.front, t)
 	client2 := getTestClient(proxy.front, t)
@@ -153,8 +155,6 @@ func TestConcurrentClientRequest(t *testing.T) {
 			t.Errorf("expect %v; got %v", "1", string(data))
 		}
 	}()
-	// give client1 some time to establish the connection.
-	time.Sleep(1 * time.Second)
 	go func() {
 		defer wg.Done()
 		r, err := client2.Post(s.URL, "text/plain", bytes.NewBufferString("2"))
