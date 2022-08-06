@@ -155,8 +155,10 @@ func TestProxyHandleDialError_GRPC(t *testing.T) {
 	invalidServer.Close()
 
 	_, err = c.Get(url)
-	if err == nil || !strings.Contains(err.Error(), "connection refused") {
+	if err == nil {
 		t.Error("Expected error when destination is unreachable, did not receive error")
+	} else if !strings.Contains(err.Error(), "connection refused") {
+		t.Errorf("Unexpected error: %v", err)
 	}
 }
 
@@ -182,8 +184,10 @@ func TestProxyHandle_DoneContext_GRPC(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), -time.Second)
 	defer cancel()
 	_, err = client.CreateSingleUseGrpcTunnel(ctx, proxy.front, grpc.WithInsecure())
-	if err == nil || !strings.Contains(err.Error(), "context deadline exceeded") {
+	if err == nil {
 		t.Error("Expected error when context is cancelled, did not receive error")
+	} else if !strings.Contains(err.Error(), "context deadline exceeded") {
+		t.Errorf("Unexpected error: %v", err)
 	}
 }
 
@@ -232,8 +236,10 @@ func TestProxyHandle_SlowContext_GRPC(t *testing.T) {
 	}
 
 	_, err = c.Do(req)
-	if err == nil || !strings.Contains(err.Error(), "context deadline exceeded") {
+	if err == nil {
 		t.Error("Expected error when context is cancelled, did not receive error")
+	} else if !strings.Contains(err.Error(), "context deadline exceeded") {
+		t.Errorf("Unexpected error: %v", err)
 	}
 }
 
@@ -282,8 +288,10 @@ func TestProxyHandle_ContextCancelled_GRPC(t *testing.T) {
 	}
 
 	_, err = c.Do(req)
-	if err == nil || !strings.Contains(err.Error(), "context canceled") {
+	if err == nil {
 		t.Error("Expected error when context is cancelled, did not receive error")
+	} else if !strings.Contains(err.Error(), "context canceled") {
+		t.Errorf("Unexpected error: %v", err)
 	}
 }
 
@@ -463,8 +471,10 @@ func TestFailedDial_HTTPCONN(t *testing.T) {
 	}
 
 	_, err = c.Get(server.URL)
-	if err == nil || !strings.Contains(err.Error(), "connection reset by peer") {
+	if err == nil {
 		t.Error(err)
+	} else if !strings.Contains(err.Error(), "connection reset by peer") {
+		t.Errorf("Unexpected error: %v", err)
 	}
 
 	err = wait.PollImmediate(100*time.Millisecond, wait.ForeverTestTimeout, func() (bool, error) {
