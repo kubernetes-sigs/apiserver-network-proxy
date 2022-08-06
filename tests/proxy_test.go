@@ -459,13 +459,12 @@ func TestFailedDial_HTTPCONN(t *testing.T) {
 		t.Error(err)
 	}
 
-	for i := 0; i < 20; i++ {
-		if proxy.getActiveHTTPConnectConns() == 0 {
-			return
-		}
-		time.Sleep(time.Millisecond * 10)
+	err = wait.PollImmediate(100*time.Millisecond, wait.ForeverTestTimeout, func() (bool, error) {
+		return proxy.getActiveHTTPConnectConns() == 0, nil
+	})
+	if err != nil {
+		t.Errorf("while waiting for connection to be closed: %v", err)
 	}
-	t.Errorf("expected connection to eventually be closed")
 }
 
 func localAddr(addr net.Addr) string {
