@@ -135,6 +135,9 @@ func TestBasicHAProxyServer_GRPC(t *testing.T) {
 
 	clientset := runAgent(lbAddr, stopCh)
 	waitForConnectedServerCount(t, 3, clientset)
+	if cc := clientset.ClientsCount(); cc != 3 {
+		t.Fatalf("Expected 3 clients, got %d", cc)
+	}
 
 	// run test client
 	testProxyServer(t, proxy[0].front, server.URL)
@@ -163,6 +166,9 @@ func TestBasicHAProxyServer_GRPC(t *testing.T) {
 
 	// wait for the new server to be connected.
 	waitForConnectedServerCount(t, 3, clientset)
+	if cc := clientset.ClientsCount(); cc != 3 && cc != 4 {
+		t.Fatalf("Expected 3 or 4 clients, got %d", cc)
+	}
 
 	// run test client
 	testProxyServer(t, proxy[1].front, server.URL)
