@@ -50,7 +50,7 @@ func TestProxy_Agent_Disconnect_HTTP_Persistent_Connection(t *testing.T) {
 			defer cleanup()
 
 			runAgent(proxy.agent, stopCh)
-			waitForBackends(t, 1, proxy.server)
+			waitForConnectedAgentCount(t, 1, proxy.server)
 
 			// run test client
 
@@ -67,7 +67,7 @@ func TestProxy_Agent_Disconnect_HTTP_Persistent_Connection(t *testing.T) {
 			close(stopCh)
 
 			// Wait for the agent to disconnect
-			waitForBackends(t, 0, proxy.server)
+			waitForConnectedAgentCount(t, 0, proxy.server)
 
 			// Reuse same client to make the request
 			_, err = clientRequest(c, server.URL)
@@ -114,7 +114,7 @@ func TestProxy_Agent_Reconnect(t *testing.T) {
 			defer cleanup()
 
 			cs1 := runAgent(proxy.agent, stopCh)
-			waitForHealthyClients(t, 1, cs1)
+			waitForConnectedServerCount(t, 1, cs1)
 
 			// run test client
 
@@ -130,13 +130,13 @@ func TestProxy_Agent_Reconnect(t *testing.T) {
 			close(stopCh)
 
 			// Wait for the agent to disconnect
-			waitForBackends(t, 0, proxy.server)
+			waitForConnectedAgentCount(t, 0, proxy.server)
 
 			// Reconnect agent
 			stopCh2 := make(chan struct{})
 			defer close(stopCh2)
 			cs2 := runAgent(proxy.agent, stopCh2)
-			waitForHealthyClients(t, 1, cs2)
+			waitForConnectedServerCount(t, 1, cs2)
 
 			// Proxy requests should work again after agent reconnects
 			c2, err := tc.clientFunction(ctx, proxy.front, server.URL)

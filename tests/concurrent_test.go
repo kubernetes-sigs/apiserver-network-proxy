@@ -29,7 +29,7 @@ func TestProxy_ConcurrencyGRPC(t *testing.T) {
 	defer cleanup()
 
 	clientset := runAgent(proxy.agent, stopCh)
-	waitForHealthyClients(t, 1, clientset)
+	waitForConnectedServerCount(t, 1, clientset)
 
 	// run test client
 	tunnel, err := client.CreateSingleUseGrpcTunnel(ctx, proxy.front, grpc.WithInsecure())
@@ -88,7 +88,7 @@ func TestProxy_ConcurrencyHTTP(t *testing.T) {
 	defer cleanup()
 
 	clientset := runAgent(proxy.agent, stopCh)
-	waitForHealthyClients(t, 1, clientset)
+	waitForConnectedServerCount(t, 1, clientset)
 
 	// run test clients
 	var wg sync.WaitGroup
@@ -153,7 +153,7 @@ func TestAgent_MultipleConn(t *testing.T) {
 			defer cleanup()
 
 			cs1 := runAgentWithID("multipleAgentConn", proxy.agent, stopCh)
-			waitForHealthyClients(t, 1, cs1)
+			waitForConnectedServerCount(t, 1, cs1)
 			defer close(stopCh)
 
 			// run test client
@@ -177,10 +177,10 @@ func TestAgent_MultipleConn(t *testing.T) {
 			// This simulates the scenario where a proxy agent established connections with HA proxy server
 			// and creates multiple connections with the same proxy server
 			cs2 := runAgentWithID("multipleAgentConn", proxy.agent, stopCh2)
-			waitForHealthyClients(t, 1, cs2)
+			waitForConnectedServerCount(t, 1, cs2)
 			close(stopCh2)
 			// Wait for the server to run cleanup routine
-			waitForBackends(t, 1, proxy.server)
+			waitForConnectedAgentCount(t, 1, proxy.server)
 			close(waitServer.respondCh)
 
 			<-fcnStopCh

@@ -131,8 +131,8 @@ func TestConcurrentClientRequest(t *testing.T) {
 	// Run two agents
 	cs1 := runAgent(proxy.agent, stopCh)
 	cs2 := runAgent(proxy.agent, stopCh)
-	waitForHealthyClients(t, 1, cs1)
-	waitForHealthyClients(t, 1, cs2)
+	waitForConnectedServerCount(t, 1, cs1)
+	waitForConnectedServerCount(t, 1, cs2)
 
 	client1 := getTestClient(proxy.front, t)
 	client2 := getTestClient(proxy.front, t)

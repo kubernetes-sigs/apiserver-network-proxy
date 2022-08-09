@@ -56,7 +56,7 @@ func TestEchoServer(t *testing.T) {
 	defer cleanup()
 
 	clientset := runAgent(proxy.agent, stopCh)
-	waitForHealthyClients(t, 1, clientset)
+	waitForConnectedServerCount(t, 1, clientset)
 
 	// run test client
 	tunnel, err := client.CreateSingleUseGrpcTunnel(ctx, proxy.front, grpc.WithInsecure())

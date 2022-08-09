@@ -86,7 +86,7 @@ func TestBasicProxy_GRPC(t *testing.T) {
 	defer cleanup()
 
 	clientset := runAgent(proxy.agent, stopCh)
-	waitForHealthyClients(t, 1, clientset)
+	waitForConnectedServerCount(t, 1, clientset)
 
 	// run test client
 	tunnel, err := client.CreateSingleUseGrpcTunnel(ctx, proxy.front, grpc.WithInsecure())
@@ -137,7 +137,7 @@ func TestProxyHandleDialError_GRPC(t *testing.T) {
 	defer cleanup()
 
 	clientset := runAgent(proxy.agent, stopCh)
-	waitForHealthyClients(t, 1, clientset)
+	waitForConnectedServerCount(t, 1, clientset)
 
 	// run test client
 	tunnel, err := client.CreateSingleUseGrpcTunnel(ctx, proxy.front, grpc.WithInsecure())
@@ -178,7 +178,7 @@ func TestProxyHandle_DoneContext_GRPC(t *testing.T) {
 	defer cleanup()
 
 	clientset := runAgent(proxy.agent, stopCh)
-	waitForHealthyClients(t, 1, clientset)
+	waitForConnectedServerCount(t, 1, clientset)
 
 	// run test client
 	ctx, cancel := context.WithTimeout(context.Background(), -time.Second)
@@ -208,7 +208,7 @@ func TestProxyHandle_SlowContext_GRPC(t *testing.T) {
 	defer cleanup()
 
 	clientset := runAgent(proxy.agent, stopCh)
-	waitForHealthyClients(t, 1, clientset)
+	waitForConnectedServerCount(t, 1, clientset)
 
 	// run test client
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
@@ -260,7 +260,7 @@ func TestProxyHandle_ContextCancelled_GRPC(t *testing.T) {
 	defer cleanup()
 
 	clientset := runAgent(proxy.agent, stopCh)
-	waitForHealthyClients(t, 1, clientset)
+	waitForConnectedServerCount(t, 1, clientset)
 
 	// run test client
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
@@ -314,7 +314,7 @@ func TestProxy_LargeResponse(t *testing.T) {
 	defer cleanup()
 
 	clientset := runAgent(proxy.agent, stopCh)
-	waitForHealthyClients(t, 1, clientset)
+	waitForConnectedServerCount(t, 1, clientset)
 
 	// run test client
 	tunnel, err := client.CreateSingleUseGrpcTunnel(ctx, proxy.front, grpc.WithInsecure())
@@ -365,7 +365,7 @@ func TestBasicProxy_HTTPCONN(t *testing.T) {
 	defer cleanup()
 
 	clientset := runAgent(proxy.agent, stopCh)
-	waitForHealthyClients(t, 1, clientset)
+	waitForConnectedServerCount(t, 1, clientset)
 
 	conn, err := net.Dial("tcp", proxy.front)
 	if err != nil {
@@ -435,7 +435,7 @@ func TestFailedDial_HTTPCONN(t *testing.T) {
 	defer cleanup()
 
 	clientset := runAgent(proxy.agent, stopCh)
-	waitForHealthyClients(t, 1, clientset)
+	waitForConnectedServerCount(t, 1, clientset)
 
 	conn, err := net.Dial("tcp", proxy.front)
 	if err != nil {
@@ -612,14 +612,17 @@ func runAgentWithID(agentID, addr string, stopCh <-chan struct{}) *agent.ClientS
 	return client
 }
 
-func waitForHealthyClients(t *testing.T, expectedClientCount int, clientset *agent.ClientSet) {
-	err := wait.Poll(100*time.Millisecond, wait.ForeverTestTimeout, func() (bool, error) {
+// waitForConnectedServerCount waits for the agent ClientSet to have the expected number of health
+// server connections (HealthyClientsCount).
+func waitForConnectedServerCount(t *testing.T, expectedServerCount int, clientset *agent.ClientSet) {
+	t.Helper()
+	err := wait.PollImmediate(100*time.Millisecond, wait.ForeverTestTimeout, func() (bool, error) {
 		hc := clientset.HealthyClientsCount()
-		if hc == expectedClientCount {
+		if hc == expectedServerCount {
 			return true, nil
 		}
 		cc := clientset.ClientsCount()
-		t.Logf("got %d clients, %d of them are healthy", cc, hc)
+		t.Logf("got %d clients, %d of them are healthy; waiting for %d", cc, hc, expectedServerCount)
 		return false, nil
 	})
 	if err != nil {
@@ -627,15 +630,16 @@ func waitForHealthyClients(t *testing.T, expectedClientCount int, clientset *age
 	}
 }
 
-// waitForBackends waits for the proxy server to have the expected number of registered backends.
-// This assumes the ProxyServer is using a single ProxyStrategy.
-func waitForBackends(t *testing.T, expectedBackendCount int, proxy *server.ProxyServer) {
-	err := wait.Poll(100*time.Millisecond, wait.ForeverTestTimeout, func() (bool, error) {
+// waitForConnectedAgentCount waits for the proxy server to have the expected number of registered
+// agents (backends). This assumes the ProxyServer is using a single ProxyStrategy.
+func waitForConnectedAgentCount(t *testing.T, expectedAgentCount int, proxy *server.ProxyServer) {
+	t.Helper()
+	err := wait.PollImmediate(100*time.Millisecond, wait.ForeverTestTimeout, func() (bool, error) {
 		count := proxy.BackendManagers[0].NumBackends()
-		if count == expectedBackendCount {
+		if count == expectedAgentCount {
 			return true, nil
 		}
-		t.Logf("got %d backends", count)
+		t.Logf("got %d backends; waiting for %d", count, expectedAgentCount)
 		return false, nil
 	})
 	if err != nil {

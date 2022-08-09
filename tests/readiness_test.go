@@ -20,7 +20,7 @@ func TestReadiness(t *testing.T) {
 	}
 
 	clientset := runAgent(proxy.agent, stopCh)
-	waitForHealthyClients(t, 1, clientset)
+	waitForConnectedServerCount(t, 1, clientset)
 
 	ready, _ = server.Readiness.Ready()
 	if !ready {

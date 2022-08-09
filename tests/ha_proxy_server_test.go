@@ -134,7 +134,7 @@ func TestBasicHAProxyServer_GRPC(t *testing.T) {
 	lbAddr := lb.serve(stopCh)
 
 	clientset := runAgent(lbAddr, stopCh)
-	waitForHealthyClients(t, 3, clientset)
+	waitForConnectedServerCount(t, 3, clientset)
 
 	// run test client
 	testProxyServer(t, proxy[0].front, server.URL)
@@ -148,7 +148,7 @@ func TestBasicHAProxyServer_GRPC(t *testing.T) {
 	cleanups[0]()
 
 	// give the agent some time to detect the disconnection
-	waitForHealthyClients(t, 2, clientset)
+	waitForConnectedServerCount(t, 2, clientset)
 
 	proxy4, _, cleanup4, err := runGRPCProxyServerWithServerCount(haServerCount)
 	if err != nil {
@@ -162,7 +162,7 @@ func TestBasicHAProxyServer_GRPC(t *testing.T) {
 	}()
 
 	// wait for the new server to be connected.
-	waitForHealthyClients(t, 3, clientset)
+	waitForConnectedServerCount(t, 3, clientset)
 
 	// run test client
 	testProxyServer(t, proxy[1].front, server.URL)
