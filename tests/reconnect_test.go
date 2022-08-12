@@ -3,10 +3,12 @@ package tests
 import (
 	"net"
 	"testing"
+	"time"
 
 	"github.com/google/uuid"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/metadata"
+	"k8s.io/apimachinery/pkg/util/wait"
 	"sigs.k8s.io/apiserver-network-proxy/proto/agent"
 	agentproto "sigs.k8s.io/apiserver-network-proxy/proto/agent"
 	"sigs.k8s.io/apiserver-network-proxy/proto/header"
@@ -32,14 +34,21 @@ func TestClientReconnects(t *testing.T) {
 		t.Fatal(err)
 	}
 	go func() {
-		svr.Serve(lis)
+		if err := svr.Serve(lis); err != nil {
+			panic(err)
+		}
 	}()
 
 	stopCh := make(chan struct{})
 	defer close(stopCh)
 	runAgentWithID("test-id", lis.Addr().String(), stopCh)
 
-	<-connections
+	select {
+	case <-connections:
+		// Expected
+	case <-time.After(wait.ForeverTestTimeout):
+		t.Fatal("Timed out waiting for agent to connect")
+	}
 	svr.Stop()
 
 	lis2, err := net.Listen("tcp", lis.Addr().String())
@@ -53,8 +62,14 @@ func TestClientReconnects(t *testing.T) {
 			panic(err)
 		}
 	}()
+	defer svr2.Stop()
 
-	<-connections
+	select {
+	case <-connections:
+		// Expected
+	case <-time.After(wait.ForeverTestTimeout):
+		t.Fatal("Timed out waiting for agent to reconnect")
+	}
 }
 
 type testAgentServerImpl struct {

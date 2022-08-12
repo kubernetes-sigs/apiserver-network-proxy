@@ -17,6 +17,7 @@ import (
 	"github.com/google/uuid"
 	"go.uber.org/goleak"
 	"google.golang.org/grpc"
+	"k8s.io/apimachinery/pkg/util/wait"
 	"sigs.k8s.io/apiserver-network-proxy/konnectivity-client/pkg/client"
 	clientproto "sigs.k8s.io/apiserver-network-proxy/konnectivity-client/proto/client"
 	"sigs.k8s.io/apiserver-network-proxy/pkg/agent"
@@ -28,7 +29,6 @@ import (
 type testServer struct {
 	echo   []byte
 	chunks int
-	wchan  chan struct{}
 }
 
 func newEchoServer(echo string) *testServer {
@@ -47,13 +47,26 @@ func newSizedServer(length, chunks int) *testServer {
 
 func (s *testServer) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 	for i := 0; i < s.chunks; i++ {
-		// Wait before sending the last chunk if test requires it
-		if i == (s.chunks-1) && s.wchan != nil {
-			<-s.wchan
-		}
-
 		w.Write(s.echo)
 	}
+}
+
+type waitingServer struct {
+	requestReceivedCh chan struct{} // channel is closed when the server receives a request
+	respondCh         chan struct{} // server responds when this channel is closed
+}
+
+func newWaitingServer() *waitingServer {
+	return &waitingServer{
+		requestReceivedCh: make(chan struct{}),
+		respondCh:         make(chan struct{}),
+	}
+}
+
+func (s *waitingServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	close(s.requestReceivedCh)
+	<-s.respondCh // Wait for permission to respond.
+	w.Write([]byte("hello"))
 }
 
 func TestBasicProxy_GRPC(t *testing.T) {
@@ -72,10 +85,8 @@ func TestBasicProxy_GRPC(t *testing.T) {
 	}
 	defer cleanup()
 
-	runAgent(proxy.agent, stopCh)
-
-	// Wait for agent to register on proxy server
-	time.Sleep(time.Second)
+	clientset := runAgent(proxy.agent, stopCh)
+	waitForConnectedServerCount(t, 1, clientset)
 
 	// run test client
 	tunnel, err := client.CreateSingleUseGrpcTunnel(ctx, proxy.front, grpc.WithInsecure())
@@ -125,10 +136,8 @@ func TestProxyHandleDialError_GRPC(t *testing.T) {
 	}
 	defer cleanup()
 
-	runAgent(proxy.agent, stopCh)
-
-	// Wait for agent to register on proxy server
-	time.Sleep(time.Second)
+	clientset := runAgent(proxy.agent, stopCh)
+	waitForConnectedServerCount(t, 1, clientset)
 
 	// run test client
 	tunnel, err := client.CreateSingleUseGrpcTunnel(ctx, proxy.front, grpc.WithInsecure())
@@ -146,17 +155,17 @@ func TestProxyHandleDialError_GRPC(t *testing.T) {
 	invalidServer.Close()
 
 	_, err = c.Get(url)
-	if err == nil || !strings.Contains(err.Error(), "connection refused") {
+	if err == nil {
 		t.Error("Expected error when destination is unreachable, did not receive error")
+	} else if !strings.Contains(err.Error(), "connection refused") {
+		t.Errorf("Unexpected error: %v", err)
 	}
 }
 
 func TestProxyHandle_DoneContext_GRPC(t *testing.T) {
 	defer goleak.VerifyNone(t, goleak.IgnoreCurrent())
 
-	hangingServer := newEchoServer("hello")
-	hangingServer.wchan = make(chan struct{})
-	server := httptest.NewServer(hangingServer)
+	server := httptest.NewServer(newEchoServer("hello"))
 	defer server.Close()
 
 	stopCh := make(chan struct{})
@@ -168,25 +177,24 @@ func TestProxyHandle_DoneContext_GRPC(t *testing.T) {
 	}
 	defer cleanup()
 
-	runAgent(proxy.agent, stopCh)
-
-	// Wait for agent to register on proxy server
-	time.Sleep(time.Second)
+	clientset := runAgent(proxy.agent, stopCh)
+	waitForConnectedServerCount(t, 1, clientset)
 
 	// run test client
 	ctx, cancel := context.WithTimeout(context.Background(), -time.Second)
 	defer cancel()
 	_, err = client.CreateSingleUseGrpcTunnel(ctx, proxy.front, grpc.WithInsecure())
-	if err == nil || !strings.Contains(err.Error(), "context deadline exceeded") {
+	if err == nil {
 		t.Error("Expected error when context is cancelled, did not receive error")
+	} else if !strings.Contains(err.Error(), "context deadline exceeded") {
+		t.Errorf("Unexpected error: %v", err)
 	}
 }
 
 func TestProxyHandle_SlowContext_GRPC(t *testing.T) {
 	defer goleak.VerifyNone(t, goleak.IgnoreCurrent())
 
-	slowServer := newEchoServer("hello")
-	slowServer.wchan = make(chan struct{})
+	slowServer := newWaitingServer()
 	server := httptest.NewServer(slowServer)
 	defer server.Close()
 
@@ -199,10 +207,8 @@ func TestProxyHandle_SlowContext_GRPC(t *testing.T) {
 	}
 	defer cleanup()
 
-	runAgent(proxy.agent, stopCh)
-
-	// Wait for agent to register on proxy server
-	time.Sleep(time.Second)
+	clientset := runAgent(proxy.agent, stopCh)
+	waitForConnectedServerCount(t, 1, clientset)
 
 	// run test client
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
@@ -213,8 +219,8 @@ func TestProxyHandle_SlowContext_GRPC(t *testing.T) {
 	}
 
 	go func() {
-		time.Sleep(3 * time.Second)
-		close(slowServer.wchan)
+		<-ctx.Done() // Wait for context to time out.
+		close(slowServer.respondCh)
 	}()
 
 	c := &http.Client{
@@ -230,16 +236,17 @@ func TestProxyHandle_SlowContext_GRPC(t *testing.T) {
 	}
 
 	_, err = c.Do(req)
-	if err == nil || !strings.Contains(err.Error(), "context deadline exceeded") {
+	if err == nil {
 		t.Error("Expected error when context is cancelled, did not receive error")
+	} else if !strings.Contains(err.Error(), "context deadline exceeded") {
+		t.Errorf("Unexpected error: %v", err)
 	}
 }
 
 func TestProxyHandle_ContextCancelled_GRPC(t *testing.T) {
 	defer goleak.VerifyNone(t, goleak.IgnoreCurrent())
 
-	slowServer := newEchoServer("hello")
-	slowServer.wchan = make(chan struct{})
+	slowServer := newWaitingServer()
 	server := httptest.NewServer(slowServer)
 	defer server.Close()
 
@@ -252,10 +259,8 @@ func TestProxyHandle_ContextCancelled_GRPC(t *testing.T) {
 	}
 	defer cleanup()
 
-	runAgent(proxy.agent, stopCh)
-
-	// Wait for agent to register on proxy server
-	time.Sleep(time.Second)
+	clientset := runAgent(proxy.agent, stopCh)
+	waitForConnectedServerCount(t, 1, clientset)
 
 	// run test client
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
@@ -265,9 +270,9 @@ func TestProxyHandle_ContextCancelled_GRPC(t *testing.T) {
 	}
 
 	go func() {
-		time.Sleep(1 * time.Second)
+		<-slowServer.requestReceivedCh // Wait for server to receive request.
 		cancel()
-		close(slowServer.wchan)
+		close(slowServer.respondCh) // Unblock server response.
 	}()
 
 	c := &http.Client{
@@ -283,8 +288,10 @@ func TestProxyHandle_ContextCancelled_GRPC(t *testing.T) {
 	}
 
 	_, err = c.Do(req)
-	if err == nil || !strings.Contains(err.Error(), "context canceled") {
+	if err == nil {
 		t.Error("Expected error when context is cancelled, did not receive error")
+	} else if !strings.Contains(err.Error(), "context canceled") {
+		t.Errorf("Unexpected error: %v", err)
 	}
 }
 
@@ -306,10 +313,8 @@ func TestProxy_LargeResponse(t *testing.T) {
 	}
 	defer cleanup()
 
-	runAgent(proxy.agent, stopCh)
-
-	// Wait for agent to register on proxy server
-	time.Sleep(time.Second)
+	clientset := runAgent(proxy.agent, stopCh)
+	waitForConnectedServerCount(t, 1, clientset)
 
 	// run test client
 	tunnel, err := client.CreateSingleUseGrpcTunnel(ctx, proxy.front, grpc.WithInsecure())
@@ -359,10 +364,8 @@ func TestBasicProxy_HTTPCONN(t *testing.T) {
 	}
 	defer cleanup()
 
-	runAgent(proxy.agent, stopCh)
-
-	// Wait for agent to register on proxy server
-	time.Sleep(time.Second)
+	clientset := runAgent(proxy.agent, stopCh)
+	waitForConnectedServerCount(t, 1, clientset)
 
 	conn, err := net.Dial("tcp", proxy.front)
 	if err != nil {
@@ -431,10 +434,8 @@ func TestFailedDial_HTTPCONN(t *testing.T) {
 	}
 	defer cleanup()
 
-	runAgent(proxy.agent, stopCh)
-
-	// Wait for agent to register on proxy server
-	time.Sleep(time.Second)
+	clientset := runAgent(proxy.agent, stopCh)
+	waitForConnectedServerCount(t, 1, clientset)
 
 	conn, err := net.Dial("tcp", proxy.front)
 	if err != nil {
@@ -470,17 +471,18 @@ func TestFailedDial_HTTPCONN(t *testing.T) {
 	}
 
 	_, err = c.Get(server.URL)
-	if err == nil || !strings.Contains(err.Error(), "connection reset by peer") {
+	if err == nil {
 		t.Error(err)
+	} else if !strings.Contains(err.Error(), "connection reset by peer") {
+		t.Errorf("Unexpected error: %v", err)
 	}
 
-	for i := 0; i < 20; i++ {
-		if proxy.getActiveHTTPConnectConns() == 0 {
-			return
-		}
-		time.Sleep(time.Millisecond * 10)
+	err = wait.PollImmediate(100*time.Millisecond, wait.ForeverTestTimeout, func() (bool, error) {
+		return proxy.getActiveHTTPConnectConns() == 0, nil
+	})
+	if err != nil {
+		t.Errorf("while waiting for connection to be closed: %v", err)
 	}
-	t.Errorf("expected connection to eventually be closed")
 }
 
 func localAddr(addr net.Addr) string {
@@ -608,4 +610,39 @@ func runAgentWithID(agentID, addr string, stopCh <-chan struct{}) *agent.ClientS
 	client := cc.NewAgentClientSet(stopCh)
 	client.Serve()
 	return client
+}
+
+// waitForConnectedServerCount waits for the agent ClientSet to have the expected number of health
+// server connections (HealthyClientsCount).
+func waitForConnectedServerCount(t *testing.T, expectedServerCount int, clientset *agent.ClientSet) {
+	t.Helper()
+	err := wait.PollImmediate(100*time.Millisecond, wait.ForeverTestTimeout, func() (bool, error) {
+		hc := clientset.HealthyClientsCount()
+		if hc == expectedServerCount {
+			return true, nil
+		}
+		cc := clientset.ClientsCount()
+		t.Logf("got %d clients, %d of them are healthy; waiting for %d", cc, hc, expectedServerCount)
+		return false, nil
+	})
+	if err != nil {
+		t.Fatalf("Error waiting for healthy clients: %v", err)
+	}
+}
+
+// waitForConnectedAgentCount waits for the proxy server to have the expected number of registered
+// agents (backends). This assumes the ProxyServer is using a single ProxyStrategy.
+func waitForConnectedAgentCount(t *testing.T, expectedAgentCount int, proxy *server.ProxyServer) {
+	t.Helper()
+	err := wait.PollImmediate(100*time.Millisecond, wait.ForeverTestTimeout, func() (bool, error) {
+		count := proxy.BackendManagers[0].NumBackends()
+		if count == expectedAgentCount {
+			return true, nil
+		}
+		t.Logf("got %d backends; waiting for %d", count, expectedAgentCount)
+		return false, nil
+	})
+	if err != nil {
+		t.Fatalf("Error waiting for backend count: %v", err)
+	}
 }
