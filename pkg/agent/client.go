@@ -426,6 +426,7 @@ func (a *Client) Serve() {
 				start := time.Now()
 				conn, err := net.DialTimeout(dialReq.Protocol, dialReq.Address, dialTimeout)
 				if err != nil {
+					klog.ErrorS(err, "error dialing backend", "dialID", dialReq.Random)
 					dialResp.GetDialResponse().Error = err.Error()
 					if err := a.Send(dialResp); err != nil {
 						klog.ErrorS(err, "could not send dialResp")
@@ -534,13 +535,13 @@ func (a *Client) proxyToRemote(connID int64, ctx *connContext) {
 			klog.V(3).InfoS("Exiting proxyToRemote", "connectionID", connID)
 		}
 	}()
-	// Not safe to call cleanup here, as cleanup() closes the dataCh 
+	// Not safe to call cleanup here, as cleanup() closes the dataCh
 	// and we are the receiver for the dataCh. Also we now have a later
 	// defer which will block until dataCh is closed.
 	defer func() {
 		// As the read side of the dataCh channel, we cannot close it.
 		// However serve() may be blocked writing to the channel,
-		// so we need to consume the channel until it is closed. 
+		// so we need to consume the channel until it is closed.
 		for range ctx.dataCh {
 			// Ignore values as this indicates there was a problem
 			// with the remote connection.
