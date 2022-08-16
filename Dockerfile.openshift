@@ -4,8 +4,8 @@ WORKDIR /go/src/sigs.k8s.io/apiserver-network-proxy
 
 COPY . .
 
-RUN go build -o proxy-server sigs.k8s.io/apiserver-network-proxy/cmd/server
-RUN go build -o proxy-agent sigs.k8s.io/apiserver-network-proxy/cmd/agent
+RUN CGO_ENABLED=0 go build -v -a -ldflags '-extldflags "-static"' -o proxy-server sigs.k8s.io/apiserver-network-proxy/cmd/server
+RUN CGO_ENABLED=0 go build -v -a -ldflags '-extldflags "-static"' -o proxy-agent sigs.k8s.io/apiserver-network-proxy/cmd/agent
 
 FROM registry.ci.openshift.org/ocp/4.11:base
 
