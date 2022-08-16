@@ -20,6 +20,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"flag"
 	"io"
 	"testing"
 	"time"
@@ -29,6 +30,14 @@ import (
 	"k8s.io/klog/v2"
 	"sigs.k8s.io/apiserver-network-proxy/konnectivity-client/proto/client"
 )
+
+func TestMain(m *testing.M) {
+	fs := flag.NewFlagSet("test", flag.PanicOnError)
+	klog.InitFlags(fs)
+	fs.Set("v", "9")
+
+	m.Run()
+}
 
 func TestDial(t *testing.T) {
 	defer goleak.VerifyNone(t, goleak.IgnoreCurrent())
@@ -40,12 +49,7 @@ func TestDial(t *testing.T) {
 	defer ps.Close()
 	defer s.Close()
 
-	tunnel := &grpcTunnel{
-		stream:             s,
-		pendingDial:        make(map[int64]pendingDial),
-		conns:              make(map[int64]*conn),
-		readTimeoutSeconds: 10,
-	}
+	tunnel := newUnstartedTunnel(s)
 
 	go tunnel.serve(ctx, &fakeConn{})
 	go ts.serve()
@@ -76,13 +80,9 @@ func TestDialRace(t *testing.T) {
 	defer ps.Close()
 	defer s.Close()
 
-	tunnel := &grpcTunnel{
-		// artificially delay after calling Send, ensure handoff of result from serve to DialContext still works
-		stream:             fakeSlowSend{s},
-		pendingDial:        make(map[int64]pendingDial),
-		conns:              make(map[int64]*conn),
-		readTimeoutSeconds: 10,
-	}
+	// artificially delay after calling Send, ensure handoff of result from serve to DialContext still works
+	slowStream := fakeSlowSend{s}
+	tunnel := newUnstartedTunnel(slowStream)
 
 	go tunnel.serve(ctx, &fakeConn{})
 	go ts.serve()
@@ -126,12 +126,7 @@ func TestData(t *testing.T) {
 	defer ps.Close()
 	defer s.Close()
 
-	tunnel := &grpcTunnel{
-		stream:             s,
-		pendingDial:        make(map[int64]pendingDial),
-		conns:              make(map[int64]*conn),
-		readTimeoutSeconds: 10,
-	}
+	tunnel := newUnstartedTunnel(s)
 
 	go tunnel.serve(ctx, &fakeConn{})
 	go ts.serve()
@@ -187,12 +182,7 @@ func TestClose(t *testing.T) {
 	defer ps.Close()
 	defer s.Close()
 
-	tunnel := &grpcTunnel{
-		stream:             s,
-		pendingDial:        make(map[int64]pendingDial),
-		conns:              make(map[int64]*conn),
-		readTimeoutSeconds: 10,
-	}
+	tunnel := newUnstartedTunnel(s)
 
 	go tunnel.serve(ctx, &fakeConn{})
 	go ts.serve()
@@ -233,12 +223,7 @@ func TestCloseTimeout(t *testing.T) {
 	defer ps.Close()
 	defer s.Close()
 
-	tunnel := &grpcTunnel{
-		stream:             s,
-		pendingDial:        make(map[int64]pendingDial),
-		conns:              make(map[int64]*conn),
-		readTimeoutSeconds: 10,
-	}
+	tunnel := newUnstartedTunnel(s)
 
 	go tunnel.serve(ctx, &fakeConn{})
 	go ts.serve()
@@ -297,12 +282,7 @@ func TestDialAfterTunnelCancelled(t *testing.T) {
 	defer ps.Close()
 	defer s.Close()
 
-	tunnel := &grpcTunnel{
-		stream:             s,
-		pendingDial:        make(map[int64]pendingDial),
-		conns:              make(map[int64]*conn),
-		readTimeoutSeconds: 10,
-	}
+	tunnel := newUnstartedTunnel(s)
 
 	go tunnel.serve(ctx, &fakeConn{})
 	go ts.serve()
@@ -310,6 +290,14 @@ func TestDialAfterTunnelCancelled(t *testing.T) {
 	_, err := tunnel.DialContext(ctx, "tcp", "127.0.0.1:80")
 	if err == nil {
 		t.Fatalf("expect err when dialing after tunnel closed")
+	}
+
+	t.Log("Wait for tunnel to close")
+	select {
+	case <-tunnel.Done():
+		t.Log("Tunnel closed successfully")
+	case <-time.After(30 * time.Second):
+		t.Errorf("Timed out waiting for tunnel to close")
 	}
 }
 

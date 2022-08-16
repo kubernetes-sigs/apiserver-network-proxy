@@ -106,17 +106,21 @@ func CreateSingleUseGrpcTunnelWithContext(createCtx, tunnelCtx context.Context, 
 		return nil, err
 	}
 
-	tunnel := &grpcTunnel{
+	tunnel := newUnstartedTunnel(stream)
+
+	go tunnel.serve(tunnelCtx, c)
+
+	return tunnel, nil
+}
+
+func newUnstartedTunnel(stream client.ProxyService_ProxyClient) *grpcTunnel {
+	return &grpcTunnel{
 		stream:             stream,
 		pendingDial:        make(map[int64]pendingDial),
 		conns:              make(map[int64]*conn),
 		readTimeoutSeconds: 10,
 		done:               make(chan struct{}),
 	}
-
-	go tunnel.serve(tunnelCtx, c)
-
-	return tunnel, nil
 }
 
 func (t *grpcTunnel) serve(tunnelCtx context.Context, c clientConn) {
