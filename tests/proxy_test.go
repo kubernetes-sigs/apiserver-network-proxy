@@ -25,6 +25,10 @@ import (
 	agentproto "sigs.k8s.io/apiserver-network-proxy/proto/agent"
 )
 
+// Define a blackholed address, for which Dial is expected to hang. This address is reserved for
+// benchmarking by RFC 6890.
+const blackhole = "198.18.0.254:1234"
+
 // test remote server
 type testServer struct {
 	echo   []byte
@@ -243,7 +247,57 @@ func TestProxyHandle_SlowContext_GRPC(t *testing.T) {
 	}
 }
 
-func TestProxyHandle_ContextCancelled_GRPC(t *testing.T) {
+func TestProxyDial_RequestCancelled_GRPC(t *testing.T) {
+	defer goleak.VerifyNone(t, goleak.IgnoreCurrent())
+
+	proxy, cleanup, err := runGRPCProxyServer()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer cleanup()
+
+	stopCh := make(chan struct{})
+	defer close(stopCh)
+	clientset := runAgent(proxy.agent, stopCh)
+	waitForConnectedServerCount(t, 1, clientset)
+
+	func() {
+		// Ensure that tunnels aren't leaked with long-running servers.
+		defer goleak.VerifyNone(t, goleak.IgnoreCurrent())
+
+		// run test client
+		tunnel, err := client.CreateSingleUseGrpcTunnel(context.Background(), proxy.front, grpc.WithInsecure())
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		ctx, cancel := context.WithCancel(context.Background())
+
+		go func() {
+			// Note: We need to wait long enough for the DialContext to be sent, but the agent uses
+			// a hard-coded 5 second timeout. This is likely to be flaky.
+			time.Sleep(1 * time.Second)
+			cancel() // Cancel the request (client-side)
+		}()
+
+		_, err = tunnel.DialContext(ctx, "tcp", blackhole)
+		if err == nil {
+			t.Error("Expected error when context is cancelled, did not receive error")
+		} else if !strings.Contains(err.Error(), "dial timeout, context") {
+			t.Errorf("Unexpected error: %v", err)
+		}
+
+		t.Log("Wait for tunnel to close")
+		select {
+		case <-tunnel.Done():
+			t.Log("Tunnel closed successfully")
+		case <-time.After(wait.ForeverTestTimeout):
+			t.Errorf("Timed out waiting for tunnel to close")
+		}
+	}()
+}
+
+func TestProxyHandle_TunnelContextCancelled_GRPC(t *testing.T) {
 	defer goleak.VerifyNone(t, goleak.IgnoreCurrent())
 
 	slowServer := newWaitingServer()
