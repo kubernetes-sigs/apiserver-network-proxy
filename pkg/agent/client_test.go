@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"go.uber.org/goleak"
 	"google.golang.org/grpc"
 	"k8s.io/klog/v2"
 	"sigs.k8s.io/apiserver-network-proxy/konnectivity-client/proto/client"
@@ -195,6 +196,81 @@ func TestClose_Client(t *testing.T) {
 
 }
 
+// brokenStream wraps a ConnectClient and returns an error on Send and/or Recv if the respective
+// error is non-nil.
+type brokenStream struct {
+	agent.AgentService_ConnectClient
+
+	sendErr, recvErr error
+}
+
+func (bs *brokenStream) Send(packet *client.Packet) error {
+	if bs.sendErr != nil {
+		return bs.sendErr
+	}
+	return bs.AgentService_ConnectClient.Send(packet)
+}
+
+func (bs *brokenStream) Recv() (*client.Packet, error) {
+	if bs.recvErr != nil {
+		return nil, bs.recvErr
+	}
+	return bs.AgentService_ConnectClient.Recv()
+}
+
+func TestFailedSend_DialResp_GRPC(t *testing.T) {
+	defer goleakVerifyNone(t, goleak.IgnoreCurrent())
+
+	stopCh := make(chan struct{})
+	cs := &ClientSet{
+		clients: make(map[string]*Client),
+		stopCh:  stopCh,
+	}
+	testClient := &Client{
+		connManager: newConnectionManager(),
+		stopCh:      stopCh,
+		cs:          cs,
+	}
+
+	clientStream, stream := pipe()
+	testClient.stream = &brokenStream{
+		AgentService_ConnectClient: clientStream,
+		sendErr:                    errors.New("expected send error"),
+	}
+
+	// Start agent
+	go testClient.Serve()
+	defer close(stopCh)
+
+	// Start test http server as remote service
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		t.Log(">>>> Request Received") // FIXME
+		fmt.Fprint(w, "hello, world")
+	}))
+	defer ts.Close()
+
+	func() {
+		defer goleakVerifyNone(t, goleak.IgnoreCurrent())
+
+		// Stimulate sending KAS DIAL_REQ to (Agent) Client
+		dialPacket := newDialPacket("tcp", ts.URL[len("http://"):], 111)
+		err := stream.Send(dialPacket)
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		// Expect receiving DIAL_RSP packet from (Agent) Client
+		_, err = stream.Recv()
+		if err == nil {
+			t.Error("expected timeout error, got none")
+		}
+
+		if conns := len(testClient.connManager.List()); conns > 0 {
+			t.Errorf("Leaked %d connections", conns)
+		}
+	}()
+}
+
 // fakeStream implements AgentService_ConnectClient
 type fakeStream struct {
 	grpc.ClientStream
@@ -259,5 +335,12 @@ func newClosePacket(connID int64) *client.Packet {
 				ConnectID: connID,
 			},
 		},
+	}
+}
+
+func goleakVerifyNone(t *testing.T, options ...goleak.Option) {
+	t.Helper()
+	if err := goleak.Find(options...); err != nil {
+		t.Error(err)
 	}
 }

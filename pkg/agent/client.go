@@ -422,7 +422,6 @@ func (a *Client) Serve() {
 				}
 			}
 			go func() {
-				defer close(dialDone)
 				start := time.Now()
 				conn, err := net.DialTimeout(dialReq.Protocol, dialReq.Address, dialTimeout)
 				if err != nil {
@@ -439,8 +438,11 @@ func (a *Client) Serve() {
 				dialResp.GetDialResponse().ConnectID = connID
 				if err := a.Send(dialResp); err != nil {
 					klog.ErrorS(err, "could not send dialResp")
+					close(dialDone)
+					connCtx.cleanup()
 					return
 				}
+				close(dialDone)
 				klog.V(3).InfoS("Proxying new connection", "connectionID", connID)
 				go a.remoteToProxy(connID, connCtx)
 				go a.proxyToRemote(connID, connCtx)
