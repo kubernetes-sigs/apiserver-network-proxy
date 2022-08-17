@@ -70,6 +70,8 @@ func (c *ProxyClientConnection) send(pkt *client.Packet) error {
 	} else if c.Mode == "http-connect" {
 		if pkt.Type == client.PacketType_CLOSE_RSP {
 			return c.CloseHTTP()
+		} else if pkt.Type == client.PacketType_DIAL_CLS {
+			return c.CloseHTTP()
 		} else if pkt.Type == client.PacketType_DATA {
 			_, err := c.HTTP.Write(pkt.GetData().Data)
 			return err
@@ -738,7 +740,8 @@ func (s *ProxyServer) serveRecvBackend(backend Backend, stream agent.AgentServic
 			} else {
 				dialErr := false
 				if resp.Error != "" {
-					klog.ErrorS(errors.New(resp.Error), "DIAL_RSP contains failure", "dialID", resp.Random, "agentID", agentID, "connectionID", resp.ConnectID)
+					// Dial response with error should not contain a valid ConnID.
+					klog.ErrorS(errors.New(resp.Error), "DIAL_RSP contains failure", "dialID", resp.Random, "agentID", agentID)
 					dialErr = true
 				}
 				err := frontend.send(pkt)
@@ -746,6 +749,18 @@ func (s *ProxyServer) serveRecvBackend(backend Backend, stream agent.AgentServic
 				if err != nil {
 					klog.ErrorS(err, "DIAL_RSP send to frontend stream failure",
 						"dialID", resp.Random, "serverID", s.serverID, "agentID", agentID, "connectionID", resp.ConnectID)
+					// If we never finish setting up the tunnel for ConnectID, then the connection is dead.
+					// Currently, the agent will no resend DIAL_RSP, so connection is dead.
+					// We already attempted to tell the frontend that. We should ensure we tell the backend.
+					pkt := &client.Packet{
+						Type: client.PacketType_CLOSE_REQ,
+						Payload: &client.Packet_CloseRequest{
+							CloseRequest: &client.CloseRequest{
+								ConnectID: resp.ConnectID,
+							},
+						},
+					}
+					_ = stream.Send(pkt)
 					dialErr = true
 				}
 				// Avoid adding the frontend if there was an error dialing the destination
@@ -757,6 +772,22 @@ func (s *ProxyServer) serveRecvBackend(backend Backend, stream agent.AgentServic
 				s.addFrontend(agentID, resp.ConnectID, frontend)
 				close(frontend.connected)
 				metrics.Metrics.ObserveDialLatency(time.Since(frontend.start))
+			}
+
+		case client.PacketType_DIAL_CLS:
+			resp := pkt.GetCloseDial()
+			klog.V(5).InfoS("Received DIAL_CLS", "serverID", s.serverID, "agentID", agentID, "dialID", resp.Random)
+			if frontend, ok := s.PendingDial.Get(resp.Random); !ok {
+				klog.V(2).InfoS("DIAL_CLS not recognized; dropped", "dialID", resp.Random, "agentID", agentID)
+			} else {
+				if err := frontend.send(pkt); err != nil {
+					// Normal when frontend closes it.
+					klog.ErrorS(err, "DIAL_CLS send to client stream error", "serverID", s.serverID, "agentID", agentID, "dialID", resp.Random)
+				} else {
+					klog.V(5).InfoS("DIAL_CLS sent to frontend", "dialID", resp.Random)
+				}
+				s.PendingDial.Remove(resp.Random)
+				klog.V(5).InfoS("Close streaming", "agentID", agentID, "dialID", resp.Random)
 			}
 
 		case client.PacketType_DATA:
