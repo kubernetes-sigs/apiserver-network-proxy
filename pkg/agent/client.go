@@ -431,7 +431,8 @@ func (a *Client) Serve() {
 				}
 			}
 			go func() {
-				defer close(dialDone)
+				closeOnce := sync.Once{}
+				defer closeOnce.Do(func() { close(dialDone) })
 				start := time.Now()
 				conn, err := net.DialTimeout(dialReq.Protocol, dialReq.Address, dialTimeout)
 				if err != nil {
@@ -440,7 +441,7 @@ func (a *Client) Serve() {
 					if err := a.Send(dialResp); err != nil {
 						klog.ErrorS(err, "could not send dialResp")
 					}
-					// Cannot invoke clean up as we have no function yet.
+					// Cannot invoke clean up as we have no conn yet.
 					return
 				}
 				metrics.Metrics.ObserveDialLatency(time.Since(start))
@@ -451,6 +452,7 @@ func (a *Client) Serve() {
 					klog.ErrorS(err, "could not send dialResp")
 					// clean-up is normally called from remoteToProxy which we will never invoke.
 					// So we are invoking it here to force the clean-up to occur.
+					closeOnce.Do(func() { close(dialDone) })
 					connCtx.cleanup()
 					return
 				}
