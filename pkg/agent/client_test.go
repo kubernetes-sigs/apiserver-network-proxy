@@ -241,6 +241,12 @@ func TestFailedSend_DialResp_GRPC(t *testing.T) {
 		stopCh:      stopCh,
 		cs:          cs,
 	}
+	defer func() {
+		close(stopCh)
+		// Give a.probe() time to clean up
+		// This is terrible and racy
+		time.Sleep(time.Second)
+	}()
 
 	clientStream, stream := pipe()
 	testClient.stream = &brokenStream{
@@ -250,7 +256,6 @@ func TestFailedSend_DialResp_GRPC(t *testing.T) {
 
 	// Start agent
 	go testClient.Serve()
-	defer close(stopCh)
 
 	// Start test http server as remote service
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
