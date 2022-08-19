@@ -760,7 +760,10 @@ func (s *ProxyServer) serveRecvBackend(backend Backend, stream agent.AgentServic
 							},
 						},
 					}
-					_ = stream.Send(pkt)
+					if err := stream.Send(pkt); err != nil {
+						klog.V(5).ErrorS(err, "failed to notify server of closing due to dial error",
+							"dialID", resp.Random, "serverID", s.serverID, "agentID", agentID, "connectionID", resp.ConnectID)
+					}
 					dialErr = true
 				}
 				// Avoid adding the frontend if there was an error dialing the destination
