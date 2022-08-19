@@ -737,6 +737,9 @@ func (s *ProxyServer) serveRecvBackend(backend Backend, stream agent.AgentServic
 
 			if frontend, ok := s.PendingDial.Get(resp.Random); !ok {
 				klog.V(2).InfoS("DIAL_RSP not recognized; dropped", "dialID", resp.Random, "agentID", agentID, "connectionID", resp.ConnectID)
+				if resp.ConnectID != 0 {
+					s.sendCloseRequest(stream, resp.ConnectID, resp.Random, "failed to notify agent of closing due to unknown dial id")
+				}
 			} else {
 				dialErr := false
 				if resp.Error != "" {
@@ -752,18 +755,7 @@ func (s *ProxyServer) serveRecvBackend(backend Backend, stream agent.AgentServic
 					// If we never finish setting up the tunnel for ConnectID, then the connection is dead.
 					// Currently, the agent will no resend DIAL_RSP, so connection is dead.
 					// We already attempted to tell the frontend that. We should ensure we tell the backend.
-					pkt := &client.Packet{
-						Type: client.PacketType_CLOSE_REQ,
-						Payload: &client.Packet_CloseRequest{
-							CloseRequest: &client.CloseRequest{
-								ConnectID: resp.ConnectID,
-							},
-						},
-					}
-					if err := stream.Send(pkt); err != nil {
-						klog.V(5).ErrorS(err, "failed to notify server of closing due to dial error",
-							"dialID", resp.Random, "serverID", s.serverID, "agentID", agentID, "connectionID", resp.ConnectID)
-					}
+					s.sendCloseRequest(stream, resp.ConnectID, resp.Random, "failed to notify agent of closing due to dial error")
 					dialErr = true
 				}
 				// Avoid adding the frontend if there was an error dialing the destination
@@ -830,4 +822,17 @@ func (s *ProxyServer) serveRecvBackend(backend Backend, stream agent.AgentServic
 		}
 	}
 	klog.V(5).InfoS("Close backend of agent", "backend", stream, "serverID", s.serverID, "agentID", agentID)
+}
+func (s *ProxyServer) sendCloseRequest(stream agent.AgentService_ConnectServer, connectID int64, random int64, failMsg string) {
+	pkt := &client.Packet{
+		Type: client.PacketType_CLOSE_REQ,
+		Payload: &client.Packet_CloseRequest{
+			CloseRequest: &client.CloseRequest{
+				ConnectID: connectID,
+			},
+		},
+	}
+	if err := stream.Send(pkt); err != nil {
+		klog.V(5).ErrorS(err, failMsg, "dialID", random, "serverID", s.serverID, "agentID", agentID, "connectionID", connectID)
+	}
 }
