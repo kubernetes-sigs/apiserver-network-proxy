@@ -259,7 +259,7 @@ func TestFailedSend_DialResp_GRPC(t *testing.T) {
 
 	// Start test http server as remote service
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		t.Log(">>>> Request Received") // FIXME
+		t.Log("Request Received", "url", r.URL, "userAgent", r.UserAgent())
 		fmt.Fprint(w, "hello, world")
 	}))
 	defer ts.Close()
@@ -268,7 +268,7 @@ func TestFailedSend_DialResp_GRPC(t *testing.T) {
 		defer goleakVerifyNone(t, goleak.IgnoreCurrent())
 
 		// Stimulate sending KAS DIAL_REQ to (Agent) Client
-		dialPacket := newDialPacket("tcp", ts.URL[len("http://"):], 111)
+		dialPacket := newDialPacket("tcp", strings.TrimPrefix(ts.URL, "http://"), 111)
 		err := stream.Send(dialPacket)
 		if err != nil {
 			t.Fatal(err)
