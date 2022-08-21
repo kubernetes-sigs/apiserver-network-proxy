@@ -776,7 +776,6 @@ func (s *ProxyServer) serveRecvBackend(backend Backend, stream agent.AgentServic
 				klog.V(2).InfoS("DIAL_CLS not recognized; dropped", "dialID", resp.Random, "agentID", agentID)
 			} else {
 				if err := frontend.send(pkt); err != nil {
-					// Normal when frontend closes it.
 					klog.ErrorS(err, "DIAL_CLS send to client stream error", "serverID", s.serverID, "agentID", agentID, "dialID", resp.Random)
 				} else {
 					klog.V(5).InfoS("DIAL_CLS sent to frontend", "dialID", resp.Random)
