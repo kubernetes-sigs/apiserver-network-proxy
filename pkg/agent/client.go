@@ -404,13 +404,22 @@ func (a *Client) Serve() {
 				<-dialDone
 				if connCtx.conn != nil {
 					klog.V(4).InfoS("close connection", "connectionID", connID)
-					closeResp := &client.Packet{
-						Type:    client.PacketType_CLOSE_RSP,
-						Payload: &client.Packet_CloseResponse{CloseResponse: &client.CloseResponse{}},
+					var closePkt *client.Packet
+					if connID == 0 {
+						closePkt = &client.Packet{
+							Type:    client.PacketType_DIAL_CLS,
+							Payload: &client.Packet_CloseDial{CloseDial: &client.CloseDial{}},
+						}
+						closePkt.GetCloseDial().Random = dialReq.Random
+					} else {
+						closePkt = &client.Packet{
+							Type:    client.PacketType_CLOSE_RSP,
+							Payload: &client.Packet_CloseResponse{CloseResponse: &client.CloseResponse{}},
+						}
+						closePkt.GetCloseResponse().ConnectID = connID
 					}
-					closeResp.GetCloseResponse().ConnectID = connID
-					if err := a.Send(closeResp); err != nil {
-						klog.ErrorS(err, "close response failure")
+					if err := a.Send(closePkt); err != nil {
+						klog.ErrorS(err, "close response failure", "")
 					}
 					close(dataCh)
 					a.connManager.Delete(connID)
@@ -431,6 +440,7 @@ func (a *Client) Serve() {
 					if err := a.Send(dialResp); err != nil {
 						klog.ErrorS(err, "could not send dialResp")
 					}
+					// Cannot invoke clean up as we have no conn yet.
 					return
 				}
 				metrics.Metrics.ObserveDialLatency(time.Since(start))
@@ -439,6 +449,11 @@ func (a *Client) Serve() {
 				dialResp.GetDialResponse().ConnectID = connID
 				if err := a.Send(dialResp); err != nil {
 					klog.ErrorS(err, "could not send dialResp")
+					// clean-up is normally called from remoteToProxy which we will never invoke.
+					// So we are invoking it here to force the clean-up to occur.
+					// However, cleanup will block until dialDone is closed.
+					// So placing cleanup on its own goroutine to wait for the deferred close(dialDone) to kick in.
+					go connCtx.cleanup()
 					return
 				}
 				klog.V(3).InfoS("Proxying new connection", "connectionID", connID)
