@@ -431,8 +431,7 @@ func (a *Client) Serve() {
 				}
 			}
 			go func() {
-				closeOnce := sync.Once{}
-				defer closeOnce.Do(func() { close(dialDone) })
+				defer close(dialDone)
 				start := time.Now()
 				conn, err := net.DialTimeout(dialReq.Protocol, dialReq.Address, dialTimeout)
 				if err != nil {
@@ -452,8 +451,9 @@ func (a *Client) Serve() {
 					klog.ErrorS(err, "could not send dialResp")
 					// clean-up is normally called from remoteToProxy which we will never invoke.
 					// So we are invoking it here to force the clean-up to occur.
-					closeOnce.Do(func() { close(dialDone) })
-					connCtx.cleanup()
+					// However, cleanup will block until dialDone is closed.
+					// So placing cleanup on its own goroutine to wait for the deferred close(dialDone) to kick in.
+					go connCtx.cleanup()
 					return
 				}
 				klog.V(3).InfoS("Proxying new connection", "connectionID", connID)
