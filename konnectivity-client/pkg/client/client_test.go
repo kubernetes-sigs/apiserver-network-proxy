@@ -41,9 +41,10 @@ func TestDial(t *testing.T) {
 	defer s.Close()
 
 	tunnel := &grpcTunnel{
-		stream:      s,
-		pendingDial: make(map[int64]pendingDial),
-		conns:       make(map[int64]*conn),
+		stream:             s,
+		pendingDial:        make(map[int64]pendingDial),
+		conns:              make(map[int64]*conn),
+		readTimeoutSeconds: 10,
 	}
 
 	go tunnel.serve(ctx, &fakeConn{})
@@ -77,9 +78,10 @@ func TestDialRace(t *testing.T) {
 
 	tunnel := &grpcTunnel{
 		// artificially delay after calling Send, ensure handoff of result from serve to DialContext still works
-		stream:      fakeSlowSend{s},
-		pendingDial: make(map[int64]pendingDial),
-		conns:       make(map[int64]*conn),
+		stream:             fakeSlowSend{s},
+		pendingDial:        make(map[int64]pendingDial),
+		conns:              make(map[int64]*conn),
+		readTimeoutSeconds: 10,
 	}
 
 	go tunnel.serve(ctx, &fakeConn{})
@@ -125,9 +127,10 @@ func TestData(t *testing.T) {
 	defer s.Close()
 
 	tunnel := &grpcTunnel{
-		stream:      s,
-		pendingDial: make(map[int64]pendingDial),
-		conns:       make(map[int64]*conn),
+		stream:             s,
+		pendingDial:        make(map[int64]pendingDial),
+		conns:              make(map[int64]*conn),
+		readTimeoutSeconds: 10,
 	}
 
 	go tunnel.serve(ctx, &fakeConn{})
@@ -185,9 +188,10 @@ func TestClose(t *testing.T) {
 	defer s.Close()
 
 	tunnel := &grpcTunnel{
-		stream:      s,
-		pendingDial: make(map[int64]pendingDial),
-		conns:       make(map[int64]*conn),
+		stream:             s,
+		pendingDial:        make(map[int64]pendingDial),
+		conns:              make(map[int64]*conn),
+		readTimeoutSeconds: 10,
 	}
 
 	go tunnel.serve(ctx, &fakeConn{})
@@ -230,9 +234,10 @@ func TestCloseTimeout(t *testing.T) {
 	defer s.Close()
 
 	tunnel := &grpcTunnel{
-		stream:      s,
-		pendingDial: make(map[int64]pendingDial),
-		conns:       make(map[int64]*conn),
+		stream:             s,
+		pendingDial:        make(map[int64]pendingDial),
+		conns:              make(map[int64]*conn),
+		readTimeoutSeconds: 10,
 	}
 
 	go tunnel.serve(ctx, &fakeConn{})
@@ -293,9 +298,10 @@ func TestDialAfterTunnelCancelled(t *testing.T) {
 	defer s.Close()
 
 	tunnel := &grpcTunnel{
-		stream:      s,
-		pendingDial: make(map[int64]pendingDial),
-		conns:       make(map[int64]*conn),
+		stream:             s,
+		pendingDial:        make(map[int64]pendingDial),
+		conns:              make(map[int64]*conn),
+		readTimeoutSeconds: 10,
 	}
 
 	go tunnel.serve(ctx, &fakeConn{})
