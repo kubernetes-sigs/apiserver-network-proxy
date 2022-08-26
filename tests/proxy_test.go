@@ -632,6 +632,7 @@ func runHTTPConnProxyServer() (proxy, func(), error) {
 		Server: s,
 	}
 	httpServer := &http.Server{
+		ReadHeaderTimeout: 60 * time.Second,
 		Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			atomic.AddInt32(&active, 1)
 			defer atomic.AddInt32(&active, -1)

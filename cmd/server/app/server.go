@@ -37,6 +37,8 @@ import (
 
 var udsListenerLock sync.Mutex
 
+const ReadHeaderTimeout = 60 * time.Second
+
 func NewProxyCommand(p *Proxy, o *options.ProxyRunOptions) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:  "proxy",
@@ -201,6 +203,7 @@ func (p *Proxy) runUDSFrontendServer(ctx context.Context, o *options.ProxyRunOpt
 	} else {
 		// http-connect
 		server := &http.Server{
+			ReadHeaderTimeout: ReadHeaderTimeout,
 			Handler: &server.Tunnel{
 				Server: s,
 			},
@@ -288,8 +291,9 @@ func (p *Proxy) runMTLSFrontendServer(ctx context.Context, o *options.ProxyRunOp
 	} else {
 		// http-connect
 		server := &http.Server{
-			Addr:      addr,
-			TLSConfig: tlsConfig,
+			ReadHeaderTimeout: ReadHeaderTimeout,
+			Addr:              addr,
+			TLSConfig:         tlsConfig,
 			Handler: &server.Tunnel{
 				Server: s,
 			},
@@ -350,7 +354,7 @@ func (p *Proxy) runAdminServer(o *options.ProxyRunOptions, server *server.ProxyS
 		}
 	}
 	adminServer := &http.Server{
-		Addr:           net.JoinHostPort(o.AdminBindAddress, strconv.Itoa(o.AdminPort)),
+		Addr:           fmt.Sprintf("127.0.0.1:%d", o.AdminPort),
 		Handler:        muxHandler,
 		MaxHeaderBytes: 1 << 20,
 	}
@@ -387,9 +391,10 @@ func (p *Proxy) runHealthServer(o *options.ProxyRunOptions, server *server.Proxy
 	muxHandler.HandleFunc("/ready", readinessHandler)
 	muxHandler.HandleFunc("/readyz", readinessHandler)
 	healthServer := &http.Server{
-		Addr:           net.JoinHostPort(o.HealthBindAddress, strconv.Itoa(o.HealthPort)),
-		Handler:        muxHandler,
-		MaxHeaderBytes: 1 << 20,
+		Addr:              net.JoinHostPort(o.HealthBindAddress, strconv.Itoa(o.HealthPort)),
+		Handler:           muxHandler,
+		MaxHeaderBytes:    1 << 20,
+		ReadHeaderTimeout: ReadHeaderTimeout,
 	}
 
 	go func() {
