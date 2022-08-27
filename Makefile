@@ -121,11 +121,11 @@ proto/agent/agent.pb.go: proto/agent/agent.proto
 ## --------------------------------------
 
 easy-rsa.tar.gz:
-	curl -L -o easy-rsa.tar.gz --connect-timeout 20 --retry 6 --retry-delay 2 https://github.com/OpenVPN/easy-rsa/archive/refs/tags/v3.0.8.tar.gz
+	curl -L -o easy-rsa.tar.gz --connect-timeout 20 --retry 6 --retry-delay 2 https://storage.googleapis.com/kubernetes-release/easy-rsa/easy-rsa.tar.gz
 
 easy-rsa: easy-rsa.tar.gz
 	tar xvf easy-rsa.tar.gz
-	mv easy-rsa-3.0.8 easy-rsa
+	mv easy-rsa-master easy-rsa
 
 cfssl:
 	@if ! command -v cfssl &> /dev/null; then \

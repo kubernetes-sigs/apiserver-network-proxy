@@ -40,6 +40,7 @@ import (
 
 	"sigs.k8s.io/apiserver-network-proxy/konnectivity-client/pkg/client"
 	"sigs.k8s.io/apiserver-network-proxy/pkg/util"
+	runpprof "runtime/pprof"
 )
 
 func main() {
@@ -254,42 +255,48 @@ func (c *Client) run(o *GrpcProxyClientOptions) error {
 	for i := 1; i <= o.testRequests; i++ {
 		i := i
 		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			dialer, err := c.getDialer(o)
-			if err != nil {
-				ch <- fmt.Errorf("failed to get dialer for client, got %v", err)
-				return
-			}
-			transport := &http.Transport{
-				DialContext: dialer,
-			}
-			if o.enableHTTP2HealthChecks {
-				err = configureHTTP2Transport(transport)
+		labels := runpprof.Labels(
+			"core", "testClient",
+			"testID", strconv.Itoa(i),
+		)
+		go runpprof.Do(context.Background(), labels, func(context.Context) {
+			func() {
+				defer wg.Done()
+				dialer, err := c.getDialer(o)
 				if err != nil {
-					klog.V(1).Error(err, "error initializing HTTP2 health checking parameters. Using default transport.")
+					ch <- fmt.Errorf("failed to get dialer for client, got %v", err)
+					return
 				}
-			}
-			client := &http.Client{
-				Transport: transport,
-			}
-			if o.closeIdleConn {
-				defer client.CloseIdleConnections()
-			}
+				transport := &http.Transport{
+					DialContext: dialer,
+				}
+				if o.enableHTTP2HealthChecks {
+					err = configureHTTP2Transport(transport)
+					if err != nil {
+						klog.V(1).Error(err, "error initializing HTTP2 health checking parameters. Using default transport.")
+					}
+				}
+				client := &http.Client{
+					Transport: transport,
+				}
+				if o.closeIdleConn {
+					defer client.CloseIdleConnections()
+				}
 
-			err = c.makeRequest(o, client)
-			if err != nil {
-				ch <- err
-				return
-			}
+				err = c.makeRequest(o, client)
+				if err != nil {
+					ch <- err
+					return
+				}
 
-			if i != o.testRequests {
-				klog.V(1).InfoS("Waiting for next connection test.", "seconds", o.testDelaySec, "iteration", i, "test requests", o.testRequests)
-				wait := time.Duration(o.testDelaySec) * time.Second
-				time.Sleep(wait)
-			}
-			ch <- nil
-		}()
+				if i != o.testRequests {
+					klog.V(1).InfoS("Waiting for next connection test.", "seconds", o.testDelaySec, "iteration", i, "test requests", o.testRequests)
+					wait := time.Duration(o.testDelaySec) * time.Second
+					time.Sleep(wait)
+				}
+				ch <- nil
+			}()
+		})
 	}
 	wg.Wait()
 	close(ch)
@@ -404,13 +411,20 @@ func (c *Client) getUDSDialer(o *GrpcProxyClientOptions) (func(ctx context.Conte
 	ch := make(chan os.Signal, 1)
 	signal.Notify(ch)
 
-	go func() {
-		<-ch
-		if proxyConn != nil {
-			err := proxyConn.Close()
-			klog.ErrorS(err, "connection closed")
-		}
-	}()
+	labels := runpprof.Labels(
+		"core", "testUdsDialer",
+		"requestPath", o.requestPath,
+		"udsName", o.proxyUdsName,
+	)
+	go runpprof.Do(context.Background(), labels, func(context.Context) {
+		func() {
+			<-ch
+			if proxyConn != nil {
+				err := proxyConn.Close()
+				klog.ErrorS(err, "connection closed")
+			}
+		}()
+	})
 
 	switch o.mode {
 	case "grpc":
@@ -482,13 +496,20 @@ func (c *Client) getMTLSDialer(o *GrpcProxyClientOptions) (func(ctx context.Cont
 	ch := make(chan os.Signal, 1)
 	signal.Notify(ch)
 
-	go func() {
-		<-ch
-		if proxyConn != nil {
-			err := proxyConn.Close()
-			klog.ErrorS(err, "connection closed")
-		}
-	}()
+	labels := runpprof.Labels(
+		"core", "testMtlsDialer",
+		"requestPath", o.requestPath,
+		"requestPort", strconv.Itoa(o.requestPort),
+	)
+	go runpprof.Do(context.Background(), labels, func(context.Context) {
+		func() {
+			<-ch
+			if proxyConn != nil {
+				err := proxyConn.Close()
+				klog.ErrorS(err, "connection closed")
+			}
+		}()
+	})
 
 	switch o.mode {
 	case "grpc":

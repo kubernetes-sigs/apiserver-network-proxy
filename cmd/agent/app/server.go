@@ -1,6 +1,7 @@
 package app
 
 import (
+	"context"
 	"crypto/tls"
 	"fmt"
 	"net"
@@ -19,6 +20,7 @@ import (
 
 	"sigs.k8s.io/apiserver-network-proxy/cmd/agent/app/options"
 	"sigs.k8s.io/apiserver-network-proxy/pkg/util"
+	runpprof "runtime/pprof"
 )
 
 const ReadHeaderTimeout = 60 * time.Second
@@ -103,13 +105,19 @@ func (a *Agent) runHealthServer(o *options.GrpcProxyAgentOptions) error {
 		ReadHeaderTimeout: ReadHeaderTimeout,
 	}
 
-	go func() {
-		err := healthServer.ListenAndServe()
-		if err != nil {
-			klog.ErrorS(err, "health server could not listen")
-		}
-		klog.V(0).Infoln("Health server stopped listening")
-	}()
+	labels := runpprof.Labels(
+		"core", "healthListener",
+		"port", strconv.Itoa(o.HealthServerPort),
+	)
+	go runpprof.Do(context.Background(), labels, func(context.Context) {
+		func() {
+			err := healthServer.ListenAndServe()
+			if err != nil {
+				klog.ErrorS(err, "health server could not listen")
+			}
+			klog.V(0).Infoln("Health server stopped listening")
+		}()
+	})
 
 	return nil
 }
@@ -140,13 +148,19 @@ func (a *Agent) runAdminServer(o *options.GrpcProxyAgentOptions) error {
 		ReadHeaderTimeout: ReadHeaderTimeout,
 	}
 
-	go func() {
-		err := adminServer.ListenAndServe()
-		if err != nil {
-			klog.ErrorS(err, "admin server could not listen")
-		}
-		klog.V(0).Infoln("Admin server stopped listening")
-	}()
+	labels := runpprof.Labels(
+		"core", "adminListener",
+		"port", strconv.Itoa(o.AdminServerPort),
+	)
+	go runpprof.Do(context.Background(), labels, func(context.Context) {
+		func() {
+			err := adminServer.ListenAndServe()
+			if err != nil {
+				klog.ErrorS(err, "admin server could not listen")
+			}
+			klog.V(0).Infoln("Admin server stopped listening")
+		}()
+	})
 
 	return nil
 }

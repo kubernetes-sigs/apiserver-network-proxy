@@ -25,6 +25,8 @@ import (
 	"google.golang.org/grpc/connectivity"
 	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/klog/v2"
+	runpprof "runtime/pprof"
+	"context"
 )
 
 // ClientSet consists of clients connected to each instance of an HA proxy server.
@@ -220,12 +222,24 @@ func (cs *ClientSet) connectOnce() error {
 		return err
 	}
 	klog.V(2).InfoS("sync added client connecting to proxy server", "serverID", c.serverID)
-	go c.Serve()
+
+	labels := runpprof.Labels(
+		"agentID", cs.agentID,
+		"agentIdentifiers", cs.agentIdentifiers,
+		"serverAddress", cs.address,
+		"serverID", c.serverID,
+	)
+	go runpprof.Do(context.Background(), labels, func(context.Context) { c.Serve() })
 	return nil
 }
 
 func (cs *ClientSet) Serve() {
-	go cs.sync()
+	labels := runpprof.Labels(
+		"agentID", cs.agentID,
+		"agentIdentifiers", cs.agentIdentifiers,
+		"serverAddress", cs.address,
+	)
+	go runpprof.Do(context.Background(), labels, func(context.Context) { cs.sync() })
 }
 
 func (cs *ClientSet) shutdown() {
