@@ -41,9 +41,10 @@ func TestDial(t *testing.T) {
 	defer s.Close()
 
 	tunnel := &grpcTunnel{
-		stream:      s,
-		pendingDial: make(map[int64]pendingDial),
-		conns:       make(map[int64]*conn),
+		stream:             s,
+		pendingDial:        make(map[int64]pendingDial),
+		conns:              make(map[int64]*conn),
+		readTimeoutSeconds: 10,
 	}
 
 	go tunnel.serve(ctx, &fakeConn{})
@@ -77,9 +78,10 @@ func TestDialRace(t *testing.T) {
 
 	tunnel := &grpcTunnel{
 		// artificially delay after calling Send, ensure handoff of result from serve to DialContext still works
-		stream:      fakeSlowSend{s},
-		pendingDial: make(map[int64]pendingDial),
-		conns:       make(map[int64]*conn),
+		stream:             fakeSlowSend{s},
+		pendingDial:        make(map[int64]pendingDial),
+		conns:              make(map[int64]*conn),
+		readTimeoutSeconds: 10,
 	}
 
 	go tunnel.serve(ctx, &fakeConn{})
@@ -125,9 +127,10 @@ func TestData(t *testing.T) {
 	defer s.Close()
 
 	tunnel := &grpcTunnel{
-		stream:      s,
-		pendingDial: make(map[int64]pendingDial),
-		conns:       make(map[int64]*conn),
+		stream:             s,
+		pendingDial:        make(map[int64]pendingDial),
+		conns:              make(map[int64]*conn),
+		readTimeoutSeconds: 10,
 	}
 
 	go tunnel.serve(ctx, &fakeConn{})
@@ -185,9 +188,10 @@ func TestClose(t *testing.T) {
 	defer s.Close()
 
 	tunnel := &grpcTunnel{
-		stream:      s,
-		pendingDial: make(map[int64]pendingDial),
-		conns:       make(map[int64]*conn),
+		stream:             s,
+		pendingDial:        make(map[int64]pendingDial),
+		conns:              make(map[int64]*conn),
+		readTimeoutSeconds: 10,
 	}
 
 	go tunnel.serve(ctx, &fakeConn{})
@@ -211,6 +215,9 @@ func TestClose(t *testing.T) {
 }
 
 func TestCloseTimeout(t *testing.T) {
+	if testing.Short() {
+		t.Skip()
+	}
 	defer goleak.VerifyNone(t, goleak.IgnoreCurrent())
 
 	ctx := context.Background()
@@ -227,9 +234,10 @@ func TestCloseTimeout(t *testing.T) {
 	defer s.Close()
 
 	tunnel := &grpcTunnel{
-		stream:      s,
-		pendingDial: make(map[int64]pendingDial),
-		conns:       make(map[int64]*conn),
+		stream:             s,
+		pendingDial:        make(map[int64]pendingDial),
+		conns:              make(map[int64]*conn),
+		readTimeoutSeconds: 10,
 	}
 
 	go tunnel.serve(ctx, &fakeConn{})
@@ -290,9 +298,10 @@ func TestDialAfterTunnelCancelled(t *testing.T) {
 	defer s.Close()
 
 	tunnel := &grpcTunnel{
-		stream:      s,
-		pendingDial: make(map[int64]pendingDial),
-		conns:       make(map[int64]*conn),
+		stream:             s,
+		pendingDial:        make(map[int64]pendingDial),
+		conns:              make(map[int64]*conn),
+		readTimeoutSeconds: 10,
 	}
 
 	go tunnel.serve(ctx, &fakeConn{})
@@ -302,9 +311,6 @@ func TestDialAfterTunnelCancelled(t *testing.T) {
 	if err == nil {
 		t.Fatalf("expect err when dialing after tunnel closed")
 	}
-
-	// try to avoid race with deferred Close()
-	time.Sleep(time.Second)
 }
 
 // TODO: Move to common testing library
@@ -312,9 +318,10 @@ func TestDialAfterTunnelCancelled(t *testing.T) {
 // fakeStream implements ProxyService_ProxyClient
 type fakeStream struct {
 	grpc.ClientStream
-	r    <-chan *client.Packet
-	w    chan<- *client.Packet
-	done <-chan struct{}
+	r      <-chan *client.Packet
+	w      chan<- *client.Packet
+	done   <-chan struct{}
+	closed chan struct{}
 }
 
 type fakeConn struct {
@@ -334,7 +341,8 @@ func pipe() (*fakeStream, *fakeStream) {
 
 func pipeWithContext(context context.Context) (*fakeStream, *fakeStream) {
 	r, w := make(chan *client.Packet, 2), make(chan *client.Packet, 2)
-	s1, s2 := &fakeStream{done: context.Done()}, &fakeStream{done: context.Done()}
+	s1 := &fakeStream{done: context.Done(), closed: make(chan struct{})}
+	s2 := &fakeStream{done: context.Done(), closed: make(chan struct{})}
 	s1.r, s1.w = r, w
 	s2.r, s2.w = w, r
 	return s1, s2
@@ -348,6 +356,8 @@ func (s *fakeStream) Send(packet *client.Packet) error {
 	select {
 	case <-s.done:
 		return errors.New("Send on cancelled stream")
+	case <-s.closed:
+		return errors.New("Send on closed stream")
 	case s.w <- packet:
 		return nil
 	}
@@ -357,6 +367,8 @@ func (s *fakeStream) Recv() (*client.Packet, error) {
 	select {
 	case <-s.done:
 		return nil, errors.New("Recv on cancelled stream")
+	case <-s.closed:
+		return nil, errors.New("Recv on closed stream")
 	case pkt := <-s.r:
 		klog.V(4).InfoS("[DEBUG] recv", "packet", pkt)
 		return pkt, nil
@@ -366,7 +378,7 @@ func (s *fakeStream) Recv() (*client.Packet, error) {
 }
 
 func (s *fakeStream) Close() {
-	close(s.w)
+	close(s.closed)
 }
 
 type proxyServer struct {
