@@ -25,6 +25,10 @@ import (
 	agentproto "sigs.k8s.io/apiserver-network-proxy/proto/agent"
 )
 
+// Define a blackholed address, for which Dial is expected to hang. This address is reserved for
+// benchmarking by RFC 6890.
+const blackhole = "198.18.0.254:1234"
+
 // test remote server
 type testServer struct {
 	echo   []byte
@@ -191,7 +195,7 @@ func TestProxyHandle_DoneContext_GRPC(t *testing.T) {
 	}
 }
 
-func TestProxyHandle_SlowContext_GRPC(t *testing.T) {
+func TestProxyHandle_RequestDeadlineExceeded_GRPC(t *testing.T) {
 	defer goleak.VerifyNone(t, goleak.IgnoreCurrent())
 
 	slowServer := newWaitingServer()
@@ -210,40 +214,102 @@ func TestProxyHandle_SlowContext_GRPC(t *testing.T) {
 	clientset := runAgent(proxy.agent, stopCh)
 	waitForConnectedServerCount(t, 1, clientset)
 
-	// run test client
-	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
-	defer cancel()
-	tunnel, err := client.CreateSingleUseGrpcTunnel(ctx, proxy.front, grpc.WithInsecure())
+	func() {
+		// Ensure that tunnels aren't leaked with long-running servers.
+		defer goleak.VerifyNone(t, goleak.IgnoreCurrent())
+
+		// run test client
+		tunnel, err := client.CreateSingleUseGrpcTunnel(context.Background(), proxy.front, grpc.WithInsecure())
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+		defer cancel()
+		go func() {
+			<-ctx.Done() // Wait for context to time out.
+			close(slowServer.respondCh)
+		}()
+
+		c := &http.Client{
+			Transport: &http.Transport{
+				DialContext: tunnel.DialContext,
+			},
+		}
+
+		req, err := http.NewRequestWithContext(ctx, "GET", server.URL, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		_, err = c.Do(req)
+		if err == nil {
+			t.Error("Expected error when context is cancelled, did not receive error")
+		} else if !strings.Contains(err.Error(), "context deadline exceeded") {
+			t.Errorf("Unexpected error: %v", err)
+		}
+
+		t.Log("Wait for tunnel to close")
+		select {
+		case <-tunnel.Done():
+			t.Log("Tunnel closed successfully")
+		case <-time.After(wait.ForeverTestTimeout):
+			t.Errorf("Timed out waiting for tunnel to close")
+		}
+	}()
+}
+
+func TestProxyDial_RequestCancelled_GRPC(t *testing.T) {
+	defer goleak.VerifyNone(t, goleak.IgnoreCurrent())
+
+	proxy, cleanup, err := runGRPCProxyServer()
 	if err != nil {
 		t.Fatal(err)
 	}
+	defer cleanup()
 
-	go func() {
-		<-ctx.Done() // Wait for context to time out.
-		close(slowServer.respondCh)
+	stopCh := make(chan struct{})
+	defer close(stopCh)
+	clientset := runAgent(proxy.agent, stopCh)
+	waitForConnectedServerCount(t, 1, clientset)
+
+	func() {
+		// Ensure that tunnels aren't leaked with long-running servers.
+		defer goleak.VerifyNone(t, goleak.IgnoreCurrent())
+
+		// run test client
+		tunnel, err := client.CreateSingleUseGrpcTunnel(context.Background(), proxy.front, grpc.WithInsecure())
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		ctx, cancel := context.WithCancel(context.Background())
+
+		go func() {
+			// Note: We need to wait long enough for the DialContext to be sent, but the agent uses
+			// a hard-coded 5 second timeout. This is likely to be flaky.
+			time.Sleep(1 * time.Second)
+			cancel() // Cancel the request (client-side)
+		}()
+
+		_, err = tunnel.DialContext(ctx, "tcp", blackhole)
+		if err == nil {
+			t.Error("Expected error when context is cancelled, did not receive error")
+		} else if !strings.Contains(err.Error(), "dial timeout, context") {
+			t.Errorf("Unexpected error: %v", err)
+		}
+
+		t.Log("Wait for tunnel to close")
+		select {
+		case <-tunnel.Done():
+			t.Log("Tunnel closed successfully")
+		case <-time.After(wait.ForeverTestTimeout):
+			t.Errorf("Timed out waiting for tunnel to close")
+		}
 	}()
-
-	c := &http.Client{
-		Transport: &http.Transport{
-			DialContext: tunnel.DialContext,
-		},
-	}
-
-	// TODO: handle case where there is no context on the request.
-	req, err := http.NewRequestWithContext(ctx, "GET", server.URL, nil)
-	if err != nil {
-		t.Error(err)
-	}
-
-	_, err = c.Do(req)
-	if err == nil {
-		t.Error("Expected error when context is cancelled, did not receive error")
-	} else if !strings.Contains(err.Error(), "context deadline exceeded") {
-		t.Errorf("Unexpected error: %v", err)
-	}
 }
 
-func TestProxyHandle_ContextCancelled_GRPC(t *testing.T) {
+func TestProxyHandle_TunnelContextCancelled_GRPC(t *testing.T) {
 	defer goleak.VerifyNone(t, goleak.IgnoreCurrent())
 
 	slowServer := newWaitingServer()
@@ -621,11 +687,11 @@ func waitForConnectedServerCount(t *testing.T, expectedServerCount int, clientse
 		if hc == expectedServerCount {
 			return true, nil
 		}
-		cc := clientset.ClientsCount()
-		t.Logf("got %d clients, %d of them are healthy; waiting for %d", cc, hc, expectedServerCount)
 		return false, nil
 	})
 	if err != nil {
+		hc, cc := clientset.HealthyClientsCount(), clientset.ClientsCount()
+		t.Logf("got %d clients, %d of them are healthy; expected %d", cc, hc, expectedServerCount)
 		t.Fatalf("Error waiting for healthy clients: %v", err)
 	}
 }
@@ -639,10 +705,11 @@ func waitForConnectedAgentCount(t *testing.T, expectedAgentCount int, proxy *ser
 		if count == expectedAgentCount {
 			return true, nil
 		}
-		t.Logf("got %d backends; waiting for %d", count, expectedAgentCount)
 		return false, nil
 	})
 	if err != nil {
+		count := proxy.BackendManagers[0].NumBackends()
+		t.Logf("got %d backends; expected %d", count, expectedAgentCount)
 		t.Fatalf("Error waiting for backend count: %v", err)
 	}
 }

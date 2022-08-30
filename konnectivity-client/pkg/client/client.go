@@ -36,6 +36,9 @@ type Tunnel interface {
 	// Dial connects to the address on the named network, similar to
 	// what net.Dial does. The only supported protocol is tcp.
 	DialContext(requestCtx context.Context, protocol, address string) (net.Conn, error)
+	// Done returns a channel that is closed when the tunnel is no longer serving any connections,
+	// and can no longer be used.
+	Done() <-chan struct{}
 }
 
 type dialResult struct {
@@ -61,6 +64,10 @@ type grpcTunnel struct {
 	// The tunnel will be closed if the caller fails to read via conn.Read()
 	// more than readTimeoutSeconds after a packet has been received.
 	readTimeoutSeconds int
+
+	// The done channel is closed after the tunnel has cleaned up all connections and is no longer
+	// serving.
+	done chan struct{}
 }
 
 type clientConn interface {
@@ -99,16 +106,21 @@ func CreateSingleUseGrpcTunnelWithContext(createCtx, tunnelCtx context.Context, 
 		return nil, err
 	}
 
-	tunnel := &grpcTunnel{
-		stream:             stream,
-		pendingDial:        make(map[int64]pendingDial),
-		conns:              make(map[int64]*conn),
-		readTimeoutSeconds: 10,
-	}
+	tunnel := newUnstartedTunnel(stream)
 
 	go tunnel.serve(tunnelCtx, c)
 
 	return tunnel, nil
+}
+
+func newUnstartedTunnel(stream client.ProxyService_ProxyClient) *grpcTunnel {
+	return &grpcTunnel{
+		stream:             stream,
+		pendingDial:        make(map[int64]pendingDial),
+		conns:              make(map[int64]*conn),
+		readTimeoutSeconds: 10,
+		done:               make(chan struct{}),
+	}
 }
 
 func (t *grpcTunnel) serve(tunnelCtx context.Context, c clientConn) {
@@ -123,6 +135,8 @@ func (t *grpcTunnel) serve(tunnelCtx context.Context, c clientConn) {
 			close(conn.readCh)
 		}
 		t.connsLock.Unlock()
+
+		close(t.done)
 	}()
 
 	for {
@@ -219,6 +233,12 @@ func (t *grpcTunnel) serve(tunnelCtx context.Context, c clientConn) {
 // Dial connects to the address on the named network, similar to
 // what net.Dial does. The only supported protocol is tcp.
 func (t *grpcTunnel) DialContext(requestCtx context.Context, protocol, address string) (net.Conn, error) {
+	select {
+	case <-t.done:
+		return nil, errors.New("tunnel is closed")
+	default: // Tunnel is open, carry on.
+	}
+
 	if protocol != "tcp" {
 		return nil, errors.New("protocol not supported")
 	}
@@ -282,6 +302,10 @@ func (t *grpcTunnel) DialContext(requestCtx context.Context, protocol, address s
 	}
 
 	return c, nil
+}
+
+func (t *grpcTunnel) Done() <-chan struct{} {
+	return t.done
 }
 
 func GetDialFailureReason(err error) (isDialFailure bool, reason DialFailureReason) {

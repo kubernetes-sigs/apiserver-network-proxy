@@ -155,17 +155,16 @@ func TestProxy_Agent_Reconnect(t *testing.T) {
 
 func clientRequest(c *http.Client, addr string) ([]byte, error) {
 	r, err := c.Get(addr)
-
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("http GET %q: %w", addr, err)
 	}
 
 	data, err := ioutil.ReadAll(r.Body)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("error reading response body: %w", err)
 	}
 
-	defer r.Body.Close()
+	r.Body.Close()
 
 	return data, nil
 }
@@ -218,7 +217,7 @@ func createHTTPConnectClient(ctx context.Context, proxyAddr, addr string) (*http
 	}
 
 	c := &http.Client{
-		Timeout: 10 * time.Second,
+		Timeout: 30 * time.Second,
 		Transport: &http.Transport{
 			Dial: dialer,
 		},

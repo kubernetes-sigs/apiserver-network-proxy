@@ -101,8 +101,7 @@ func TestProxy_ConcurrencyHTTP(t *testing.T) {
 		data, err := clientRequest(tunnel, server.URL)
 		if err != nil {
 			t.Error(err)
-		}
-		if len(data) != length*chunks {
+		} else if len(data) != length*chunks {
 			t.Errorf("expect data length %d; got %d", length*chunks, len(data))
 		}
 	}
