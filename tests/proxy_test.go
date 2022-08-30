@@ -687,11 +687,11 @@ func waitForConnectedServerCount(t *testing.T, expectedServerCount int, clientse
 		if hc == expectedServerCount {
 			return true, nil
 		}
-		cc := clientset.ClientsCount()
-		t.Logf("got %d clients, %d of them are healthy; waiting for %d", cc, hc, expectedServerCount)
 		return false, nil
 	})
 	if err != nil {
+		hc, cc := clientset.HealthyClientsCount(), clientset.ClientsCount()
+		t.Logf("got %d clients, %d of them are healthy; expected %d", cc, hc, expectedServerCount)
 		t.Fatalf("Error waiting for healthy clients: %v", err)
 	}
 }
@@ -705,10 +705,11 @@ func waitForConnectedAgentCount(t *testing.T, expectedAgentCount int, proxy *ser
 		if count == expectedAgentCount {
 			return true, nil
 		}
-		t.Logf("got %d backends; waiting for %d", count, expectedAgentCount)
 		return false, nil
 	})
 	if err != nil {
+		count := proxy.BackendManagers[0].NumBackends()
+		t.Logf("got %d backends; expected %d", count, expectedAgentCount)
 		t.Fatalf("Error waiting for backend count: %v", err)
 	}
 }
