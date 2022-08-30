@@ -155,16 +155,16 @@ func SetupSignalHandler() (stopCh <-chan struct{}) {
 	labels := runpprof.Labels(
 		"core", "signalHandler",
 	)
-	go runpprof.Do(context.Background(), labels, func(context.Context) {
-		func() {
-			<-c
-			close(stop)
-			<-c
-			os.Exit(1) // second signal. Exit directly.
-		}()
-	})
+	go runpprof.Do(context.Background(), labels, func(context.Context) { handleSignals(c, stop) })
 
 	return stop
+}
+
+func handleSignals(signalCh chan os.Signal, stopCh chan struct{}) {
+	<-signalCh
+	close(stopCh)
+	<-signalCh
+	os.Exit(1) // second signal. Exit directly.
 }
 
 func getUDSListener(ctx context.Context, udsName string) (net.Listener, error) {
@@ -227,20 +227,18 @@ func (p *Proxy) runUDSFrontendServer(ctx context.Context, o *options.ProxyRunOpt
 			"udsFile", o.UdsName,
 		)
 		go runpprof.Do(context.Background(), labels, func(context.Context) {
-			func() {
-				udsListener, err := getUDSListener(ctx, o.UdsName)
-				if err != nil {
-					klog.ErrorS(err, "failed to get uds listener")
-				}
-				defer func() {
-					err := udsListener.Close()
-					klog.ErrorS(err, "failed to close uds listener")
-				}()
-				err = server.Serve(udsListener)
-				if err != nil {
-					klog.ErrorS(err, "failed to serve uds requests")
-				}
+			udsListener, err := getUDSListener(ctx, o.UdsName)
+			if err != nil {
+				klog.ErrorS(err, "failed to get uds listener")
+			}
+			defer func() {
+				err := udsListener.Close()
+				klog.ErrorS(err, "failed to close uds listener")
 			}()
+			err = server.Serve(udsListener)
+			if err != nil {
+				klog.ErrorS(err, "failed to serve uds requests")
+			}
 		})
 	}
 
@@ -330,12 +328,10 @@ func (p *Proxy) runMTLSFrontendServer(ctx context.Context, o *options.ProxyRunOp
 			"port", strconv.FormatUint(uint64(o.ServerPort), 10),
 		)
 		go runpprof.Do(context.Background(), labels, func(context.Context) {
-			func() {
-				err := server.ListenAndServeTLS("", "") // empty files defaults to tlsConfig
-				if err != nil {
-					klog.ErrorS(err, "failed to listen on frontend port")
-				}
-			}()
+			err := server.ListenAndServeTLS("", "") // empty files defaults to tlsConfig
+			if err != nil {
+				klog.ErrorS(err, "failed to listen on frontend port")
+			}
 		})
 	}
 
@@ -394,13 +390,11 @@ func (p *Proxy) runAdminServer(o *options.ProxyRunOptions, server *server.ProxyS
 		"port", strconv.FormatUint(uint64(o.AdminPort), 10),
 	)
 	go runpprof.Do(context.Background(), labels, func(context.Context) {
-		func() {
-			err := adminServer.ListenAndServe()
-			if err != nil {
-				klog.ErrorS(err, "admin server could not listen")
-			}
-			klog.V(1).Infoln("Admin server stopped listening")
-		}()
+		err := adminServer.ListenAndServe()
+		if err != nil {
+			klog.ErrorS(err, "admin server could not listen")
+		}
+		klog.V(1).Infoln("Admin server stopped listening")
 	})
 
 	return nil
@@ -438,13 +432,11 @@ func (p *Proxy) runHealthServer(o *options.ProxyRunOptions, server *server.Proxy
 		"port", strconv.FormatUint(uint64(o.HealthPort), 10),
 	)
 	go runpprof.Do(context.Background(), labels, func(context.Context) {
-		func() {
-			err := healthServer.ListenAndServe()
-			if err != nil {
-				klog.ErrorS(err, "health server could not listen")
-			}
-			klog.V(1).Infoln("Health server stopped listening")
-		}()
+		err := healthServer.ListenAndServe()
+		if err != nil {
+			klog.ErrorS(err, "health server could not listen")
+		}
+		klog.V(1).Infoln("Health server stopped listening")
 	})
 
 	return nil

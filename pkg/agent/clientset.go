@@ -17,7 +17,9 @@ limitations under the License.
 package agent
 
 import (
+	"context"
 	"math"
+	runpprof "runtime/pprof"
 	"sync"
 	"time"
 
@@ -25,8 +27,6 @@ import (
 	"google.golang.org/grpc/connectivity"
 	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/klog/v2"
-	runpprof "runtime/pprof"
-	"context"
 )
 
 // ClientSet consists of clients connected to each instance of an HA proxy server.
