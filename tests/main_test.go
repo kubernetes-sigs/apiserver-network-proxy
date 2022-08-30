@@ -10,7 +10,7 @@ import (
 func TestMain(m *testing.M) {
 	fs := flag.NewFlagSet("mock-flags", flag.PanicOnError)
 	klog.InitFlags(fs)
-	fs.Set("v", "9") // Set klog to max verbosity.
+	fs.Set("v", "1") // Set klog verbosity.
 
 	m.Run()
 }
