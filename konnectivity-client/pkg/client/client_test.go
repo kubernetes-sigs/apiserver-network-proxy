@@ -301,6 +301,80 @@ func TestDialAfterTunnelCancelled(t *testing.T) {
 	}
 }
 
+func TestDial_RequestContextCancelled(t *testing.T) {
+	defer goleak.VerifyNone(t, goleak.IgnoreCurrent())
+
+	reqCtx, reqCancel := context.WithCancel(context.Background())
+	s, ps := pipe()
+	ts := testServer(ps, 100)
+	ts.handlers[client.PacketType_DIAL_REQ] = func(*client.Packet) *client.Packet {
+		reqCancel()
+		return nil // don't respond
+	}
+
+	defer ps.Close()
+	defer s.Close()
+
+	tunnel := newUnstartedTunnel(s)
+
+	go tunnel.serve(context.Background(), &fakeConn{})
+	go ts.serve()
+
+	_, err := tunnel.DialContext(reqCtx, "tcp", "127.0.0.1:80")
+	if err == nil {
+		t.Fatalf("Expected dial error, got none")
+	}
+
+	isDialFailure, reason := GetDialFailureReason(err)
+	if !isDialFailure {
+		t.Errorf("Unexpected non-dial failure error: %v", err)
+	} else if reason != DialFailureContext {
+		t.Errorf("Expected DialFailureContext, got %v", reason)
+	}
+
+	ts.assertPacketType(0, client.PacketType_DIAL_REQ)
+}
+
+func TestDial_BackendError(t *testing.T) {
+	defer goleak.VerifyNone(t, goleak.IgnoreCurrent())
+
+	s, ps := pipe()
+	ts := testServer(ps, 100)
+	ts.handlers[client.PacketType_DIAL_REQ] = func(pkt *client.Packet) *client.Packet {
+		return &client.Packet{
+			Type: client.PacketType_DIAL_RSP,
+			Payload: &client.Packet_DialResponse{
+				DialResponse: &client.DialResponse{
+					Random: pkt.GetDialRequest().Random,
+					Error:  "fake backend error",
+				},
+			},
+		}
+	}
+
+	defer ps.Close()
+	defer s.Close()
+
+	tunnel := newUnstartedTunnel(s)
+
+	go tunnel.serve(context.Background(), &fakeConn{})
+	go ts.serve()
+
+	_, err := tunnel.DialContext(context.Background(), "tcp", "127.0.0.1:80")
+	if err == nil {
+		t.Fatalf("Expected dial error, got none")
+	}
+
+	isDialFailure, reason := GetDialFailureReason(err)
+	if !isDialFailure {
+		t.Errorf("Unexpected non-dial failure error: %v", err)
+	} else if reason != DialFailureEndpoint {
+		t.Errorf("Expected DialFailureContext, got %v", reason)
+	}
+
+	ts.assertPacketType(0, client.PacketType_DIAL_REQ)
+}
+
 // TODO: Move to common testing library
 
 // fakeStream implements ProxyService_ProxyClient
@@ -405,24 +479,32 @@ func (s *proxyServer) serve() {
 			return
 		}
 
+		s.packets = append(s.packets, pkt)
+
 		if handler, ok := s.handlers[pkt.Type]; ok {
-			if err := s.s.Send(handler(pkt)); err != nil {
-				s.t.Error(err)
+			req := handler(pkt)
+			if req != nil {
+				if err := s.s.Send(req); err != nil {
+					s.t.Error(err)
+				}
 			}
 		}
 	}
-
 }
 
-func (s *proxyServer) handle(t client.PacketType, h handler) *proxyServer {
-	s.handlers[t] = h
-	return s
+func (s *proxyServer) assertPacketType(index int, expectedType client.PacketType) {
+	if index >= len(s.packets) {
+		s.t.Fatalf("Expected %v packet[%d], but have only received %d packets", expectedType, index, len(s.packets))
+	}
+	actual := s.packets[index].Type
+	if actual != expectedType {
+		s.t.Errorf("Unexpected packet[%d].type: got %v, expected %v", index, actual, expectedType)
+	}
 }
 
 type handler func(pkt *client.Packet) *client.Packet
 
 func (s *proxyServer) handleDial(pkt *client.Packet) *client.Packet {
-	s.packets = append(s.packets, pkt)
 	return &client.Packet{
 		Type: client.PacketType_DIAL_RSP,
 		Payload: &client.Packet_DialResponse{
@@ -435,7 +517,6 @@ func (s *proxyServer) handleDial(pkt *client.Packet) *client.Packet {
 }
 
 func (s *proxyServer) handleClose(pkt *client.Packet) *client.Packet {
-	s.packets = append(s.packets, pkt)
 	return &client.Packet{
 		Type: client.PacketType_CLOSE_RSP,
 		Payload: &client.Packet_CloseResponse{
@@ -447,7 +528,6 @@ func (s *proxyServer) handleClose(pkt *client.Packet) *client.Packet {
 }
 
 func (s *proxyServer) handleData(pkt *client.Packet) *client.Packet {
-	s.packets = append(s.packets, pkt)
 	s.data.Write(pkt.GetData().Data)
 
 	return &client.Packet{
