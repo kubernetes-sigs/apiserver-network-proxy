@@ -327,9 +327,11 @@ func (t *grpcTunnel) DialContext(requestCtx context.Context, protocol, address s
 		t.connsLock.Unlock()
 	case <-time.After(30 * time.Second):
 		klog.V(5).InfoS("Timed out waiting for DialResp", "dialID", random)
+		go t.closeDial(random)
 		return nil, &dialFailure{"dial timeout, backstop", DialFailureTimeout}
 	case <-requestCtx.Done():
 		klog.V(5).InfoS("Context canceled waiting for DialResp", "ctxErr", requestCtx.Err(), "dialID", random)
+		go t.closeDial(random)
 		return nil, &dialFailure{"dial timeout, context", DialFailureContext}
 	}
 
@@ -338,6 +340,21 @@ func (t *grpcTunnel) DialContext(requestCtx context.Context, protocol, address s
 
 func (t *grpcTunnel) Done() <-chan struct{} {
 	return t.done
+}
+
+// Send a best-effort DIAL_CLS request for the given dial ID.
+func (t *grpcTunnel) closeDial(dialID int64) {
+	req := &client.Packet{
+		Type: client.PacketType_DIAL_CLS,
+		Payload: &client.Packet_CloseDial{
+			CloseDial: &client.CloseDial{
+				Random: dialID,
+			},
+		},
+	}
+	if err := t.stream.Send(req); err != nil {
+		klog.V(5).InfoS("Failed to send DIAL_CLS", "err", err, "dialID", dialID)
+	}
 }
 
 func GetDialFailureReason(err error) (isDialFailure bool, reason DialFailureReason) {

@@ -310,6 +310,11 @@ func TestDial_RequestContextCancelled(t *testing.T) {
 		reqCancel()
 		return nil // don't respond
 	}
+	closeCh := make(chan struct{})
+	ts.handlers[client.PacketType_DIAL_CLS] = func(*client.Packet) *client.Packet {
+		close(closeCh)
+		return nil // don't respond
+	}
 
 	defer ps.Close()
 	defer s.Close()
@@ -332,6 +337,12 @@ func TestDial_RequestContextCancelled(t *testing.T) {
 	}
 
 	ts.assertPacketType(0, client.PacketType_DIAL_REQ)
+	select {
+	case <-closeCh:
+		ts.assertPacketType(1, client.PacketType_DIAL_CLS)
+	case <-time.After(30 * time.Second):
+		t.Fatal("Timed out waiting for DIAL_CLS packet")
+	}
 }
 
 func TestDial_BackendError(t *testing.T) {
