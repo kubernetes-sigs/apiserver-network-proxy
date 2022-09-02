@@ -42,7 +42,7 @@ type Tunnel interface {
 }
 
 type dialResult struct {
-	err    string
+	err    *dialFailure
 	connid int64
 }
 
@@ -159,23 +159,26 @@ func (t *grpcTunnel) serve(tunnelCtx context.Context, c clientConn) {
 			t.pendingDialLock.RUnlock()
 
 			if !ok {
+				// If the DIAL_RSP does not match a pending dial, it means one of two things:
+				//   1. There was a second DIAL_RSP for the connection request (this is very unlikely but possible)
+				//   2. grpcTunnel.DialContext() returned early due to a dial timeout or the client canceling the context
+				//
+				// In either scenario, we should return here and close the tunnel as it is no longer needed.
 				klog.V(1).InfoS("DialResp not recognized; dropped", "connectionID", resp.ConnectID, "dialID", resp.Random)
 				return
 			} else {
-				result := dialResult{
-					err:    resp.Error,
-					connid: resp.ConnectID,
+				result := dialResult{connid: resp.ConnectID}
+				if resp.Error != "" {
+					result.err = &dialFailure{resp.Error, DialFailureEndpoint}
 				}
 				select {
 				// try to send to the result channel
 				case pendingDial.resultCh <- result:
 				// unblock if the cancel channel is closed
 				case <-pendingDial.cancelCh:
-					// If there are no readers of the pending dial channel above, it means one of two things:
-					//   1. There was a second DIAL_RSP for the connection request (this is very unlikely but possible)
-					//   2. grpcTunnel.DialContext() returned early due to a dial timeout or the client canceling the context
-					//
-					// In either scenario, we should return here as this tunnel is no longer needed.
+					// Note: this condition can only be hit by a race condition where the
+					// DialContext() returns early (timeout) after the pendingDial is already
+					// fetched here, but before the result is sent.
 					klog.V(1).InfoS("Pending dial has been cancelled; dropped", "connectionID", resp.ConnectID, "dialID", resp.Random)
 					return
 				case <-tunnelCtx.Done():
@@ -188,6 +191,34 @@ func (t *grpcTunnel) serve(tunnelCtx context.Context, c clientConn) {
 				// On dial error, avoid leaking serve goroutine.
 				return
 			}
+
+		case client.PacketType_DIAL_CLS:
+			resp := pkt.GetCloseDial()
+			t.pendingDialLock.RLock()
+			pendingDial, ok := t.pendingDial[resp.Random]
+			t.pendingDialLock.RUnlock()
+
+			if !ok {
+				// If the DIAL_CLS does not match a pending dial, it means one of two things:
+				//   1. There was a DIAL_CLS receieved after a DIAL_RSP (unlikely but possible)
+				//   2. grpcTunnel.DialContext() returned early due to a dial timeout or the client canceling the context
+				//
+				// In either scenario, we should return here and close the tunnel as it is no longer needed.
+				klog.V(1).InfoS("DIAL_CLS after dial finished", "dialID", resp.Random)
+			} else {
+				result := dialResult{
+					err: &dialFailure{"dial closed", DialFailureDialClosed},
+				}
+				select {
+				case pendingDial.resultCh <- result:
+				case <-pendingDial.cancelCh:
+					// Note: this condition can only be hit by a race condition where the
+					// DialContext() returns early (timeout) after the pendingDial is already
+					// fetched here, but before the result is sent.
+				case <-tunnelCtx.Done():
+				}
+			}
+			return // Stop serving & close the tunnel.
 
 		case client.PacketType_DATA:
 			resp := pkt.GetData()
@@ -210,6 +241,7 @@ func (t *grpcTunnel) serve(tunnelCtx context.Context, c clientConn) {
 			} else {
 				klog.V(1).InfoS("connection not recognized", "connectionID", resp.ConnectID)
 			}
+
 		case client.PacketType_CLOSE_RSP:
 			resp := pkt.GetCloseResponse()
 			t.connsLock.RLock()
@@ -284,8 +316,8 @@ func (t *grpcTunnel) DialContext(requestCtx context.Context, protocol, address s
 
 	select {
 	case res := <-resCh:
-		if res.err != "" {
-			return nil, &dialFailure{res.err, DialFailureEndpoint}
+		if res.err != nil {
+			return nil, res.err
 		}
 		c.connID = res.connid
 		c.readCh = make(chan []byte, 10)
@@ -336,4 +368,7 @@ const (
 	DialFailureContext DialFailureReason = "context"
 	// DialFailureEndpoint indicates that the konnectivity-agent was unable to reach the backend endpoint.
 	DialFailureEndpoint DialFailureReason = "endpoint"
+	// DialFailureDialClosed indicates that the client received a CloseDial response, indicating the
+	// connection was closed before the dial could complete.
+	DialFailureDialClosed DialFailureReason = "dialclosed"
 )

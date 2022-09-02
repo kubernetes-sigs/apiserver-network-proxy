@@ -22,6 +22,7 @@ import (
 	"errors"
 	"flag"
 	"io"
+	"sync"
 	"testing"
 	"time"
 
@@ -40,7 +41,7 @@ func TestMain(m *testing.M) {
 }
 
 func TestDial(t *testing.T) {
-	defer goleak.VerifyNone(t, goleak.IgnoreCurrent())
+	defer goleakVerifyNone(t, goleak.IgnoreCurrent())
 
 	ctx := context.Background()
 	s, ps := pipe()
@@ -71,7 +72,7 @@ func TestDial(t *testing.T) {
 // TestDialRace exercises the scenario where serve() observes and handles DIAL_RSP
 // before DialContext() does any work after sending the DIAL_REQ.
 func TestDialRace(t *testing.T) {
-	defer goleak.VerifyNone(t, goleak.IgnoreCurrent())
+	defer goleakVerifyNone(t, goleak.IgnoreCurrent())
 
 	ctx := context.Background()
 	s, ps := pipe()
@@ -117,7 +118,7 @@ func (s fakeSlowSend) Send(p *client.Packet) error {
 }
 
 func TestData(t *testing.T) {
-	defer goleak.VerifyNone(t, goleak.IgnoreCurrent())
+	defer goleakVerifyNone(t, goleak.IgnoreCurrent())
 
 	ctx := context.Background()
 	s, ps := pipe()
@@ -173,7 +174,7 @@ func TestData(t *testing.T) {
 }
 
 func TestClose(t *testing.T) {
-	defer goleak.VerifyNone(t, goleak.IgnoreCurrent())
+	defer goleakVerifyNone(t, goleak.IgnoreCurrent())
 
 	ctx := context.Background()
 	s, ps := pipe()
@@ -208,7 +209,7 @@ func TestCloseTimeout(t *testing.T) {
 	if testing.Short() {
 		t.Skip()
 	}
-	defer goleak.VerifyNone(t, goleak.IgnoreCurrent())
+	defer goleakVerifyNone(t, goleak.IgnoreCurrent())
 
 	ctx := context.Background()
 	s, ps := pipe()
@@ -248,7 +249,7 @@ func TestCloseTimeout(t *testing.T) {
 }
 
 func TestCreateSingleUseGrpcTunnel_NoLeakOnFailure(t *testing.T) {
-	defer goleak.VerifyNone(t, goleak.IgnoreCurrent())
+	defer goleakVerifyNone(t, goleak.IgnoreCurrent())
 
 	tunnel, err := CreateSingleUseGrpcTunnel(context.Background(), "127.0.0.1:12345", grpc.WithInsecure())
 	if tunnel != nil {
@@ -260,7 +261,7 @@ func TestCreateSingleUseGrpcTunnel_NoLeakOnFailure(t *testing.T) {
 }
 
 func TestCreateSingleUseGrpcTunnelWithContext_NoLeakOnFailure(t *testing.T) {
-	defer goleak.VerifyNone(t, goleak.IgnoreCurrent())
+	defer goleakVerifyNone(t, goleak.IgnoreCurrent())
 
 	tunnel, err := CreateSingleUseGrpcTunnelWithContext(context.Background(), context.Background(), "127.0.0.1:12345", grpc.WithInsecure())
 	if tunnel != nil {
@@ -272,7 +273,7 @@ func TestCreateSingleUseGrpcTunnelWithContext_NoLeakOnFailure(t *testing.T) {
 }
 
 func TestDialAfterTunnelCancelled(t *testing.T) {
-	defer goleak.VerifyNone(t, goleak.IgnoreCurrent())
+	defer goleakVerifyNone(t, goleak.IgnoreCurrent())
 
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
@@ -292,17 +293,15 @@ func TestDialAfterTunnelCancelled(t *testing.T) {
 		t.Fatalf("expect err when dialing after tunnel closed")
 	}
 
-	t.Log("Wait for tunnel to close")
 	select {
 	case <-tunnel.Done():
-		t.Log("Tunnel closed successfully")
 	case <-time.After(30 * time.Second):
 		t.Errorf("Timed out waiting for tunnel to close")
 	}
 }
 
 func TestDial_RequestContextCancelled(t *testing.T) {
-	defer goleak.VerifyNone(t, goleak.IgnoreCurrent())
+	defer goleakVerifyNone(t, goleak.IgnoreCurrent())
 
 	reqCtx, reqCancel := context.WithCancel(context.Background())
 	s, ps := pipe()
@@ -336,7 +335,7 @@ func TestDial_RequestContextCancelled(t *testing.T) {
 }
 
 func TestDial_BackendError(t *testing.T) {
-	defer goleak.VerifyNone(t, goleak.IgnoreCurrent())
+	defer goleakVerifyNone(t, goleak.IgnoreCurrent())
 
 	s, ps := pipe()
 	ts := testServer(ps, 100)
@@ -369,10 +368,59 @@ func TestDial_BackendError(t *testing.T) {
 	if !isDialFailure {
 		t.Errorf("Unexpected non-dial failure error: %v", err)
 	} else if reason != DialFailureEndpoint {
-		t.Errorf("Expected DialFailureContext, got %v", reason)
+		t.Errorf("Expected DialFailureEndpoint, got %v", reason)
 	}
 
 	ts.assertPacketType(0, client.PacketType_DIAL_REQ)
+}
+
+func TestDial_Closed(t *testing.T) {
+	defer goleakVerifyNone(t, goleak.IgnoreCurrent())
+
+	s, ps := pipe()
+	defer ps.Close()
+	defer s.Close()
+
+	ts := testServer(ps, 100)
+	ts.handlers[client.PacketType_DIAL_REQ] = func(pkt *client.Packet) *client.Packet {
+		return &client.Packet{
+			Type: client.PacketType_DIAL_CLS,
+			Payload: &client.Packet_CloseDial{
+				CloseDial: &client.CloseDial{
+					Random: pkt.GetDialRequest().Random,
+				},
+			},
+		}
+	}
+	go ts.serve()
+
+	func() {
+		// Verify that the tunnel goroutines are not leaked before cleaning up the test server.
+		goleakVerifyNone(t, goleak.IgnoreCurrent())
+
+		tunnel := newUnstartedTunnel(s)
+		go tunnel.serve(context.Background(), &fakeConn{})
+
+		_, err := tunnel.DialContext(context.Background(), "tcp", "127.0.0.1:80")
+		if err == nil {
+			t.Fatalf("Expected dial error, got none")
+		}
+
+		isDialFailure, reason := GetDialFailureReason(err)
+		if !isDialFailure {
+			t.Errorf("Unexpected non-dial failure error: %v", err)
+		} else if reason != DialFailureDialClosed {
+			t.Errorf("Expected DialFailureDialClosed, got %v", reason)
+		}
+
+		ts.assertPacketType(0, client.PacketType_DIAL_REQ)
+
+		select {
+		case <-tunnel.Done():
+		case <-time.After(30 * time.Second):
+			t.Errorf("Timed out waiting for tunnel to close")
+		}
+	}()
 }
 
 // TODO: Move to common testing library
@@ -449,7 +497,9 @@ type proxyServer struct {
 	handlers map[client.PacketType]handler
 	connid   int64
 	data     bytes.Buffer
-	packets  []*client.Packet
+
+	packets     []*client.Packet
+	packetsLock sync.Mutex
 }
 
 func testServer(s client.ProxyService_ProxyClient, connid int64) *proxyServer {
@@ -479,7 +529,9 @@ func (s *proxyServer) serve() {
 			return
 		}
 
+		s.packetsLock.Lock()
 		s.packets = append(s.packets, pkt)
+		s.packetsLock.Unlock()
 
 		if handler, ok := s.handlers[pkt.Type]; ok {
 			req := handler(pkt)
@@ -493,6 +545,9 @@ func (s *proxyServer) serve() {
 }
 
 func (s *proxyServer) assertPacketType(index int, expectedType client.PacketType) {
+	s.packetsLock.Lock()
+	defer s.packetsLock.Unlock()
+
 	if index >= len(s.packets) {
 		s.t.Fatalf("Expected %v packet[%d], but have only received %d packets", expectedType, index, len(s.packets))
 	}
@@ -538,5 +593,15 @@ func (s *proxyServer) handleData(pkt *client.Packet) *client.Packet {
 				Data:      append([]byte("echo: "), pkt.GetData().Data...),
 			},
 		},
+	}
+}
+
+// Override goleakVerifyNone to set t.Helper.
+// TODO: delete this once goleak has been updated to include
+// https://github.com/uber-go/goleak/commit/2dfebe88ddf19de216c4ab15a1189fc640b1ea9f
+func goleakVerifyNone(t *testing.T, options ...goleak.Option) {
+	t.Helper()
+	if err := goleak.Find(options...); err != nil {
+		t.Error(err)
 	}
 }
