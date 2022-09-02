@@ -111,12 +111,12 @@ type BackendStorage interface {
 // BackendManager is an interface to manage backend connections, i.e.,
 // connection to the proxy agents.
 type BackendManager interface {
-	// Backend returns a single backend.
+	// Backend returns a single backend and it's identifier string.
 	// WARNING: the context passed to the function should be a session-scoped
 	// context instead of a request-scoped context, as the backend manager will
 	// pick a backend for every tunnel session and each tunnel session may
 	// contains multiple requests.
-	Backend(ctx context.Context) (Backend, error)
+	Backend(ctx context.Context) (Backend, string, error)
 	BackendStorage
 	ReadinessManager
 }
@@ -128,7 +128,7 @@ type DefaultBackendManager struct {
 	*DefaultBackendStorage
 }
 
-func (dbm *DefaultBackendManager) Backend(_ context.Context) (Backend, error) {
+func (dbm *DefaultBackendManager) Backend(_ context.Context) (Backend, string, error) {
 	klog.V(5).InfoS("Get a random backend through the DefaultBackendManager")
 	return dbm.DefaultBackendStorage.GetRandomBackend()
 }
@@ -292,15 +292,15 @@ func ignoreNotFound(err error) error {
 }
 
 // GetRandomBackend returns a random backend connection from all connected agents.
-func (s *DefaultBackendStorage) GetRandomBackend() (Backend, error) {
+func (s *DefaultBackendStorage) GetRandomBackend() (Backend, string, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if len(s.backends) == 0 {
-		return nil, &ErrNotFound{}
+		return nil, "", &ErrNotFound{}
 	}
 	agentID := s.agentIDs[s.random.Intn(len(s.agentIDs))]
 	klog.V(4).InfoS("Pick agent as backend", "agentID", agentID)
 	// always return the first connection to an agent, because the agent
 	// will close later connections if there are multiple.
-	return s.backends[agentID][0], nil
+	return s.backends[agentID][0], agentID, nil
 }

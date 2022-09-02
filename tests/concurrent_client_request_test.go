@@ -82,16 +82,16 @@ func (s *singleTimeManager) RemoveBackend(agentID string, _ pkgagent.IdentifierT
 	delete(s.backends, agentID)
 }
 
-func (s *singleTimeManager) Backend(_ context.Context) (server.Backend, error) {
+func (s *singleTimeManager) Backend(_ context.Context) (server.Backend, string, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	for k, v := range s.backends {
 		if _, ok := s.used[k]; !ok {
 			s.used[k] = struct{}{}
-			return v, nil
+			return v, k, nil
 		}
 	}
-	return nil, fmt.Errorf("cannot find backend to a new agent")
+	return nil, "", fmt.Errorf("cannot find backend to a new agent")
 }
 
 func (s *singleTimeManager) GetBackend(agentID string) server.Backend {

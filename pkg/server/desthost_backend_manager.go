@@ -36,19 +36,19 @@ func NewDestHostBackendManager() *DestHostBackendManager {
 }
 
 // Backend tries to get a backend associating to the request destination host.
-func (dibm *DestHostBackendManager) Backend(ctx context.Context) (Backend, error) {
+func (dibm *DestHostBackendManager) Backend(ctx context.Context) (Backend, string, error) {
 	dibm.mu.RLock()
 	defer dibm.mu.RUnlock()
 	if len(dibm.backends) == 0 {
-		return nil, &ErrNotFound{}
+		return nil, "", &ErrNotFound{}
 	}
 	destHost := ctx.Value(destHost).(string)
 	if destHost != "" {
 		bes, exist := dibm.backends[destHost]
 		if exist && len(bes) > 0 {
 			klog.V(5).InfoS("Get the backend through the DestHostBackendManager", "destHost", destHost)
-			return dibm.backends[destHost][0], nil
+			return dibm.backends[destHost][0], destHost, nil
 		}
 	}
-	return nil, &ErrNotFound{}
+	return nil, "", &ErrNotFound{}
 }
