@@ -310,7 +310,7 @@ func (t *grpcTunnel) Done() <-chan struct{} {
 
 func GetDialFailureReason(err error) (isDialFailure bool, reason DialFailureReason) {
 	var df *dialFailure
-	if errors.As(err, df) {
+	if errors.As(err, &df) {
 		return true, df.reason
 	}
 	return false, DialFailureUnknown
@@ -321,7 +321,7 @@ type dialFailure struct {
 	reason DialFailureReason
 }
 
-func (df dialFailure) Error() string {
+func (df *dialFailure) Error() string {
 	return df.msg
 }
 
