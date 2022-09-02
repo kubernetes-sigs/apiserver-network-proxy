@@ -173,20 +173,20 @@ func genContext(proxyStrategies []ProxyStrategy, reqHost string) context.Context
 	return ctx
 }
 
-func (s *ProxyServer) getBackend(reqHost string) (Backend, error) {
+func (s *ProxyServer) getBackend(reqHost string) (Backend, string, error) {
 	ctx := genContext(s.proxyStrategies, reqHost)
 	for _, bm := range s.BackendManagers {
-		be, err := bm.Backend(ctx)
+		be, id, err := bm.Backend(ctx)
 		if err == nil {
-			return be, nil
+			return be, id, nil
 		}
 		if ignoreNotFound(err) != nil {
 			// if can't find a backend through current BackendManager, move on
 			// to the next one
-			return nil, err
+			return nil, "", err
 		}
 	}
-	return nil, &ErrNotFound{}
+	return nil, "", &ErrNotFound{}
 }
 
 func (s *ProxyServer) addBackend(agentID string, conn agent.AgentService_ConnectServer) (backend Backend) {
@@ -415,11 +415,14 @@ func (s *ProxyServer) Proxy(stream client.ProxyService_ProxyServer) error {
 func (s *ProxyServer) serveRecvFrontend(stream client.ProxyService_ProxyServer, recvCh <-chan *client.Packet) {
 	klog.V(4).Infoln("start serving frontend stream")
 
-	var firstConnID int64
+	var (
+		firstConnID int64
 	// The first packet should be a DIAL_REQ, we will randomly get a
 	// backend from the BackendManger then.
-	var backend Backend
-	var err error
+		backend Backend
+		agentID string
+		err     error
+	)
 
 	for pkt := range recvCh {
 		switch pkt.Type {
@@ -430,7 +433,7 @@ func (s *ProxyServer) serveRecvFrontend(stream client.ProxyService_ProxyServer, 
 			// the address, then we can send the Dial_REQ to the
 			// same agent. That way we save the agent from creating
 			// a new connection to the address.
-			backend, err = s.getBackend(pkt.GetDialRequest().Address)
+			backend, agentID, err = s.getBackend(pkt.GetDialRequest().Address)
 			if err != nil {
 				klog.ErrorS(err, "Failed to get a backend", "serverID", s.serverID, "dialID", random)
 
@@ -457,11 +460,12 @@ func (s *ProxyServer) serveRecvFrontend(stream client.ProxyService_ProxyServer, 
 					connected: make(chan struct{}),
 					start:     time.Now(),
 					backend:   backend,
+					agentID:   agentID,
 				})
 			if err := backend.Send(pkt); err != nil {
-				klog.ErrorS(err, "DIAL_REQ to Backend failed", "serverID", s.serverID, "dialID", random)
+				klog.ErrorS(err, "DIAL_REQ to Backend failed", "serverID", s.serverID, "dialID", random, "agentID", agentID)
 			} else {
-				klog.V(5).InfoS("DIAL_REQ sent to backend", "serverID", s.serverID, "dialID", random)
+				klog.V(5).InfoS("DIAL_REQ sent to backend", "serverID", s.serverID, "dialID", random, "agentID", agentID)
 			}
 
 		case client.PacketType_CLOSE_REQ:

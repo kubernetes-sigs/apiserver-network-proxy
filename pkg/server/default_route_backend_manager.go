@@ -36,16 +36,16 @@ func NewDefaultRouteBackendManager() *DefaultRouteBackendManager {
 }
 
 // Backend tries to get a backend associating to the request destination host.
-func (dibm *DefaultRouteBackendManager) Backend(ctx context.Context) (Backend, error) {
+func (dibm *DefaultRouteBackendManager) Backend(ctx context.Context) (Backend, string, error) {
 	dibm.mu.RLock()
 	defer dibm.mu.RUnlock()
 	if len(dibm.backends) == 0 {
-		return nil, &ErrNotFound{}
+		return nil, "", &ErrNotFound{}
 	}
 	if len(dibm.defaultRouteAgentIDs) == 0 {
-		return nil, &ErrNotFound{}
+		return nil, "", &ErrNotFound{}
 	}
 	agentID := dibm.defaultRouteAgentIDs[dibm.random.Intn(len(dibm.defaultRouteAgentIDs))]
 	klog.V(4).InfoS("Picked agent as backend", "agentID", agentID)
-	return dibm.backends[agentID][0], nil
+	return dibm.backends[agentID][0], agentID, nil
 }

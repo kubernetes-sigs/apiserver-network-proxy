@@ -76,7 +76,7 @@ func (t *Tunnel) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 
 	klog.V(4).Infof("Set pending(rand=%d) to %v", random, w)
-	backend, err := t.Server.getBackend(r.Host)
+	backend, agentID, err := t.Server.getBackend(r.Host)
 	if err != nil {
 		http.Error(w, fmt.Sprintf("currently no tunnels available: %v", err), http.StatusInternalServerError)
 		return
@@ -94,20 +94,21 @@ func (t *Tunnel) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		connected: connected,
 		start:     time.Now(),
 		backend:   backend,
+		agentID:   agentID,
 	}
 	t.Server.PendingDial.Add(random, connection)
 	if err := backend.Send(dialRequest); err != nil {
-		klog.ErrorS(err, "failed to tunnel dial request")
+		klog.ErrorS(err, "failed to tunnel dial request", "agentID", agentID)
 		return
 	}
 	ctxt := backend.Context()
 	if ctxt.Err() != nil {
-		klog.ErrorS(err, "context reports failure")
+		klog.ErrorS(err, "context reports failure", "agentID", agentID)
 	}
 
 	select {
 	case <-ctxt.Done():
-		klog.V(5).Infoln("context reports done")
+		klog.V(5).Infoln("context reports done", "agentID", agentID)
 	default:
 	}
 
@@ -127,7 +128,7 @@ func (t *Tunnel) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 
 		if err = backend.Send(packet); err != nil {
-			klog.V(2).InfoS("failed to send close request packet", "host", r.Host, "agentID", connection.agentID, "connectionID", connection.connectID)
+			klog.V(2).InfoS("failed to send close request packet", "host", r.Host, "agentID", agentID, "connectionID", connection.connectID)
 		}
 		conn.Close()
 	}()
@@ -136,7 +137,6 @@ func (t *Tunnel) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	pkt := make([]byte, 1<<15) // Match GRPC Window size
 
 	connID := connection.connectID
-	agentID := connection.agentID
 	var acc int
 
 	for {
@@ -168,7 +168,7 @@ func (t *Tunnel) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		klog.V(5).InfoS("Forwarding data on tunnel to agent",
 			"bytes", n,
 			"totalBytes", acc,
-			"agentID", connection.agentID,
+			"agentID", agentID,
 			"connectionID", connection.connectID)
 	}
 
