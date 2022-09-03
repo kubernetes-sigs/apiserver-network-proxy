@@ -50,9 +50,9 @@ func TestDial(t *testing.T) {
 	defer ps.Close()
 	defer s.Close()
 
-	tunnel := newUnstartedTunnel(s)
+	tunnel := newUnstartedTunnel(s, s.conn())
 
-	go tunnel.serve(ctx, &fakeConn{})
+	go tunnel.serve(ctx)
 	go ts.serve()
 
 	_, err := tunnel.DialContext(ctx, "tcp", "127.0.0.1:80")
@@ -83,9 +83,9 @@ func TestDialRace(t *testing.T) {
 
 	// artificially delay after calling Send, ensure handoff of result from serve to DialContext still works
 	slowStream := fakeSlowSend{s}
-	tunnel := newUnstartedTunnel(slowStream)
+	tunnel := newUnstartedTunnel(slowStream, &fakeConn{})
 
-	go tunnel.serve(ctx, &fakeConn{})
+	go tunnel.serve(ctx)
 	go ts.serve()
 
 	_, err := tunnel.DialContext(ctx, "tcp", "127.0.0.1:80")
@@ -127,9 +127,9 @@ func TestData(t *testing.T) {
 	defer ps.Close()
 	defer s.Close()
 
-	tunnel := newUnstartedTunnel(s)
+	tunnel := newUnstartedTunnel(s, s.conn())
 
-	go tunnel.serve(ctx, &fakeConn{})
+	go tunnel.serve(ctx)
 	go ts.serve()
 
 	conn, err := tunnel.DialContext(ctx, "tcp", "127.0.0.1:80")
@@ -183,9 +183,9 @@ func TestClose(t *testing.T) {
 	defer ps.Close()
 	defer s.Close()
 
-	tunnel := newUnstartedTunnel(s)
+	tunnel := newUnstartedTunnel(s, s.conn())
 
-	go tunnel.serve(ctx, &fakeConn{})
+	go tunnel.serve(ctx)
 	go ts.serve()
 
 	conn, err := tunnel.DialContext(ctx, "tcp", "127.0.0.1:80")
@@ -224,9 +224,9 @@ func TestCloseTimeout(t *testing.T) {
 	defer ps.Close()
 	defer s.Close()
 
-	tunnel := newUnstartedTunnel(s)
+	tunnel := newUnstartedTunnel(s, s.conn())
 
-	go tunnel.serve(ctx, &fakeConn{})
+	go tunnel.serve(ctx)
 	go ts.serve()
 
 	conn, err := tunnel.DialContext(ctx, "tcp", "127.0.0.1:80")
@@ -283,9 +283,9 @@ func TestDialAfterTunnelCancelled(t *testing.T) {
 	defer ps.Close()
 	defer s.Close()
 
-	tunnel := newUnstartedTunnel(s)
+	tunnel := newUnstartedTunnel(s, s.conn())
 
-	go tunnel.serve(ctx, &fakeConn{})
+	go tunnel.serve(ctx)
 	go ts.serve()
 
 	_, err := tunnel.DialContext(ctx, "tcp", "127.0.0.1:80")
@@ -303,9 +303,12 @@ func TestDialAfterTunnelCancelled(t *testing.T) {
 func TestDial_RequestContextCancelled(t *testing.T) {
 	defer goleakVerifyNone(t, goleak.IgnoreCurrent())
 
-	reqCtx, reqCancel := context.WithCancel(context.Background())
 	s, ps := pipe()
+	defer ps.Close()
+	defer s.Close()
+
 	ts := testServer(ps, 100)
+	reqCtx, reqCancel := context.WithCancel(context.Background())
 	ts.handlers[client.PacketType_DIAL_REQ] = func(*client.Packet) *client.Packet {
 		reqCancel()
 		return nil // don't respond
@@ -315,34 +318,45 @@ func TestDial_RequestContextCancelled(t *testing.T) {
 		close(closeCh)
 		return nil // don't respond
 	}
-
-	defer ps.Close()
-	defer s.Close()
-
-	tunnel := newUnstartedTunnel(s)
-
-	go tunnel.serve(context.Background(), &fakeConn{})
 	go ts.serve()
 
-	_, err := tunnel.DialContext(reqCtx, "tcp", "127.0.0.1:80")
-	if err == nil {
-		t.Fatalf("Expected dial error, got none")
-	}
+	func() {
+		// Tunnel should be shut down when the dial fails.
+		defer goleakVerifyNone(t, goleak.IgnoreCurrent())
 
-	isDialFailure, reason := GetDialFailureReason(err)
-	if !isDialFailure {
-		t.Errorf("Unexpected non-dial failure error: %v", err)
-	} else if reason != DialFailureContext {
-		t.Errorf("Expected DialFailureContext, got %v", reason)
-	}
+		tunnel := newUnstartedTunnel(s, s.conn())
+		go tunnel.serve(context.Background())
 
-	ts.assertPacketType(0, client.PacketType_DIAL_REQ)
-	select {
-	case <-closeCh:
-		ts.assertPacketType(1, client.PacketType_DIAL_CLS)
-	case <-time.After(30 * time.Second):
-		t.Fatal("Timed out waiting for DIAL_CLS packet")
-	}
+		_, err := tunnel.DialContext(reqCtx, "tcp", "127.0.0.1:80")
+		if err == nil {
+			t.Fatalf("Expected dial error, got none")
+		}
+
+		isDialFailure, reason := GetDialFailureReason(err)
+		if !isDialFailure {
+			t.Errorf("Unexpected non-dial failure error: %v", err)
+		} else if reason != DialFailureContext {
+			t.Errorf("Expected DialFailureContext, got %v", reason)
+		}
+
+		ts.assertPacketType(0, client.PacketType_DIAL_REQ)
+		waitForDialClsStart := time.Now()
+		select {
+		case <-closeCh:
+			t.Logf("Dial closed after %#v", time.Since(waitForDialClsStart).String())
+			ts.assertPacketType(1, client.PacketType_DIAL_CLS)
+		case <-time.After(30 * time.Second):
+			t.Fatal("Timed out waiting for DIAL_CLS packet")
+		}
+
+		waitForTunnelCloseStart := time.Now()
+		select {
+		case <-tunnel.Done():
+			t.Logf("Tunnel closed after %#v", time.Since(waitForTunnelCloseStart).String())
+		case <-time.After(30 * time.Second):
+			t.Errorf("Timed out waiting for tunnel to close")
+		}
+	}()
 }
 
 func TestDial_BackendError(t *testing.T) {
@@ -365,9 +379,9 @@ func TestDial_BackendError(t *testing.T) {
 	defer ps.Close()
 	defer s.Close()
 
-	tunnel := newUnstartedTunnel(s)
+	tunnel := newUnstartedTunnel(s, s.conn())
 
-	go tunnel.serve(context.Background(), &fakeConn{})
+	go tunnel.serve(context.Background())
 	go ts.serve()
 
 	_, err := tunnel.DialContext(context.Background(), "tcp", "127.0.0.1:80")
@@ -409,8 +423,8 @@ func TestDial_Closed(t *testing.T) {
 		// Verify that the tunnel goroutines are not leaked before cleaning up the test server.
 		goleakVerifyNone(t, goleak.IgnoreCurrent())
 
-		tunnel := newUnstartedTunnel(s)
-		go tunnel.serve(context.Background(), &fakeConn{})
+		tunnel := newUnstartedTunnel(s, s.conn())
+		go tunnel.serve(context.Background())
 
 		_, err := tunnel.DialContext(context.Background(), "tcp", "127.0.0.1:80")
 		if err == nil {
@@ -446,9 +460,13 @@ type fakeStream struct {
 }
 
 type fakeConn struct {
+	stream *fakeStream
 }
 
 func (f *fakeConn) Close() error {
+	if f.stream != nil {
+		f.stream.Close()
+	}
 	return nil
 }
 
@@ -493,13 +511,21 @@ func (s *fakeStream) Recv() (*client.Packet, error) {
 	case pkt := <-s.r:
 		klog.V(4).InfoS("[DEBUG] recv", "packet", pkt)
 		return pkt, nil
-	case <-time.After(5 * time.Second):
+	case <-time.After(30 * time.Second):
 		return nil, errors.New("timeout recv")
 	}
 }
 
 func (s *fakeStream) Close() {
-	close(s.closed)
+	select {
+	case <-s.closed: // Avoid double-closing
+	default:
+		close(s.closed)
+	}
+}
+
+func (s *fakeStream) conn() *fakeConn {
+	return &fakeConn{s}
 }
 
 type proxyServer struct {

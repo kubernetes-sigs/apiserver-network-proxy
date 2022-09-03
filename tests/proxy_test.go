@@ -17,12 +17,14 @@ import (
 	"github.com/google/uuid"
 	"go.uber.org/goleak"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/metadata"
 	"k8s.io/apimachinery/pkg/util/wait"
 	"sigs.k8s.io/apiserver-network-proxy/konnectivity-client/pkg/client"
 	clientproto "sigs.k8s.io/apiserver-network-proxy/konnectivity-client/proto/client"
 	"sigs.k8s.io/apiserver-network-proxy/pkg/agent"
 	"sigs.k8s.io/apiserver-network-proxy/pkg/server"
 	agentproto "sigs.k8s.io/apiserver-network-proxy/proto/agent"
+	"sigs.k8s.io/apiserver-network-proxy/proto/header"
 )
 
 // Define a blackholed address, for which Dial is expected to hang. This address is reserved for
@@ -268,6 +270,54 @@ func TestProxyDial_RequestCancelled_GRPC(t *testing.T) {
 	}
 	defer cleanup()
 
+	agent := &unresponsiveAgent{}
+	if err := agent.Connect(proxy.agent); err != nil {
+		t.Fatalf("Failed to connect unresponsive agent: %v", err)
+	}
+	defer agent.Close()
+	waitForConnectedAgentCount(t, 1, proxy.server)
+
+	func() {
+		// Ensure that tunnels aren't leaked with long-running servers.
+		defer goleak.VerifyNone(t, goleak.IgnoreCurrent())
+
+		// run test client
+		tunnel, err := client.CreateSingleUseGrpcTunnel(context.Background(), proxy.front, grpc.WithInsecure())
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		ctx, cancel := context.WithCancel(context.Background())
+
+		go func() {
+			time.Sleep(1 * time.Second)
+			cancel() // Cancel the request (client-side)
+		}()
+
+		_, err = tunnel.DialContext(ctx, "tcp", blackhole)
+		if err == nil {
+			t.Error("Expected error when context is cancelled, did not receive error")
+		} else if _, reason := client.GetDialFailureReason(err); reason != client.DialFailureContext {
+			t.Errorf("Unexpected error: %v", err)
+		}
+
+		select {
+		case <-tunnel.Done():
+		case <-time.After(wait.ForeverTestTimeout):
+			t.Errorf("Timed out waiting for tunnel to close")
+		}
+	}()
+}
+
+func TestProxyDial_AgentTimeout_GRPC(t *testing.T) {
+	defer goleak.VerifyNone(t, goleak.IgnoreCurrent())
+
+	proxy, cleanup, err := runGRPCProxyServer()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer cleanup()
+
 	stopCh := make(chan struct{})
 	defer close(stopCh)
 	clientset := runAgent(proxy.agent, stopCh)
@@ -283,26 +333,16 @@ func TestProxyDial_RequestCancelled_GRPC(t *testing.T) {
 			t.Fatal(err)
 		}
 
-		ctx, cancel := context.WithCancel(context.Background())
-
-		go func() {
-			// Note: We need to wait long enough for the DialContext to be sent, but the agent uses
-			// a hard-coded 5 second timeout. This is likely to be flaky.
-			time.Sleep(1 * time.Second)
-			cancel() // Cancel the request (client-side)
-		}()
-
-		_, err = tunnel.DialContext(ctx, "tcp", blackhole)
+		// Agent should time out after 5 seconds and return a DIAL_RSP with an error.
+		_, err = tunnel.DialContext(context.Background(), "tcp", blackhole)
 		if err == nil {
 			t.Error("Expected error when context is cancelled, did not receive error")
-		} else if !strings.Contains(err.Error(), "dial timeout, context") {
+		} else if _, reason := client.GetDialFailureReason(err); reason != client.DialFailureEndpoint {
 			t.Errorf("Unexpected error: %v", err)
 		}
 
-		t.Log("Wait for tunnel to close")
 		select {
 		case <-tunnel.Done():
-			t.Log("Tunnel closed successfully")
 		case <-time.After(wait.ForeverTestTimeout):
 			t.Errorf("Timed out waiting for tunnel to close")
 		}
@@ -677,6 +717,33 @@ func runAgentWithID(agentID, addr string, stopCh <-chan struct{}) *agent.ClientS
 	client := cc.NewAgentClientSet(stopCh)
 	client.Serve()
 	return client
+}
+
+type unresponsiveAgent struct {
+	conn *grpc.ClientConn
+}
+
+// Connect registers the unresponsive agent with the proxy server.
+func (a *unresponsiveAgent) Connect(address string) error {
+	agentID := uuid.New().String()
+	conn, err := grpc.Dial(address, grpc.WithInsecure())
+	if err != nil {
+		return err
+	}
+	ctx := metadata.AppendToOutgoingContext(context.Background(),
+		header.AgentID, agentID)
+	_, err = agentproto.NewAgentServiceClient(conn).Connect(ctx)
+	if err != nil {
+		conn.Close()
+		return err
+	}
+
+	a.conn = conn
+	return nil
+}
+
+func (a *unresponsiveAgent) Close() {
+	a.conn.Close()
 }
 
 // waitForConnectedServerCount waits for the agent ClientSet to have the expected number of health

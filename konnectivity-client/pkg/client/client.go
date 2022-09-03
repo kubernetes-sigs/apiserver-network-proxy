@@ -24,6 +24,7 @@ import (
 	"math/rand"
 	"net"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"google.golang.org/grpc"
@@ -56,6 +57,7 @@ type pendingDial struct {
 // grpcTunnel implements Tunnel
 type grpcTunnel struct {
 	stream          client.ProxyService_ProxyClient
+	clientConn      clientConn
 	pendingDial     map[int64]pendingDial
 	conns           map[int64]*conn
 	pendingDialLock sync.RWMutex
@@ -68,6 +70,11 @@ type grpcTunnel struct {
 	// The done channel is closed after the tunnel has cleaned up all connections and is no longer
 	// serving.
 	done chan struct{}
+
+	// closing is an atomic bool represented as a 0 or 1, and set to true when the tunnel is being closed.
+	// closing should only be accessed through atomic methods.
+	// TODO: switch this to an atomic.Bool once the client is exclusively buit with go1.19+
+	closing uint32
 }
 
 type clientConn interface {
@@ -106,16 +113,17 @@ func CreateSingleUseGrpcTunnelWithContext(createCtx, tunnelCtx context.Context, 
 		return nil, err
 	}
 
-	tunnel := newUnstartedTunnel(stream)
+	tunnel := newUnstartedTunnel(stream, c)
 
-	go tunnel.serve(tunnelCtx, c)
+	go tunnel.serve(tunnelCtx)
 
 	return tunnel, nil
 }
 
-func newUnstartedTunnel(stream client.ProxyService_ProxyClient) *grpcTunnel {
+func newUnstartedTunnel(stream client.ProxyService_ProxyClient, c clientConn) *grpcTunnel {
 	return &grpcTunnel{
 		stream:             stream,
+		clientConn:         c,
 		pendingDial:        make(map[int64]pendingDial),
 		conns:              make(map[int64]*conn),
 		readTimeoutSeconds: 10,
@@ -123,9 +131,9 @@ func newUnstartedTunnel(stream client.ProxyService_ProxyClient) *grpcTunnel {
 	}
 }
 
-func (t *grpcTunnel) serve(tunnelCtx context.Context, c clientConn) {
+func (t *grpcTunnel) serve(tunnelCtx context.Context) {
 	defer func() {
-		c.Close()
+		t.clientConn.Close()
 
 		// A connection in t.conns after serve() returns means
 		// we never received a CLOSE_RSP for it, so we need to
@@ -141,7 +149,7 @@ func (t *grpcTunnel) serve(tunnelCtx context.Context, c clientConn) {
 
 	for {
 		pkt, err := t.stream.Recv()
-		if err == io.EOF {
+		if err == io.EOF || t.isClosing() {
 			return
 		}
 		if err != nil || pkt == nil {
@@ -333,6 +341,9 @@ func (t *grpcTunnel) DialContext(requestCtx context.Context, protocol, address s
 		klog.V(5).InfoS("Context canceled waiting for DialResp", "ctxErr", requestCtx.Err(), "dialID", random)
 		go t.closeDial(random)
 		return nil, &dialFailure{"dial timeout, context", DialFailureContext}
+	case <-t.done:
+		klog.V(5).InfoS("Tunnel closed while waiting for DialResp", "dialID", random)
+		return nil, &dialFailure{"tunnel closed", DialFailureTunnelClosed}
 	}
 
 	return c, nil
@@ -355,6 +366,13 @@ func (t *grpcTunnel) closeDial(dialID int64) {
 	if err := t.stream.Send(req); err != nil {
 		klog.V(5).InfoS("Failed to send DIAL_CLS", "err", err, "dialID", dialID)
 	}
+
+	atomic.StoreUint32(&t.closing, 1)
+	t.clientConn.Close()
+}
+
+func (t *grpcTunnel) isClosing() bool {
+	return atomic.LoadUint32(&t.closing) != 0
 }
 
 func GetDialFailureReason(err error) (isDialFailure bool, reason DialFailureReason) {
@@ -388,4 +406,7 @@ const (
 	// DialFailureDialClosed indicates that the client received a CloseDial response, indicating the
 	// connection was closed before the dial could complete.
 	DialFailureDialClosed DialFailureReason = "dialclosed"
+	// DialFailureTunnelClosed indicates that the client connection was closed before the dial could
+	// complete.
+	DialFailureTunnelClosed DialFailureReason = "tunnelclosed"
 )
