@@ -320,7 +320,11 @@ func (t *grpcTunnel) DialContext(requestCtx context.Context, protocol, address s
 
 	klog.V(5).Infoln("DIAL_REQ sent to proxy server")
 
-	c := &conn{stream: t.stream, random: random}
+	c := &conn{
+		stream:      t.stream,
+		random:      random,
+		closeTunnel: t.closeTunnel,
+	}
 
 	select {
 	case res := <-resCh:
@@ -366,7 +370,10 @@ func (t *grpcTunnel) closeDial(dialID int64) {
 	if err := t.stream.Send(req); err != nil {
 		klog.V(5).InfoS("Failed to send DIAL_CLS", "err", err, "dialID", dialID)
 	}
+	t.closeTunnel()
+}
 
+func (t *grpcTunnel) closeTunnel() {
 	atomic.StoreUint32(&t.closing, 1)
 	t.clientConn.Close()
 }
