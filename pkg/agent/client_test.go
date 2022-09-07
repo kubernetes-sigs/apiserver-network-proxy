@@ -11,6 +11,7 @@ import (
 
 	"go.uber.org/goleak"
 	"google.golang.org/grpc"
+	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/klog/v2"
 	"sigs.k8s.io/apiserver-network-proxy/konnectivity-client/proto/client"
 	"sigs.k8s.io/apiserver-network-proxy/proto/agent"
@@ -355,7 +356,15 @@ func newClosePacket(connID int64) *client.Packet {
 
 func goleakVerifyNone(t *testing.T, options ...goleak.Option) {
 	t.Helper()
-	if err := goleak.Find(options...); err != nil {
+	var err error
+	waitErr := wait.PollImmediate(100*time.Millisecond, 3*time.Second, func() (bool, error) {
+		err = goleak.Find(options...)
+		if err == nil {
+			return true, nil
+		}
+		return false, nil
+	})
+	if waitErr != nil {
 		t.Error(err)
 	}
 }

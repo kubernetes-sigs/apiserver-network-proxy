@@ -23,6 +23,7 @@ import (
 	"io/ioutil"
 	"net"
 	"net/url"
+	runpprof "runtime/pprof"
 	"strconv"
 	"sync"
 	"sync/atomic"
@@ -430,7 +431,15 @@ func (a *Client) Serve() {
 					klog.ErrorS(fmt.Errorf("connection is nil"), "cannot send CLOSE_RESP to nil connection")
 				}
 			}
-			go func() {
+			labels := runpprof.Labels(
+				"agentID", a.agentID,
+				"agentIdentifiers", a.agentIdentifiers,
+				"serverAddress", a.address,
+				"serverID", a.serverID,
+				"dialID", strconv.FormatInt(dialReq.Random, 10),
+				"dialAddress", dialReq.Address,
+			)
+			go runpprof.Do(context.Background(), labels, func(context.Context) {
 				defer close(dialDone)
 				start := time.Now()
 				conn, err := net.DialTimeout(dialReq.Protocol, dialReq.Address, dialTimeout)
@@ -447,19 +456,27 @@ func (a *Client) Serve() {
 				connCtx.conn = conn
 				a.connManager.Add(connID, connCtx)
 				dialResp.GetDialResponse().ConnectID = connID
+				labels := runpprof.Labels(
+					"agentID", a.agentID,
+					"agentIdentifiers", a.agentIdentifiers,
+					"serverAddress", a.address,
+					"serverID", a.serverID,
+					"connectionID", strconv.FormatInt(connID, 10),
+					"dialAddress", dialReq.Address,
+				)
 				if err := a.Send(dialResp); err != nil {
 					klog.ErrorS(err, "could not send dialResp")
 					// clean-up is normally called from remoteToProxy which we will never invoke.
 					// So we are invoking it here to force the clean-up to occur.
 					// However, cleanup will block until dialDone is closed.
 					// So placing cleanup on its own goroutine to wait for the deferred close(dialDone) to kick in.
-					go connCtx.cleanup()
+					go runpprof.Do(context.Background(), labels, func(context.Context) { connCtx.cleanup() })
 					return
 				}
 				klog.V(3).InfoS("Proxying new connection", "connectionID", connID)
-				go a.remoteToProxy(connID, connCtx)
-				go a.proxyToRemote(connID, connCtx)
-			}()
+				go runpprof.Do(context.Background(), labels, func(context.Context) { a.remoteToProxy(connID, connCtx) })
+				go runpprof.Do(context.Background(), labels, func(context.Context) { a.proxyToRemote(connID, connCtx) })
+			})
 
 		case client.PacketType_DATA:
 			data := pkt.GetData()

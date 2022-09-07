@@ -17,7 +17,9 @@ limitations under the License.
 package agent
 
 import (
+	"context"
 	"math"
+	runpprof "runtime/pprof"
 	"sync"
 	"time"
 
@@ -220,12 +222,24 @@ func (cs *ClientSet) connectOnce() error {
 		return err
 	}
 	klog.V(2).InfoS("sync added client connecting to proxy server", "serverID", c.serverID)
-	go c.Serve()
+
+	labels := runpprof.Labels(
+		"agentID", cs.agentID,
+		"agentIdentifiers", cs.agentIdentifiers,
+		"serverAddress", cs.address,
+		"serverID", c.serverID,
+	)
+	go runpprof.Do(context.Background(), labels, func(context.Context) { c.Serve() })
 	return nil
 }
 
 func (cs *ClientSet) Serve() {
-	go cs.sync()
+	labels := runpprof.Labels(
+		"agentID", cs.agentID,
+		"agentIdentifiers", cs.agentIdentifiers,
+		"serverAddress", cs.address,
+	)
+	go runpprof.Do(context.Background(), labels, func(context.Context) { cs.sync() })
 }
 
 func (cs *ClientSet) shutdown() {
