@@ -566,9 +566,11 @@ func (s *proxyServer) serve() {
 			return
 		}
 
-		s.packetsLock.Lock()
-		s.packets = append(s.packets, pkt)
-		s.packetsLock.Unlock()
+		func() {
+			s.packetsLock.Lock()
+			defer s.packetsLock.Unlock()
+			s.packets = append(s.packets, pkt)
+		}()
 
 		if handler, ok := s.handlers[pkt.Type]; ok {
 			req := handler(pkt)
