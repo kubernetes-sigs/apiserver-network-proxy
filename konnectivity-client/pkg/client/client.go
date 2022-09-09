@@ -294,6 +294,7 @@ func (t *grpcTunnel) serve(tunnelCtx context.Context) {
 				return
 			case <-tunnelCtx.Done():
 				klog.V(1).InfoS("Tunnel has been closed, the grpc connection to the proxy server will be closed", "connectionID", conn.connID)
+				return
 			}
 
 		case client.PacketType_CLOSE_RSP:
