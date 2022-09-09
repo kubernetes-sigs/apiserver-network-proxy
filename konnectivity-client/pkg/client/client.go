@@ -224,25 +224,25 @@ func (t *grpcTunnel) serve(tunnelCtx context.Context) {
 				// In either scenario, we should return here and close the tunnel as it is no longer needed.
 				klog.V(1).InfoS("DialResp not recognized; dropped", "connectionID", resp.ConnectID, "dialID", resp.Random)
 				return
-			} else {
-				result := dialResult{connid: resp.ConnectID}
-				if resp.Error != "" {
-					result.err = &dialFailure{resp.Error, DialFailureEndpoint}
-				}
-				select {
-				// try to send to the result channel
-				case pendingDial.resultCh <- result:
-				// unblock if the cancel channel is closed
-				case <-pendingDial.cancelCh:
-					// Note: this condition can only be hit by a race condition where the
-					// DialContext() returns early (timeout) after the pendingDial is already
-					// fetched here, but before the result is sent.
-					klog.V(1).InfoS("Pending dial has been cancelled; dropped", "connectionID", resp.ConnectID, "dialID", resp.Random)
-					return
-				case <-tunnelCtx.Done():
-					klog.V(1).InfoS("Tunnel has been closed; dropped", "connectionID", resp.ConnectID, "dialID", resp.Random)
-					return
-				}
+			}
+
+			result := dialResult{connid: resp.ConnectID}
+			if resp.Error != "" {
+				result.err = &dialFailure{resp.Error, DialFailureEndpoint}
+			}
+			select {
+			// try to send to the result channel
+			case pendingDial.resultCh <- result:
+			// unblock if the cancel channel is closed
+			case <-pendingDial.cancelCh:
+				// Note: this condition can only be hit by a race condition where the
+				// DialContext() returns early (timeout) after the pendingDial is already
+				// fetched here, but before the result is sent.
+				klog.V(1).InfoS("Pending dial has been cancelled; dropped", "connectionID", resp.ConnectID, "dialID", resp.Random)
+				return
+			case <-tunnelCtx.Done():
+				klog.V(1).InfoS("Tunnel has been closed; dropped", "connectionID", resp.ConnectID, "dialID", resp.Random)
+				return
 			}
 
 			if resp.Error != "" {
@@ -281,33 +281,34 @@ func (t *grpcTunnel) serve(tunnelCtx context.Context) {
 			// TODO: flow control
 			conn, ok := t.conns.get(resp.ConnectID)
 
-			if ok {
-				timer := time.NewTimer((time.Duration)(t.readTimeoutSeconds) * time.Second)
-				select {
-				case conn.readCh <- resp.Data:
-					timer.Stop()
-				case <-timer.C:
-					klog.ErrorS(fmt.Errorf("timeout"), "readTimeout has been reached, the grpc connection to the proxy server will be closed", "connectionID", conn.connID, "readTimeoutSeconds", t.readTimeoutSeconds)
-					return
-				case <-tunnelCtx.Done():
-					klog.V(1).InfoS("Tunnel has been closed, the grpc connection to the proxy server will be closed", "connectionID", conn.connID)
-				}
-			} else {
-				klog.V(1).InfoS("connection not recognized", "connectionID", resp.ConnectID)
+			if !ok {
+				klog.V(1).InfoS("Connection not recognized", "connectionID", resp.ConnectID)
+				continue
+			}
+			timer := time.NewTimer((time.Duration)(t.readTimeoutSeconds) * time.Second)
+			select {
+			case conn.readCh <- resp.Data:
+				timer.Stop()
+			case <-timer.C:
+				klog.ErrorS(fmt.Errorf("timeout"), "readTimeout has been reached, the grpc connection to the proxy server will be closed", "connectionID", conn.connID, "readTimeoutSeconds", t.readTimeoutSeconds)
+				return
+			case <-tunnelCtx.Done():
+				klog.V(1).InfoS("Tunnel has been closed, the grpc connection to the proxy server will be closed", "connectionID", conn.connID)
 			}
 
 		case client.PacketType_CLOSE_RSP:
 			resp := pkt.GetCloseResponse()
 			conn, ok := t.conns.get(resp.ConnectID)
 
-			if ok {
-				close(conn.readCh)
-				conn.closeCh <- resp.Error
-				close(conn.closeCh)
-				t.conns.remove(resp.ConnectID)
-				return
+			if !ok {
+				klog.V(1).InfoS("Connection not recognized", "connectionID", resp.ConnectID)
+				continue
 			}
-			klog.V(1).InfoS("connection not recognized", "connectionID", resp.ConnectID)
+			close(conn.readCh)
+			conn.closeCh <- resp.Error
+			close(conn.closeCh)
+			t.conns.remove(resp.ConnectID)
+			return
 		}
 	}
 }
