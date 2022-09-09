@@ -50,6 +50,7 @@ type ServerMetrics struct {
 	backend           *prometheus.GaugeVec
 	pendingDials      *prometheus.GaugeVec
 	fullRecvChannels  *prometheus.GaugeVec
+	dialFailures      *prometheus.CounterVec
 }
 
 // newServerMetrics create a new ServerMetrics, configured with default metric names.
@@ -122,6 +123,17 @@ func newServerMetrics() *ServerMetrics {
 			"service_method",
 		},
 	)
+	dialFailures := prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Namespace: namespace,
+			Subsystem: subsystem,
+			Name:      "dial_failure_count",
+			Help:      "Number of dial failures observed. Multiple failures can occur for a single dial request.",
+		},
+		[]string{
+			"reason",
+		},
+	)
 
 	prometheus.MustRegister(latencies)
 	prometheus.MustRegister(frontendLatencies)
@@ -130,6 +142,7 @@ func newServerMetrics() *ServerMetrics {
 	prometheus.MustRegister(backend)
 	prometheus.MustRegister(pendingDials)
 	prometheus.MustRegister(fullRecvChannels)
+	prometheus.MustRegister(dialFailures)
 	return &ServerMetrics{
 		latencies:         latencies,
 		frontendLatencies: frontendLatencies,
@@ -138,6 +151,7 @@ func newServerMetrics() *ServerMetrics {
 		backend:           backend,
 		pendingDials:      pendingDials,
 		fullRecvChannels:  fullRecvChannels,
+		dialFailures:      dialFailures,
 	}
 }
 
@@ -186,4 +200,18 @@ func (a *ServerMetrics) SetPendingDialCount(count int) {
 // FullRecvChannel retrieves the metric for counting full receive channels.
 func (a *ServerMetrics) FullRecvChannel(serviceMethod string) prometheus.Gauge {
 	return a.fullRecvChannels.With(prometheus.Labels{"service_method": serviceMethod})
+}
+
+type DialFailureReason string
+
+const (
+	DialFailureEndpoint             DialFailureReason = "endpoint"              // Dial failure reported by the agent back to the server.
+	DialFailureUnrecognizedResponse DialFailureReason = "unrecognized_response" // Dial repsonse received for unrecognozide dial ID.
+	DialFailureSend                 DialFailureReason = "send"                  // Successful dial response from agent, but failed to send to frontend.
+	DialFailureBackendClose         DialFailureReason = "backend_close"         // Received a DIAL_CLS from the backend before the dial completed.
+	DialFailureFrontendClose        DialFailureReason = "frontend_close"        // Received a DIAL_CLS from the frontend before the dial completed.
+)
+
+func (a *ServerMetrics) ObserveDialFailure(reason DialFailureReason) {
+	a.dialFailures.With(prometheus.Labels{"reason": string(reason)}).Inc()
 }
