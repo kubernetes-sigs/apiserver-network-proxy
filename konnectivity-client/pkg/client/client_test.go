@@ -173,6 +173,57 @@ func TestData(t *testing.T) {
 	}
 }
 
+func TestData_TunnelContextCancelled(t *testing.T) {
+	defer goleakVerifyNone(t, goleak.IgnoreCurrent())
+
+	ctx, cancel := context.WithCancel(context.Background())
+	s, ps := pipe()
+	ts := testServer(ps, 100)
+
+	defer ps.Close()
+	defer s.Close()
+
+	tunnel := newUnstartedTunnel(s, s.conn())
+
+	go tunnel.serve(ctx)
+	go ts.serve()
+
+	conn, err := tunnel.DialContext(ctx, "tcp", "127.0.0.1:80")
+	if err != nil {
+		t.Fatalf("expect nil; got %v", err)
+	}
+
+	datas := [][]byte{
+		[]byte("hello"),
+		[]byte(", "),
+		[]byte("world."),
+	}
+
+	// send data using conn.Write
+	for _, data := range datas {
+		n, err := conn.Write(data)
+		if err != nil {
+			t.Error(err)
+		}
+		if n != len(data) {
+			t.Errorf("expect n=%d len(%q); got %d", len(data), string(data), n)
+		}
+	}
+
+	// Cancelling the tunnel context after data is sent should not result in any goroutine leaks.
+	cancel()
+
+	// Exercise reading from stream after context is cancelled to validate that the stream returned
+	// without leaking any goroutines
+	var buf [64]byte
+	for _ = range datas {
+		_, err := conn.Read(buf[:])
+		if err != nil && err != io.EOF {
+			t.Error(err)
+		}
+	}
+}
+
 func TestClose(t *testing.T) {
 	defer goleakVerifyNone(t, goleak.IgnoreCurrent())
 
