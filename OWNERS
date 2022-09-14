@@ -1,16 +1,12 @@
 # See the OWNERS docs at https://go.k8s.io/owners
 
 reviewers:
-  - ironcladlou
   - sjenning
   - enxebre
   - csrwng
   - relyt0925
-  - alvaroaleman
 approvers:
-  - ironcladlou
   - sjenning
   - enxebre
   - csrwng
-  - alvaroaleman
 component: hypershift
