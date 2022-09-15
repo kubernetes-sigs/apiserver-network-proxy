@@ -325,6 +325,7 @@ func TestServerProxyNoBackend(t *testing.T) {
 
 func TestServerProxyNormalClose(t *testing.T) {
 	validate := func(frontendConn, agentConn *agentmock.MockAgentService_ConnectServer) {
+		const connectID = 123456
 		// receive DIAL_REQ from frontend and proxy to backend
 		dialReq := &client.Packet{
 			Type: client.PacketType_DIAL_REQ,
@@ -336,18 +337,28 @@ func TestServerProxyNormalClose(t *testing.T) {
 				},
 			},
 		}
+		data := &client.Packet{
+			Type: client.PacketType_DATA,
+			Payload: &client.Packet_Data{
+				Data: &client.Data{
+					ConnectID: connectID,
+				},
+			},
+		}
 
 		gomock.InOrder(
 			frontendConn.EXPECT().Recv().Return(dialReq, nil).Times(1),
-			frontendConn.EXPECT().Recv().Return(closePacket(1), nil).Times(1),
+			frontendConn.EXPECT().Recv().Return(data, nil).Times(1),
+			frontendConn.EXPECT().Recv().Return(closePacket(connectID), nil).Times(1),
 			frontendConn.EXPECT().Recv().Return(nil, io.EOF).Times(1),
 		)
 		gomock.InOrder(
 			agentConn.EXPECT().Send(dialReq).Return(nil).Times(1),
-			agentConn.EXPECT().Send(closePacket(1)).Return(nil).Times(1),
+			agentConn.EXPECT().Send(data).Return(nil).Times(1),
+			agentConn.EXPECT().Send(closePacket(connectID)).Return(nil).Times(1),
 			// This extra close is unwanted and should be removed; see
 			// https://github.com/kubernetes-sigs/apiserver-network-proxy/pull/307
-			agentConn.EXPECT().Send(closePacket(0)).Return(nil).Times(1),
+			agentConn.EXPECT().Send(closePacket(connectID)).Return(nil).Times(1),
 		)
 	}
 	baseServerProxyTestWithBackend(t, validate)
