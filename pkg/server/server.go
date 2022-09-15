@@ -21,6 +21,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	runpprof "runtime/pprof"
 	"strconv"
 	"strings"
 	"sync"
@@ -33,7 +34,6 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/klog/v2"
-	runpprof "runtime/pprof"
 	"sigs.k8s.io/apiserver-network-proxy/konnectivity-client/proto/client"
 	pkgagent "sigs.k8s.io/apiserver-network-proxy/pkg/agent"
 	"sigs.k8s.io/apiserver-network-proxy/pkg/server/metrics"
@@ -56,6 +56,7 @@ type ProxyClientConnection struct {
 	agentID   string
 	start     time.Time
 	backend   Backend
+	address   string // cached for logging
 }
 
 const (
@@ -114,11 +115,13 @@ func (pm *PendingDialManager) Get(random int64) (*ProxyClientConnection, bool) {
 	return clientConn, ok
 }
 
-func (pm *PendingDialManager) Remove(random int64) {
+func (pm *PendingDialManager) Remove(random int64) *ProxyClientConnection {
 	pm.mu.Lock()
 	defer pm.mu.Unlock()
+	pd := pm.pendingDial[random]
 	delete(pm.pendingDial, random)
 	metrics.Metrics.SetPendingDialCount(len(pm.pendingDial))
+	return pd
 }
 
 // ProxyServer
@@ -421,7 +424,7 @@ func (s *ProxyServer) readFrontendToChannel(stream client.ProxyService_ProxyServ
 }
 
 func (s *ProxyServer) serveRecvFrontend(stream client.ProxyService_ProxyServer, recvCh <-chan *client.Packet) {
-	klog.V(4).Infoln("start serving frontend stream")
+	klog.V(5).Infoln("start serving frontend stream")
 
 	var firstConnID int64
 	// The first packet should be a DIAL_REQ, we will randomly get a
@@ -432,13 +435,14 @@ func (s *ProxyServer) serveRecvFrontend(stream client.ProxyService_ProxyServer, 
 	for pkt := range recvCh {
 		switch pkt.Type {
 		case client.PacketType_DIAL_REQ:
-			klog.V(5).Infoln("Received DIAL_REQ")
 			random := pkt.GetDialRequest().Random
+			address := pkt.GetDialRequest().Address
+			klog.V(3).InfoS("Received DIAL_REQ", "dialID", random, "address", address)
 			// TODO: if we track what agent has historically served
 			// the address, then we can send the Dial_REQ to the
 			// same agent. That way we save the agent from creating
 			// a new connection to the address.
-			backend, err = s.getBackend(pkt.GetDialRequest().Address)
+			backend, err = s.getBackend(address)
 			if err != nil {
 				klog.ErrorS(err, "Failed to get a backend", "serverID", s.serverID, "dialID", random)
 
@@ -465,6 +469,7 @@ func (s *ProxyServer) serveRecvFrontend(stream client.ProxyService_ProxyServer, 
 					connected: make(chan struct{}),
 					start:     time.Now(),
 					backend:   backend,
+					address:   address,
 				})
 			if err := backend.Send(pkt); err != nil {
 				klog.ErrorS(err, "DIAL_REQ to Backend failed", "serverID", s.serverID, "dialID", random)
@@ -491,8 +496,13 @@ func (s *ProxyServer) serveRecvFrontend(stream client.ProxyService_ProxyServer, 
 			random := pkt.GetCloseDial().Random
 			klog.V(5).InfoS("Received DIAL_CLOSE", "serverID", s.serverID, "dialID", random)
 			// Currently not worrying about backend as we do not have an established connection,
-			s.PendingDial.Remove(random)
-			klog.V(5).InfoS("Removing pending dial request", "serverID", s.serverID, "dialID", random)
+			if pd := s.PendingDial.Remove(random); pd != nil {
+				klog.ErrorS(nil, "Dial closed prematurely",
+					"source", "frontend",
+					"dialID", random,
+					"address", pd.address,
+				)
+			}
 
 		case client.PacketType_DATA:
 			connID := pkt.GetData().ConnectID
@@ -776,7 +786,7 @@ func (s *ProxyServer) serveRecvBackend(backend Backend, stream agent.AgentServic
 					dialErr = true
 				}
 				// Avoid adding the frontend if there was an error dialing the destination
-				if dialErr == true {
+				if dialErr {
 					break
 				}
 				frontend.connectID = resp.ConnectID
@@ -784,6 +794,12 @@ func (s *ProxyServer) serveRecvBackend(backend Backend, stream agent.AgentServic
 				s.addFrontend(agentID, resp.ConnectID, frontend)
 				close(frontend.connected)
 				metrics.Metrics.ObserveDialLatency(time.Since(frontend.start))
+				klog.V(3).InfoS("Proxy connection established",
+					"dialID", resp.Random,
+					"connectionID", resp.ConnectID,
+					"agentID", agentID,
+					"address", frontend.address,
+				)
 			}
 
 		case client.PacketType_DIAL_CLS:
@@ -797,8 +813,14 @@ func (s *ProxyServer) serveRecvBackend(backend Backend, stream agent.AgentServic
 				} else {
 					klog.V(5).InfoS("DIAL_CLS sent to frontend", "dialID", resp.Random)
 				}
-				s.PendingDial.Remove(resp.Random)
-				klog.V(5).InfoS("Close streaming", "agentID", agentID, "dialID", resp.Random)
+				if s.PendingDial.Remove(resp.Random) != nil {
+					klog.ErrorS(nil, "Dial closed prematurely",
+						"source", "backend",
+						"dialID", resp.Random,
+						"agentID", agentID,
+						"address", frontend.address,
+					)
+				}
 			}
 
 		case client.PacketType_DATA:
