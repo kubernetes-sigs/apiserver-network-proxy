@@ -183,9 +183,9 @@ func TestClose_Client(t *testing.T) {
 	}
 
 	// Verify internal state is consistent
-	if _, ok := testClient.connManager.Get(connID); ok {
-		t.Error("client.connContext not released")
-	}
+	// connID will be removed when remoteToProxy on another goroutine exits.
+	// Wait a short period to see if the connection gets cleaned up.
+	waitForConnectionDeletion(t, testClient, connID)
 
 	// Verify remote conn is closed
 	if err := stream.Send(closePacket); err != nil {
@@ -266,6 +266,9 @@ func TestFailedSend_DialResp_GRPC(t *testing.T) {
 	defer ts.Close()
 
 	func() {
+		// goleak.IgnoreCurrent() needs to include all the goroutines which were started by testClient.Serve() above.
+		// That includes things like pkg/agent/client.go:614 +0x88. Sleep does not guarantee they will have started.
+		time.Sleep(time.Second)
 		defer goleakVerifyNone(t, goleak.IgnoreCurrent())
 
 		// Stimulate sending KAS DIAL_REQ to (Agent) Client
@@ -351,6 +354,17 @@ func newClosePacket(connID int64) *client.Packet {
 				ConnectID: connID,
 			},
 		},
+	}
+}
+
+func waitForConnectionDeletion(t *testing.T, testClient *Client, connID int64) {
+	t.Helper()
+	err := wait.PollImmediate(100*time.Millisecond, 3*time.Second, func() (bool, error) {
+		_, ok := testClient.connManager.Get(connID)
+		return !ok, nil
+	})
+	if err != nil {
+		t.Error("client.connContext not released")
 	}
 }
 

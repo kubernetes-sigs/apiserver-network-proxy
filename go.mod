@@ -10,6 +10,7 @@ require (
 	github.com/prometheus/client_model v0.2.0
 	github.com/spf13/cobra v1.5.0
 	github.com/spf13/pflag v1.0.5
+	github.com/stretchr/testify v1.8.0
 	go.uber.org/goleak v1.2.0
 	golang.org/x/net v0.0.0-20220812174116-3211cb980234
 	google.golang.org/grpc v1.48.0
@@ -44,6 +45,7 @@ require (
 	github.com/modern-go/reflect2 v1.0.2 // indirect
 	github.com/munnerz/goautoneg v0.0.0-20191010083416-a7dc8b61c822 // indirect
 	github.com/pkg/errors v0.9.1 // indirect
+	github.com/pmezard/go-difflib v1.0.0 // indirect
 	github.com/prometheus/common v0.37.0 // indirect
 	github.com/prometheus/procfs v0.8.0 // indirect
 	golang.org/x/oauth2 v0.0.0-20220808172628-8227340efae7 // indirect
