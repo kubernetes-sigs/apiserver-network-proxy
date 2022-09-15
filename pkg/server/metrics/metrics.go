@@ -23,12 +23,20 @@ import (
 )
 
 const (
-	namespace = "konnectivity_network_proxy"
-	subsystem = "server"
+	Namespace = "konnectivity_network_proxy"
+	Subsystem = "server"
+
+	DialLatencyMetric        = "dial_duration_seconds"
+	FrontendLatencyMetric    = "frontend_write_duration_seconds"
+	GRPCConnectionsMetric    = "grpc_connections"
+	HTTPConnectionsMetric    = "http_connections"
+	BackendConnectionsMetric = "ready_backend_connections"
+	PendingDialsMetric       = "pending_backend_dials"
+	FullRecvChannelMetric    = "full_receive_channels"
+	DialFailuresMetric       = "dial_failure_count"
 
 	// Proxy is the ProxyService method used to handle incoming streams.
 	Proxy = "Proxy"
-
 	// Connect is the AgentService method used to establish next hop.
 	Connect = "Connect"
 )
@@ -57,9 +65,9 @@ type ServerMetrics struct {
 func newServerMetrics() *ServerMetrics {
 	latencies := prometheus.NewHistogramVec(
 		prometheus.HistogramOpts{
-			Namespace: namespace,
-			Subsystem: subsystem,
-			Name:      "dial_duration_seconds",
+			Namespace: Namespace,
+			Subsystem: Subsystem,
+			Name:      DialLatencyMetric,
 			Help:      "Latency of dial to the remote endpoint in seconds",
 			Buckets:   latencyBuckets,
 		},
@@ -67,9 +75,9 @@ func newServerMetrics() *ServerMetrics {
 	)
 	frontendLatencies := prometheus.NewHistogramVec(
 		prometheus.HistogramOpts{
-			Namespace: namespace,
-			Subsystem: subsystem,
-			Name:      "frontend_write_duration_seconds",
+			Namespace: Namespace,
+			Subsystem: Subsystem,
+			Name:      FrontendLatencyMetric,
 			Help:      "Latency of write to the frontend in seconds",
 			Buckets:   latencyBuckets,
 		},
@@ -77,9 +85,9 @@ func newServerMetrics() *ServerMetrics {
 	)
 	connections := prometheus.NewGaugeVec(
 		prometheus.GaugeOpts{
-			Namespace: namespace,
-			Subsystem: subsystem,
-			Name:      "grpc_connections",
+			Namespace: Namespace,
+			Subsystem: Subsystem,
+			Name:      GRPCConnectionsMetric,
 			Help:      "Number of current grpc connections, partitioned by service method.",
 		},
 		[]string{
@@ -88,35 +96,35 @@ func newServerMetrics() *ServerMetrics {
 	)
 	httpConnections := prometheus.NewGauge(
 		prometheus.GaugeOpts{
-			Namespace: namespace,
-			Subsystem: subsystem,
-			Name:      "http_connections",
+			Namespace: Namespace,
+			Subsystem: Subsystem,
+			Name:      HTTPConnectionsMetric,
 			Help:      "Number of current HTTP CONNECT connections",
 		},
 	)
 	backend := prometheus.NewGaugeVec(
 		prometheus.GaugeOpts{
-			Namespace: namespace,
-			Subsystem: subsystem,
-			Name:      "ready_backend_connections",
+			Namespace: Namespace,
+			Subsystem: Subsystem,
+			Name:      BackendConnectionsMetric,
 			Help:      "Number of konnectivity agent connected to the proxy server",
 		},
 		[]string{},
 	)
 	pendingDials := prometheus.NewGaugeVec(
 		prometheus.GaugeOpts{
-			Namespace: namespace,
-			Subsystem: subsystem,
-			Name:      "pending_backend_dials",
+			Namespace: Namespace,
+			Subsystem: Subsystem,
+			Name:      PendingDialsMetric,
 			Help:      "Current number of pending backend dial requests",
 		},
 		[]string{},
 	)
 	fullRecvChannels := prometheus.NewGaugeVec(
 		prometheus.GaugeOpts{
-			Namespace: namespace,
-			Subsystem: subsystem,
-			Name:      "full_receive_channels",
+			Namespace: Namespace,
+			Subsystem: Subsystem,
+			Name:      FullRecvChannelMetric,
 			Help:      "Number of current connections blocked by a full receive channel, partitioned by service method.",
 		},
 		[]string{
@@ -125,9 +133,9 @@ func newServerMetrics() *ServerMetrics {
 	)
 	dialFailures := prometheus.NewCounterVec(
 		prometheus.CounterOpts{
-			Namespace: namespace,
-			Subsystem: subsystem,
-			Name:      "dial_failure_count",
+			Namespace: Namespace,
+			Subsystem: Subsystem,
+			Name:      DialFailuresMetric,
 			Help:      "Number of dial failures observed. Multiple failures can occur for a single dial request.",
 		},
 		[]string{
@@ -159,6 +167,12 @@ func newServerMetrics() *ServerMetrics {
 func (a *ServerMetrics) Reset() {
 	a.latencies.Reset()
 	a.frontendLatencies.Reset()
+	a.connections.Reset()
+	a.httpConnections.Set(0)
+	a.backend.Reset()
+	a.pendingDials.Reset()
+	a.fullRecvChannels.Reset()
+	a.dialFailures.Reset()
 }
 
 // ObserveDialLatency records the latency of dial to the remote endpoint.

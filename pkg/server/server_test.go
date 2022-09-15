@@ -27,9 +27,9 @@ import (
 
 	"github.com/golang/mock/gomock"
 	"github.com/google/uuid"
-	dto "github.com/prometheus/client_model/go"
 	"google.golang.org/grpc/metadata"
 
+	promtest "github.com/prometheus/client_golang/prometheus/testutil"
 	authv1 "k8s.io/api/authentication/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/util/wait"
@@ -394,41 +394,20 @@ func TestServerProxyRecvChanFull(t *testing.T) {
 			deadline = testDeadline.Add(-1 * time.Second)
 		}
 
-		readMetric := func() (*float64, error) {
-			// Check for metric increment
-			metric := dto.Metric{}
-			if err := metrics.Metrics.FullRecvChannel(metrics.Proxy).Write(&metric); err != nil {
-				return nil, fmt.Errorf("error reading FulRecvChannel metric: %w", err)
-			}
-			if metric.Gauge == nil || metric.Gauge.Value == nil {
-				return nil, nil // Metric not ready.
-			}
-			return metric.Gauge.Value, nil
-		}
-
-		deadlineCh := make(chan struct{})
 		waitForMetricVal := func(expected float64) {
-			err := wait.PollUntil(10*time.Millisecond, func() (bool, error) {
-				val, err := readMetric()
-				if err != nil {
-					return false, err
-				}
-				return val != nil && *val == expected, nil
-			}, deadlineCh)
+			err := wait.Poll(10*time.Millisecond, time.Until(deadline), func() (bool, error) {
+				val := promtest.ToFloat64(metrics.Metrics.FullRecvChannel(metrics.Proxy))
+				return val == expected, nil
+			})
 			if err != nil {
 				t.Fatalf("Failed to observe expected metric: %v", err)
 			}
 		}
 
 		expectMetricVal := func(expected float64) {
-			val, err := readMetric()
-			if err != nil {
-				t.Fatalf("Failed to read metric: %v", err)
-			}
-			if val == nil {
-				t.Error("Missing expected metric")
-			} else if *val != expected {
-				t.Errorf("Unexpected metric value: %v (expected %v)", *val, expected)
+			val := promtest.ToFloat64(metrics.Metrics.FullRecvChannel(metrics.Proxy))
+			if val != expected {
+				t.Errorf("Unexpected metric value: %v (expected %v)", val, expected)
 			}
 		}
 

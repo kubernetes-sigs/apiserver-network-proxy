@@ -23,6 +23,8 @@ import (
 	clientproto "sigs.k8s.io/apiserver-network-proxy/konnectivity-client/proto/client"
 	"sigs.k8s.io/apiserver-network-proxy/pkg/agent"
 	"sigs.k8s.io/apiserver-network-proxy/pkg/server"
+	"sigs.k8s.io/apiserver-network-proxy/pkg/server/metrics"
+	metricstest "sigs.k8s.io/apiserver-network-proxy/pkg/testing/metrics"
 	agentproto "sigs.k8s.io/apiserver-network-proxy/proto/agent"
 	"sigs.k8s.io/apiserver-network-proxy/proto/header"
 )
@@ -76,7 +78,7 @@ func (s *waitingServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 }
 
 func TestBasicProxy_GRPC(t *testing.T) {
-	defer goleak.VerifyNone(t, goleak.IgnoreCurrent())
+	expectCleanShutdown(t)
 
 	ctx := context.Background()
 	server := httptest.NewServer(newEchoServer("hello"))
@@ -128,7 +130,7 @@ func TestBasicProxy_GRPC(t *testing.T) {
 }
 
 func TestProxyHandleDialError_GRPC(t *testing.T) {
-	defer goleak.VerifyNone(t, goleak.IgnoreCurrent())
+	expectCleanShutdown(t)
 
 	ctx := context.Background()
 	invalidServer := httptest.NewServer(newEchoServer("hello"))
@@ -166,10 +168,15 @@ func TestProxyHandleDialError_GRPC(t *testing.T) {
 	} else if !strings.Contains(err.Error(), "connection refused") {
 		t.Errorf("Unexpected error: %v", err)
 	}
+
+	if err := metricstest.ExpectDialFailure(metrics.DialFailureEndpoint, 1); err != nil {
+		t.Error(err)
+	}
+	metrics.Metrics.Reset() // For clean shutdown.
 }
 
 func TestProxyHandle_DoneContext_GRPC(t *testing.T) {
-	defer goleak.VerifyNone(t, goleak.IgnoreCurrent())
+	expectCleanShutdown(t)
 
 	server := httptest.NewServer(newEchoServer("hello"))
 	defer server.Close()
@@ -198,7 +205,7 @@ func TestProxyHandle_DoneContext_GRPC(t *testing.T) {
 }
 
 func TestProxyHandle_RequestDeadlineExceeded_GRPC(t *testing.T) {
-	defer goleak.VerifyNone(t, goleak.IgnoreCurrent())
+	expectCleanShutdown(t)
 
 	slowServer := newWaitingServer()
 	server := httptest.NewServer(slowServer)
@@ -262,7 +269,7 @@ func TestProxyHandle_RequestDeadlineExceeded_GRPC(t *testing.T) {
 }
 
 func TestProxyDial_RequestCancelled_GRPC(t *testing.T) {
-	defer goleak.VerifyNone(t, goleak.IgnoreCurrent())
+	expectCleanShutdown(t)
 
 	proxy, cleanup, err := runGRPCProxyServer()
 	if err != nil {
@@ -307,10 +314,15 @@ func TestProxyDial_RequestCancelled_GRPC(t *testing.T) {
 			t.Errorf("Timed out waiting for tunnel to close")
 		}
 	}()
+
+	if err := metricstest.ExpectDialFailure(metrics.DialFailureFrontendClose, 1); err != nil {
+		t.Error(err)
+	}
+	metrics.Metrics.Reset() // For clean shutdown.
 }
 
 func TestProxyDial_AgentTimeout_GRPC(t *testing.T) {
-	defer goleak.VerifyNone(t, goleak.IgnoreCurrent())
+	expectCleanShutdown(t)
 
 	proxy, cleanup, err := runGRPCProxyServer()
 	if err != nil {
@@ -341,6 +353,11 @@ func TestProxyDial_AgentTimeout_GRPC(t *testing.T) {
 			t.Errorf("Unexpected error: %v", err)
 		}
 
+		if err := metricstest.ExpectDialFailure(metrics.DialFailureEndpoint, 1); err != nil {
+			t.Error(err)
+		}
+		metrics.Metrics.Reset() // For clean shutdown.
+
 		select {
 		case <-tunnel.Done():
 		case <-time.After(wait.ForeverTestTimeout):
@@ -350,7 +367,7 @@ func TestProxyDial_AgentTimeout_GRPC(t *testing.T) {
 }
 
 func TestProxyHandle_TunnelContextCancelled_GRPC(t *testing.T) {
-	defer goleak.VerifyNone(t, goleak.IgnoreCurrent())
+	expectCleanShutdown(t)
 
 	slowServer := newWaitingServer()
 	server := httptest.NewServer(slowServer)
@@ -402,7 +419,7 @@ func TestProxyHandle_TunnelContextCancelled_GRPC(t *testing.T) {
 }
 
 func TestProxy_LargeResponse(t *testing.T) {
-	defer goleak.VerifyNone(t, goleak.IgnoreCurrent())
+	expectCleanShutdown(t)
 
 	ctx := context.Background()
 	length := 1 << 20 // 1M
@@ -456,7 +473,7 @@ func TestProxy_LargeResponse(t *testing.T) {
 }
 
 func TestBasicProxy_HTTPCONN(t *testing.T) {
-	defer goleak.VerifyNone(t, goleak.IgnoreCurrent())
+	expectCleanShutdown(t)
 
 	server := httptest.NewServer(newEchoServer("hello"))
 	defer server.Close()
@@ -526,7 +543,7 @@ func TestBasicProxy_HTTPCONN(t *testing.T) {
 }
 
 func TestFailedDial_HTTPCONN(t *testing.T) {
-	defer goleak.VerifyNone(t, goleak.IgnoreCurrent())
+	expectCleanShutdown(t)
 
 	server := httptest.NewServer(newEchoServer("hello"))
 	server.Close() // cleanup immediately so connections will fail
@@ -589,6 +606,11 @@ func TestFailedDial_HTTPCONN(t *testing.T) {
 	if err != nil {
 		t.Errorf("while waiting for connection to be closed: %v", err)
 	}
+
+	if err := metricstest.ExpectDialFailure(metrics.DialFailureEndpoint, 1); err != nil {
+		t.Error(err)
+	}
+	metrics.Metrics.Reset() // For clean shutdown.
 }
 
 func localAddr(addr net.Addr) string {
@@ -780,4 +802,20 @@ func waitForConnectedAgentCount(t *testing.T, expectedAgentCount int, proxy *ser
 		t.Logf("got %d backends; expected %d", count, expectedAgentCount)
 		t.Fatalf("Error waiting for backend count: %v", err)
 	}
+}
+
+func assertNoDialFailures(t *testing.T) {
+	t.Helper()
+	if err := metricstest.ExpectDialFailures(nil); err != nil {
+		t.Errorf("Unexpected %s metric: %v", metrics.DialFailuresMetric, err)
+	}
+}
+
+func expectCleanShutdown(t *testing.T) {
+	metrics.Metrics.Reset()
+	currentGoRoutines := goleak.IgnoreCurrent()
+	t.Cleanup(func() {
+		goleak.VerifyNone(t, currentGoRoutines)
+		assertNoDialFailures(t)
+	})
 }
