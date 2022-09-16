@@ -169,7 +169,7 @@ func TestProxyHandleDialError_GRPC(t *testing.T) {
 		t.Errorf("Unexpected error: %v", err)
 	}
 
-	if err := metricstest.ExpectDialFailure(metrics.DialFailureEndpoint, 1); err != nil {
+	if err := metricstest.ExpectDialFailure(metrics.DialFailureErrorResponse, 1); err != nil {
 		t.Error(err)
 	}
 	metrics.Metrics.Reset() // For clean shutdown.
@@ -353,7 +353,7 @@ func TestProxyDial_AgentTimeout_GRPC(t *testing.T) {
 			t.Errorf("Unexpected error: %v", err)
 		}
 
-		if err := metricstest.ExpectDialFailure(metrics.DialFailureEndpoint, 1); err != nil {
+		if err := metricstest.ExpectDialFailure(metrics.DialFailureErrorResponse, 1); err != nil {
 			t.Error(err)
 		}
 		metrics.Metrics.Reset() // For clean shutdown.
@@ -607,7 +607,7 @@ func TestFailedDial_HTTPCONN(t *testing.T) {
 		t.Errorf("while waiting for connection to be closed: %v", err)
 	}
 
-	if err := metricstest.ExpectDialFailure(metrics.DialFailureEndpoint, 1); err != nil {
+	if err := metricstest.ExpectDialFailure(metrics.DialFailureErrorResponse, 1); err != nil {
 		t.Error(err)
 	}
 	metrics.Metrics.Reset() // For clean shutdown.

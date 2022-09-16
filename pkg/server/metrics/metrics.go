@@ -168,7 +168,6 @@ func (a *ServerMetrics) Reset() {
 	a.latencies.Reset()
 	a.frontendLatencies.Reset()
 	a.connections.Reset()
-	a.httpConnections.Set(0)
 	a.backend.Reset()
 	a.pendingDials.Reset()
 	a.fullRecvChannels.Reset()
@@ -219,9 +218,9 @@ func (a *ServerMetrics) FullRecvChannel(serviceMethod string) prometheus.Gauge {
 type DialFailureReason string
 
 const (
-	DialFailureEndpoint             DialFailureReason = "endpoint"              // Dial failure reported by the agent back to the server.
+	DialFailureErrorResponse        DialFailureReason = "error_response"        // Dial failure reported by the agent back to the server.
 	DialFailureUnrecognizedResponse DialFailureReason = "unrecognized_response" // Dial repsonse received for unrecognozide dial ID.
-	DialFailureSend                 DialFailureReason = "send"                  // Successful dial response from agent, but failed to send to frontend.
+	DialFailureSendResponse         DialFailureReason = "send_rsp"              // Successful dial response from agent, but failed to send to frontend.
 	DialFailureBackendClose         DialFailureReason = "backend_close"         // Received a DIAL_CLS from the backend before the dial completed.
 	DialFailureFrontendClose        DialFailureReason = "frontend_close"        // Received a DIAL_CLS from the frontend before the dial completed.
 )
