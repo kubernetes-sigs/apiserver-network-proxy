@@ -1,0 +1,143 @@
+package options
+
+import (
+	"testing"
+	"reflect"
+	"time"
+	"fmt"
+	"github.com/stretchr/testify/assert"
+)
+
+func TestDefaultServerOptions(t *testing.T) {
+	defaultServerOptions := NewProxyRunOptions()
+	assertDefaultValue(t, "ServerCert", defaultServerOptions.ServerCert, "")
+	assertDefaultValue(t, "ServerKey", defaultServerOptions.ServerKey, "")
+	assertDefaultValue(t, "ServerCaCert", defaultServerOptions.ServerCaCert, "")
+	assertDefaultValue(t, "ClusterCert", defaultServerOptions.ClusterCert, "")
+	assertDefaultValue(t, "ClusterKey", defaultServerOptions.ClusterKey, "")
+	assertDefaultValue(t, "ClusterCaCert", defaultServerOptions.ClusterCaCert, "")
+	assertDefaultValue(t, "Mode", defaultServerOptions.Mode, "grpc")
+	assertDefaultValue(t, "UdsName", defaultServerOptions.UdsName, "")
+	assertDefaultValue(t, "DeleteUDSFile", defaultServerOptions.DeleteUDSFile, false)
+	assertDefaultValue(t, "ServerPort", defaultServerOptions.ServerPort, 8090)
+	assertDefaultValue(t, "ServerBindAddress", defaultServerOptions.ServerBindAddress, "")
+	assertDefaultValue(t, "AgentPort", defaultServerOptions.AgentPort, 8091)
+	assertDefaultValue(t, "AgentBindAddress", defaultServerOptions.AgentBindAddress, "")
+	assertDefaultValue(t, "HealthPort", defaultServerOptions.HealthPort, 8092)
+	assertDefaultValue(t, "HealthBindAddress", defaultServerOptions.HealthBindAddress, "")
+	assertDefaultValue(t, "AdminPort", defaultServerOptions.AdminPort, 8095)
+	assertDefaultValue(t, "AdminBindAddress", defaultServerOptions.AdminBindAddress, "127.0.0.1")
+	assertDefaultValue(t, "KeepaliveTime", defaultServerOptions.KeepaliveTime, 1*time.Hour)
+	assertDefaultValue(t, "FrontendKeepaliveTime", defaultServerOptions.FrontendKeepaliveTime, 1*time.Hour)
+	assertDefaultValue(t, "EnableProfiling", defaultServerOptions.EnableProfiling, false)
+	assertDefaultValue(t, "EnableContentionProfiling", defaultServerOptions.EnableContentionProfiling, false)
+	assertDefaultValue(t, "ServerCount", defaultServerOptions.ServerCount, uint(1))
+	assertDefaultValue(t, "AgentNamespace", defaultServerOptions.AgentNamespace, "")
+	assertDefaultValue(t, "AgentServiceAccount", defaultServerOptions.AgentServiceAccount, "")
+	assertDefaultValue(t, "KubeconfigPath", defaultServerOptions.KubeconfigPath, "")
+	assertDefaultValue(t, "KubeconfigQPS", defaultServerOptions.KubeconfigQPS, float32(0))
+	assertDefaultValue(t, "KubeconfigBurst", defaultServerOptions.KubeconfigBurst, 0)
+	assertDefaultValue(t, "AuthenticationAudience", defaultServerOptions.AuthenticationAudience, "")
+	assertDefaultValue(t, "ProxyStrategies", defaultServerOptions.ProxyStrategies, "default")
+	assertDefaultValue(t, "CipherSuites", defaultServerOptions.CipherSuites, "")
+}
+
+func assertDefaultValue(t *testing.T, fieldName string, actual, expected interface{}) {
+	t.Helper()
+	assert.IsType(t, expected, actual, "For field %s, got the wrong type.", fieldName)
+	assert.Equal(t, expected, actual, "For field %s, got the wrong value.", fieldName)
+}
+
+func TestValidate(t *testing.T) {
+	for desc, tc := range map[string]struct {
+		field    string
+		value    interface{}
+		expected error
+	}{
+		"default": {
+			field:    "",
+			value:    nil,
+			expected: nil,
+		},
+		"ReservedServerPort": {
+			field:    "ServerPort",
+			value:    1023,
+			expected: fmt.Errorf("please do not try to use reserved port 1023 for the server port"),
+		},
+		"StartValidServerPort": {
+			field:    "ServerPort",
+			value:    1024,
+			expected: nil,
+		},
+		"EndValidServerPort": {
+			field:    "ServerPort",
+			value:    49151,
+			expected: nil,
+		},
+		"StartEphemeralServerPort": {
+			field:    "ServerPort",
+			value:    49152,
+			expected: fmt.Errorf("please do not try to use ephemeral port 49152 for the server port"),
+		},
+		"ReservedAdminPort": {
+			field:    "AdminPort",
+			value:    1023,
+			expected: fmt.Errorf("please do not try to use reserved port 1023 for the admin port"),
+		},
+		"StartValidAdminPort": {
+			field:    "AdminPort",
+			value:    1024,
+			expected: nil,
+		},
+		"EndValidAdminPort": {
+			field:    "AdminPort",
+			value:    49151,
+			expected: nil,
+		},
+		"StartEphemeralAdminPort": {
+			field:    "AdminPort",
+			value:    49152,
+			expected: fmt.Errorf("please do not try to use ephemeral port 49152 for the admin port"),
+		},
+		"ReservedHealthPort": {
+			field:    "HealthPort",
+			value:    1023,
+			expected: fmt.Errorf("please do not try to use reserved port 1023 for the health port"),
+		},
+		"StartValidHealthPort": {
+			field:    "HealthPort",
+			value:    1024,
+			expected: nil,
+		},
+		"EndValidHealthPort": {
+			field:    "HealthPort",
+			value:    49151,
+			expected: nil,
+		},
+		"StartEphemeralHealthPort": {
+			field:    "HealthPort",
+			value:    49152,
+			expected: fmt.Errorf("please do not try to use ephemeral port 49152 for the health port"),
+		},
+	} {
+		t.Run(desc, func(t *testing.T) {
+			testServerOptions := NewProxyRunOptions()
+			if tc.field != "" {
+				rv := reflect.ValueOf(testServerOptions)
+				rv = rv.Elem()
+				fv := rv.FieldByName(tc.field)
+				switch reflect.TypeOf(tc.value).Kind() {
+				case reflect.String:
+					svalue := tc.value.(string)
+					fv.SetString(svalue)
+				case reflect.Int:
+					ivalue := tc.value.(int)
+					fv.SetInt(int64(ivalue))
+				}
+			}
+			actual := testServerOptions.Validate()
+			assert.IsType(t, tc.expected, actual, "Validation for field %s, got the wrong type.", tc.field)
+			assert.Equal(t, tc.expected, actual, "Validation for field %s, got the wrong value.", tc.field)
+		})
+	}
+}
