@@ -86,7 +86,7 @@ func (o *GrpcProxyAgentOptions) Flags() *pflag.FlagSet {
 	flags.IntVar(&o.AdminServerPort, "admin-server-port", o.AdminServerPort, "The port the admin server is listening on.")
 	flags.BoolVar(&o.EnableProfiling, "enable-profiling", o.EnableProfiling, "enable pprof at host:admin-port/debug/pprof")
 	flags.BoolVar(&o.EnableContentionProfiling, "enable-contention-profiling", o.EnableContentionProfiling, "enable contention profiling at host:admin-port/debug/pprof/block. \"--enable-profiling\" must also be set.")
-	flags.StringVar(&o.AgentID, "agent-id", o.AgentID, "The unique ID of this agent. Default to a generated uuid if not set.")
+	flags.StringVar(&o.AgentID, "agent-id", o.AgentID, "The unique ID of this agent. Can also be set by the 'PROXY_AGENT_ID' environment variable. Default to a generated uuid if not set.")
 	flags.DurationVar(&o.SyncInterval, "sync-interval", o.SyncInterval, "The initial interval by which the agent periodically checks if it has connections to all instances of the proxy server.")
 	flags.DurationVar(&o.ProbeInterval, "probe-interval", o.ProbeInterval, "The interval by which the agent periodically checks if its connections to the proxy server are ready.")
 	flags.DurationVar(&o.SyncIntervalCap, "sync-interval-cap", o.SyncIntervalCap, "The maximum interval for the SyncInterval to back off to when unable to connect to the proxy server")
@@ -200,7 +200,7 @@ func NewGrpcProxyAgentOptions() *GrpcProxyAgentOptions {
 		AdminServerPort:           8094,
 		EnableProfiling:           false,
 		EnableContentionProfiling: false,
-		AgentID:                   uuid.New().String(),
+		AgentID:                   defaultAgentID(),
 		AgentIdentifiers:          "",
 		SyncInterval:              1 * time.Second,
 		ProbeInterval:             1 * time.Second,
@@ -211,4 +211,13 @@ func NewGrpcProxyAgentOptions() *GrpcProxyAgentOptions {
 		SyncForever:               false,
 	}
 	return &o
+}
+
+func defaultAgentID() string {
+	// Default to the value set by the PROXY_AGENT_ID environment variable. If both the flag &
+	// environment variable are set, the flag always wins.
+	if id := os.Getenv("PROXY_AGENT_ID"); id != "" {
+		return id
+	}
+	return uuid.New().String()
 }
