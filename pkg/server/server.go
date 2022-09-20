@@ -375,7 +375,6 @@ func (s *ProxyServer) Proxy(stream client.ProxyService_ProxyServer) error {
 	stopCh := make(chan error)
 
 	labels := runpprof.Labels(
-		"serverID", s.serverID,
 		"serverCount", strconv.Itoa(s.serverCount),
 		"userAgent", strings.Join(userAgent, ", "),
 	)
@@ -668,7 +667,6 @@ func (s *ProxyServer) Connect(stream agent.AgentService_ConnectServer) error {
 
 	klog.V(2).InfoS("Connect request from agent", "agentID", agentID)
 	labels := runpprof.Labels(
-		"serverID", s.serverID,
 		"serverCount", strconv.Itoa(s.serverCount),
 		"agentID", agentID,
 	)
