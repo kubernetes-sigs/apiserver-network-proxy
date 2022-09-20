@@ -511,7 +511,7 @@ func (a *Client) Serve() {
 			}
 
 		default:
-			klog.V(2).InfoS("unrecognized packet", "type", pkt)
+			klog.V(5).InfoS("unrecognized packet", "type", pkt)
 		}
 	}
 }
