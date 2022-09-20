@@ -351,7 +351,7 @@ func (a *Client) Serve() {
 		for _, connCtx := range a.connManager.List() {
 			connCtx.cleanup()
 		}
-		klog.V(2).InfoS("cleanup all of conn contexts when client exits", "agentID", a.agentID)
+		klog.V(2).InfoS("cleanup all of conn contexts when client exits")
 	}()
 
 	klog.V(2).InfoS("Start serving", "serverID", a.serverID)
