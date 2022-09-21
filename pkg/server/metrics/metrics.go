@@ -23,12 +23,20 @@ import (
 )
 
 const (
-	namespace = "konnectivity_network_proxy"
-	subsystem = "server"
+	Namespace = "konnectivity_network_proxy"
+	Subsystem = "server"
+
+	DialLatencyMetric        = "dial_duration_seconds"
+	FrontendLatencyMetric    = "frontend_write_duration_seconds"
+	GRPCConnectionsMetric    = "grpc_connections"
+	HTTPConnectionsMetric    = "http_connections"
+	BackendConnectionsMetric = "ready_backend_connections"
+	PendingDialsMetric       = "pending_backend_dials"
+	FullRecvChannelMetric    = "full_receive_channels"
+	DialFailuresMetric       = "dial_failure_count"
 
 	// Proxy is the ProxyService method used to handle incoming streams.
 	Proxy = "Proxy"
-
 	// Connect is the AgentService method used to establish next hop.
 	Connect = "Connect"
 )
@@ -50,15 +58,16 @@ type ServerMetrics struct {
 	backend           *prometheus.GaugeVec
 	pendingDials      *prometheus.GaugeVec
 	fullRecvChannels  *prometheus.GaugeVec
+	dialFailures      *prometheus.CounterVec
 }
 
 // newServerMetrics create a new ServerMetrics, configured with default metric names.
 func newServerMetrics() *ServerMetrics {
 	latencies := prometheus.NewHistogramVec(
 		prometheus.HistogramOpts{
-			Namespace: namespace,
-			Subsystem: subsystem,
-			Name:      "dial_duration_seconds",
+			Namespace: Namespace,
+			Subsystem: Subsystem,
+			Name:      DialLatencyMetric,
 			Help:      "Latency of dial to the remote endpoint in seconds",
 			Buckets:   latencyBuckets,
 		},
@@ -66,9 +75,9 @@ func newServerMetrics() *ServerMetrics {
 	)
 	frontendLatencies := prometheus.NewHistogramVec(
 		prometheus.HistogramOpts{
-			Namespace: namespace,
-			Subsystem: subsystem,
-			Name:      "frontend_write_duration_seconds",
+			Namespace: Namespace,
+			Subsystem: Subsystem,
+			Name:      FrontendLatencyMetric,
 			Help:      "Latency of write to the frontend in seconds",
 			Buckets:   latencyBuckets,
 		},
@@ -76,9 +85,9 @@ func newServerMetrics() *ServerMetrics {
 	)
 	connections := prometheus.NewGaugeVec(
 		prometheus.GaugeOpts{
-			Namespace: namespace,
-			Subsystem: subsystem,
-			Name:      "grpc_connections",
+			Namespace: Namespace,
+			Subsystem: Subsystem,
+			Name:      GRPCConnectionsMetric,
 			Help:      "Number of current grpc connections, partitioned by service method.",
 		},
 		[]string{
@@ -87,39 +96,50 @@ func newServerMetrics() *ServerMetrics {
 	)
 	httpConnections := prometheus.NewGauge(
 		prometheus.GaugeOpts{
-			Namespace: namespace,
-			Subsystem: subsystem,
-			Name:      "http_connections",
+			Namespace: Namespace,
+			Subsystem: Subsystem,
+			Name:      HTTPConnectionsMetric,
 			Help:      "Number of current HTTP CONNECT connections",
 		},
 	)
 	backend := prometheus.NewGaugeVec(
 		prometheus.GaugeOpts{
-			Namespace: namespace,
-			Subsystem: subsystem,
-			Name:      "ready_backend_connections",
+			Namespace: Namespace,
+			Subsystem: Subsystem,
+			Name:      BackendConnectionsMetric,
 			Help:      "Number of konnectivity agent connected to the proxy server",
 		},
 		[]string{},
 	)
 	pendingDials := prometheus.NewGaugeVec(
 		prometheus.GaugeOpts{
-			Namespace: namespace,
-			Subsystem: subsystem,
-			Name:      "pending_backend_dials",
+			Namespace: Namespace,
+			Subsystem: Subsystem,
+			Name:      PendingDialsMetric,
 			Help:      "Current number of pending backend dial requests",
 		},
 		[]string{},
 	)
 	fullRecvChannels := prometheus.NewGaugeVec(
 		prometheus.GaugeOpts{
-			Namespace: namespace,
-			Subsystem: subsystem,
-			Name:      "full_receive_channels",
+			Namespace: Namespace,
+			Subsystem: Subsystem,
+			Name:      FullRecvChannelMetric,
 			Help:      "Number of current connections blocked by a full receive channel, partitioned by service method.",
 		},
 		[]string{
 			"service_method",
+		},
+	)
+	dialFailures := prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Namespace: Namespace,
+			Subsystem: Subsystem,
+			Name:      DialFailuresMetric,
+			Help:      "Number of dial failures observed. Multiple failures can occur for a single dial request.",
+		},
+		[]string{
+			"reason",
 		},
 	)
 
@@ -130,6 +150,7 @@ func newServerMetrics() *ServerMetrics {
 	prometheus.MustRegister(backend)
 	prometheus.MustRegister(pendingDials)
 	prometheus.MustRegister(fullRecvChannels)
+	prometheus.MustRegister(dialFailures)
 	return &ServerMetrics{
 		latencies:         latencies,
 		frontendLatencies: frontendLatencies,
@@ -138,6 +159,7 @@ func newServerMetrics() *ServerMetrics {
 		backend:           backend,
 		pendingDials:      pendingDials,
 		fullRecvChannels:  fullRecvChannels,
+		dialFailures:      dialFailures,
 	}
 }
 
@@ -145,6 +167,11 @@ func newServerMetrics() *ServerMetrics {
 func (a *ServerMetrics) Reset() {
 	a.latencies.Reset()
 	a.frontendLatencies.Reset()
+	a.connections.Reset()
+	a.backend.Reset()
+	a.pendingDials.Reset()
+	a.fullRecvChannels.Reset()
+	a.dialFailures.Reset()
 }
 
 // ObserveDialLatency records the latency of dial to the remote endpoint.
@@ -186,4 +213,18 @@ func (a *ServerMetrics) SetPendingDialCount(count int) {
 // FullRecvChannel retrieves the metric for counting full receive channels.
 func (a *ServerMetrics) FullRecvChannel(serviceMethod string) prometheus.Gauge {
 	return a.fullRecvChannels.With(prometheus.Labels{"service_method": serviceMethod})
+}
+
+type DialFailureReason string
+
+const (
+	DialFailureErrorResponse        DialFailureReason = "error_response"        // Dial failure reported by the agent back to the server.
+	DialFailureUnrecognizedResponse DialFailureReason = "unrecognized_response" // Dial repsonse received for unrecognozide dial ID.
+	DialFailureSendResponse         DialFailureReason = "send_rsp"              // Successful dial response from agent, but failed to send to frontend.
+	DialFailureBackendClose         DialFailureReason = "backend_close"         // Received a DIAL_CLS from the backend before the dial completed.
+	DialFailureFrontendClose        DialFailureReason = "frontend_close"        // Received a DIAL_CLS from the frontend before the dial completed.
+)
+
+func (a *ServerMetrics) ObserveDialFailure(reason DialFailureReason) {
+	a.dialFailures.With(prometheus.Labels{"reason": string(reason)}).Inc()
 }

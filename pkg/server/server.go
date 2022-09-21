@@ -501,6 +501,7 @@ func (s *ProxyServer) serveRecvFrontend(stream client.ProxyService_ProxyServer, 
 					"dialAddress", pd.dialAddress,
 					"dialDuration", time.Since(pd.start),
 				)
+				metrics.Metrics.ObserveDialFailure(metrics.DialFailureFrontendClose)
 			}
 
 		case client.PacketType_DATA:
@@ -766,6 +767,7 @@ func (s *ProxyServer) serveRecvBackend(backend Backend, stream agent.AgentServic
 
 			if frontend, ok := s.PendingDial.Get(resp.Random); !ok {
 				klog.V(2).InfoS("DIAL_RSP not recognized; dropped", "dialID", resp.Random, "agentID", agentID, "connectionID", resp.ConnectID)
+				metrics.Metrics.ObserveDialFailure(metrics.DialFailureUnrecognizedResponse)
 				if resp.ConnectID != 0 {
 					s.sendCloseRequest(stream, resp.ConnectID, resp.Random, "failed to notify agent of closing due to unknown dial id")
 				}
@@ -774,6 +776,7 @@ func (s *ProxyServer) serveRecvBackend(backend Backend, stream agent.AgentServic
 				if resp.Error != "" {
 					// Dial response with error should not contain a valid ConnID.
 					klog.ErrorS(errors.New(resp.Error), "DIAL_RSP contains failure", "dialID", resp.Random, "agentID", agentID)
+					metrics.Metrics.ObserveDialFailure(metrics.DialFailureErrorResponse)
 					dialErr = true
 				}
 				err := frontend.send(pkt)
@@ -781,6 +784,9 @@ func (s *ProxyServer) serveRecvBackend(backend Backend, stream agent.AgentServic
 				if err != nil {
 					klog.ErrorS(err, "DIAL_RSP send to frontend stream failure",
 						"dialID", resp.Random, "agentID", agentID, "connectionID", resp.ConnectID)
+					if !dialErr { // Avoid double-counting.
+						metrics.Metrics.ObserveDialFailure(metrics.DialFailureSendResponse)
+					}
 					// If we never finish setting up the tunnel for ConnectID, then the connection is dead.
 					// Currently, the agent will no resend DIAL_RSP, so connection is dead.
 					// We already attempted to tell the frontend that. We should ensure we tell the backend.
@@ -823,6 +829,7 @@ func (s *ProxyServer) serveRecvBackend(backend Backend, stream agent.AgentServic
 						"dialAddress", frontend.dialAddress,
 						"dialDuration", time.Since(frontend.start),
 					)
+					metrics.Metrics.ObserveDialFailure(metrics.DialFailureBackendClose)
 				}
 			}
 
