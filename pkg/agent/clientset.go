@@ -224,7 +224,6 @@ func (cs *ClientSet) connectOnce() error {
 	klog.V(2).InfoS("sync added client connecting to proxy server", "serverID", c.serverID)
 
 	labels := runpprof.Labels(
-		"agentID", cs.agentID,
 		"agentIdentifiers", cs.agentIdentifiers,
 		"serverAddress", cs.address,
 		"serverID", c.serverID,
@@ -235,7 +234,6 @@ func (cs *ClientSet) connectOnce() error {
 
 func (cs *ClientSet) Serve() {
 	labels := runpprof.Labels(
-		"agentID", cs.agentID,
 		"agentIdentifiers", cs.agentIdentifiers,
 		"serverAddress", cs.address,
 	)
