@@ -354,7 +354,7 @@ func (a *Client) Serve() {
 		klog.V(2).InfoS("cleanup all of conn contexts when client exits")
 	}()
 
-	klog.V(2).InfoS("Start serving", "serverID", a.serverID)
+	klog.V(2).InfoS("Start serving", "serverID", a.serverID, "agentID", a.agentID)
 	go a.probe()
 	for {
 		select {
@@ -383,7 +383,7 @@ func (a *Client) Serve() {
 
 		switch pkt.Type {
 		case client.PacketType_DIAL_REQ:
-			klog.V(4).InfoS("received DIAL_REQ")
+			klog.V(4).InfoS("received DIAL_REQ", "serverID", a.serverID, "agentID", a.agentID)
 			dialResp := &client.Packet{
 				Type:    client.PacketType_DIAL_RSP,
 				Payload: &client.Packet_DialResponse{DialResponse: &client.DialResponse{}},

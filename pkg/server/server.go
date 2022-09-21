@@ -369,7 +369,7 @@ func (s *ProxyServer) Proxy(stream client.ProxyService_ProxyServer) error {
 		return fmt.Errorf("failed to get context")
 	}
 	userAgent := md.Get(header.UserAgent)
-	klog.V(2).InfoS("proxy request from client", "userAgent", userAgent)
+	klog.V(2).InfoS("Proxy request from client", "userAgent", userAgent, "serverID", s.serverID)
 
 	recvCh := make(chan *client.Packet, xfrChannelSize)
 	stopCh := make(chan error)
@@ -665,7 +665,7 @@ func (s *ProxyServer) Connect(stream agent.AgentService_ConnectServer) error {
 		return err
 	}
 
-	klog.V(2).InfoS("Connect request from agent", "agentID", agentID)
+	klog.V(2).InfoS("Connect request from agent", "agentID", agentID, "serverID", s.serverID)
 	labels := runpprof.Labels(
 		"serverCount", strconv.Itoa(s.serverCount),
 		"agentID", agentID,
