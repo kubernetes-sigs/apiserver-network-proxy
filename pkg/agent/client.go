@@ -75,17 +75,25 @@ func (c *connContext) send(msg []byte) {
 type connectionManager struct {
 	mu          sync.RWMutex
 	connections map[int64]*connContext
+	closed      bool
 }
 
-func (cm *connectionManager) Add(connID int64, ctx *connContext) {
+func (cm *connectionManager) Add(connID int64, ctx *connContext) error {
 	cm.mu.Lock()
 	defer cm.mu.Unlock()
+	if cm.closed {
+		return fmt.Errorf("connection manager is shutting down")
+	}
 	cm.connections[connID] = ctx
+	return nil
 }
 
 func (cm *connectionManager) Get(connID int64) (*connContext, bool) {
 	cm.mu.RLock()
 	defer cm.mu.RUnlock()
+	if cm.closed {
+		return nil, false
+	}
 	ctx, ok := cm.connections[connID]
 	return ctx, ok
 }
@@ -96,14 +104,21 @@ func (cm *connectionManager) Delete(connID int64) {
 	delete(cm.connections, connID)
 }
 
-func (cm *connectionManager) List() []*connContext {
-	cm.mu.RLock()
-	defer cm.mu.RUnlock()
-	connContexts := make([]*connContext, 0, len(cm.connections))
-	for _, connCtx := range cm.connections {
-		connContexts = append(connContexts, connCtx)
+func (cm *connectionManager) Close(ctx context.Context) {
+	cm.mu.Lock()
+	defer cm.mu.Unlock()
+	if cm.closed {
+		return // already closed
 	}
-	return connContexts
+	cm.closed = true
+
+	// Clean up connections in parallel.
+	for _, connCtx := range cm.connections {
+		connCtx := connCtx // Don't reuse loop variable.
+		go runpprof.Do(ctx, runpprof.Labels(
+			"connID", strconv.FormatInt(connCtx.connID, 10),
+		), func(_ context.Context) { connCtx.cleanup() })
+	}
 }
 
 func newConnectionManager() *connectionManager {
@@ -348,9 +363,13 @@ func (a *Client) Serve() {
 	defer a.cs.RemoveClient(a.serverID)
 	defer func() {
 		// close all of conns with remote when Client exits
-		for _, connCtx := range a.connManager.List() {
-			connCtx.cleanup()
-		}
+		ctx := runpprof.WithLabels(context.Background(), runpprof.Labels(
+			"agentID", a.agentID,
+			"agentIdentifiers", a.agentIdentifiers,
+			"serverAddress", a.address,
+			"serverID", a.serverID,
+		))
+		a.connManager.Close(ctx)
 		klog.V(2).InfoS("cleanup all of conn contexts when client exits")
 	}()
 
@@ -453,8 +472,7 @@ func (a *Client) Serve() {
 					return
 				}
 				metrics.Metrics.ObserveDialLatency(time.Since(start))
-				connCtx.conn = conn
-				a.connManager.Add(connID, connCtx)
+
 				dialResp.GetDialResponse().ConnectID = connID
 				labels := runpprof.Labels(
 					"agentID", a.agentID,
@@ -464,6 +482,14 @@ func (a *Client) Serve() {
 					"connectionID", strconv.FormatInt(connID, 10),
 					"dialAddress", dialReq.Address,
 				)
+				connCtx.conn = conn
+				if err := a.connManager.Add(connID, connCtx); err != nil {
+					klog.ErrorS(err, "failed to register connection", "connID", connID)
+					// Failed to register new connection; clean up and abort dial.
+					go runpprof.Do(context.Background(), labels, func(context.Context) { connCtx.cleanup() })
+					return
+				}
+
 				if err := a.Send(dialResp); err != nil {
 					klog.ErrorS(err, "could not send dialResp")
 					// clean-up is normally called from remoteToProxy which we will never invoke.

@@ -300,7 +300,7 @@ func TestFailedSend_DialResp_GRPC(t *testing.T) {
 			t.Error("expected timeout error, got none")
 		}
 
-		if conns := len(testClient.connManager.List()); conns > 0 {
+		if conns := len(testClient.connManager.connections); conns > 0 {
 			t.Errorf("Leaked %d connections", conns)
 		}
 	}()
