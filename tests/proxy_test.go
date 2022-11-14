@@ -38,8 +38,9 @@ import (
 	"sigs.k8s.io/apiserver-network-proxy/konnectivity-client/pkg/client"
 	clientproto "sigs.k8s.io/apiserver-network-proxy/konnectivity-client/proto/client"
 	"sigs.k8s.io/apiserver-network-proxy/pkg/agent"
+	metricsagent "sigs.k8s.io/apiserver-network-proxy/pkg/agent/metrics"
 	"sigs.k8s.io/apiserver-network-proxy/pkg/server"
-	"sigs.k8s.io/apiserver-network-proxy/pkg/server/metrics"
+	metricsserver "sigs.k8s.io/apiserver-network-proxy/pkg/server/metrics"
 	metricstest "sigs.k8s.io/apiserver-network-proxy/pkg/testing/metrics"
 	agentproto "sigs.k8s.io/apiserver-network-proxy/proto/agent"
 	"sigs.k8s.io/apiserver-network-proxy/proto/header"
@@ -185,10 +186,14 @@ func TestProxyHandleDialError_GRPC(t *testing.T) {
 		t.Errorf("Unexpected error: %v", err)
 	}
 
-	if err := metricstest.ExpectDialFailure(metrics.DialFailureErrorResponse, 1); err != nil {
+	if err := metricstest.ExpectServerDialFailure(metricsserver.DialFailureErrorResponse, 1); err != nil {
 		t.Error(err)
 	}
-	metrics.Metrics.Reset() // For clean shutdown.
+	if err := metricstest.ExpectAgentDialFailure(metricsagent.DialFailureUnknown, 1); err != nil {
+		t.Error(err)
+	}
+	metricsserver.Metrics.Reset() // For clean shutdown.
+	metricsagent.Metrics.Reset()
 }
 
 func TestProxyHandle_DoneContext_GRPC(t *testing.T) {
@@ -331,10 +336,11 @@ func TestProxyDial_RequestCancelled_GRPC(t *testing.T) {
 		}
 	}()
 
-	if err := metricstest.ExpectDialFailure(metrics.DialFailureFrontendClose, 1); err != nil {
+	if err := metricstest.ExpectServerDialFailure(metricsserver.DialFailureFrontendClose, 1); err != nil {
 		t.Error(err)
 	}
-	metrics.Metrics.Reset() // For clean shutdown.
+	metricsserver.Metrics.Reset() // For clean shutdown.
+	metricsagent.Metrics.Reset()
 }
 
 func TestProxyDial_AgentTimeout_GRPC(t *testing.T) {
@@ -369,10 +375,14 @@ func TestProxyDial_AgentTimeout_GRPC(t *testing.T) {
 			t.Errorf("Unexpected error: %v", err)
 		}
 
-		if err := metricstest.ExpectDialFailure(metrics.DialFailureErrorResponse, 1); err != nil {
+		if err := metricstest.ExpectServerDialFailure(metricsserver.DialFailureErrorResponse, 1); err != nil {
 			t.Error(err)
 		}
-		metrics.Metrics.Reset() // For clean shutdown.
+		if err := metricstest.ExpectAgentDialFailure(metricsagent.DialFailureTimeout, 1); err != nil {
+			t.Error(err)
+		}
+		metricsserver.Metrics.Reset() // For clean shutdown.
+		metricsagent.Metrics.Reset()
 
 		select {
 		case <-tunnel.Done():
@@ -623,10 +633,14 @@ func TestFailedDial_HTTPCONN(t *testing.T) {
 		t.Errorf("while waiting for connection to be closed: %v", err)
 	}
 
-	if err := metricstest.ExpectDialFailure(metrics.DialFailureErrorResponse, 1); err != nil {
+	if err := metricstest.ExpectServerDialFailure(metricsserver.DialFailureErrorResponse, 1); err != nil {
 		t.Error(err)
 	}
-	metrics.Metrics.Reset() // For clean shutdown.
+	if err := metricstest.ExpectAgentDialFailure(metricsagent.DialFailureUnknown, 1); err != nil {
+		t.Error(err)
+	}
+	metricsserver.Metrics.Reset() // For clean shutdown.
+	metricsagent.Metrics.Reset()
 }
 
 func localAddr(addr net.Addr) string {
@@ -820,18 +834,26 @@ func waitForConnectedAgentCount(t *testing.T, expectedAgentCount int, proxy *ser
 	}
 }
 
-func assertNoDialFailures(t *testing.T) {
+func assertNoServerDialFailures(t *testing.T) {
 	t.Helper()
-	if err := metricstest.ExpectDialFailures(nil); err != nil {
-		t.Errorf("Unexpected %s metric: %v", metrics.DialFailuresMetric, err)
+	if err := metricstest.ExpectServerDialFailures(nil); err != nil {
+		t.Errorf("Unexpected %s metric: %v", metricsserver.DialFailuresMetric, err)
 	}
 }
 
+func assertNoAgentDialFailures(t *testing.T) {
+	t.Helper()
+	if err := metricstest.ExpectAgentDialFailures(nil); err != nil {
+		t.Errorf("Unexpected %s metric: %v", metricsagent.DialFailuresMetric, err)
+	}
+}
 func expectCleanShutdown(t *testing.T) {
-	metrics.Metrics.Reset()
+	metricsserver.Metrics.Reset()
+	metricsagent.Metrics.Reset()
 	currentGoRoutines := goleak.IgnoreCurrent()
 	t.Cleanup(func() {
 		goleak.VerifyNone(t, currentGoRoutines)
-		assertNoDialFailures(t)
+		assertNoServerDialFailures(t)
+		assertNoAgentDialFailures(t)
 	})
 }
