@@ -33,6 +33,8 @@ import (
 	"google.golang.org/grpc/connectivity"
 	"google.golang.org/grpc/metadata"
 	"k8s.io/klog/v2"
+
+	commonmetrics "sigs.k8s.io/apiserver-network-proxy/konnectivity-client/pkg/common/metrics"
 	"sigs.k8s.io/apiserver-network-proxy/konnectivity-client/proto/client"
 	"sigs.k8s.io/apiserver-network-proxy/pkg/agent/metrics"
 	"sigs.k8s.io/apiserver-network-proxy/proto/agent"
@@ -80,6 +82,7 @@ type connectionManager struct {
 func (cm *connectionManager) Add(connID int64, ctx *connContext) {
 	cm.mu.Lock()
 	defer cm.mu.Unlock()
+	metrics.Metrics.EndpointConnectionInc()
 	cm.connections[connID] = ctx
 }
 
@@ -93,6 +96,9 @@ func (cm *connectionManager) Get(connID int64) (*connContext, bool) {
 func (cm *connectionManager) Delete(connID int64) {
 	cm.mu.Lock()
 	defer cm.mu.Unlock()
+	// Delete for a connID is called from cleanFunc, which is
+	// protected by cleanOnce.
+	metrics.Metrics.EndpointConnectionDec()
 	delete(cm.connections, connID)
 }
 
@@ -272,9 +278,12 @@ func (a *Client) Send(pkt *client.Packet) error {
 	a.sendLock.Lock()
 	defer a.sendLock.Unlock()
 
+	const segment = commonmetrics.SegmentFromAgent
+	metrics.Metrics.ObservePacket(segment, pkt.Type)
 	err := a.stream.Send(pkt)
 	if err != nil && err != io.EOF {
-		metrics.Metrics.ObserveFailure(metrics.DirectionToServer)
+		metrics.Metrics.ObserveServerFailureDeprecated(metrics.DirectionToServer)
+		metrics.Metrics.ObserveStreamError(segment, err, pkt.Type)
 		a.cs.RemoveClient(a.serverID)
 	}
 	return err
@@ -286,7 +295,8 @@ func (a *Client) Recv() (*client.Packet, error) {
 
 	pkt, err := a.stream.Recv()
 	if err != nil && err != io.EOF {
-		metrics.Metrics.ObserveFailure(metrics.DirectionFromServer)
+		metrics.Metrics.ObserveServerFailureDeprecated(metrics.DirectionFromServer)
+		metrics.Metrics.ObserveStreamErrorNoPacket(commonmetrics.SegmentToAgent, err)
 	}
 	return pkt, err
 }
@@ -381,6 +391,7 @@ func (a *Client) Serve() {
 			continue
 		}
 
+		metrics.Metrics.ObservePacket(commonmetrics.SegmentToAgent, pkt.Type)
 		switch pkt.Type {
 		case client.PacketType_DIAL_REQ:
 			dialReq := pkt.GetDialRequest()
@@ -443,6 +454,11 @@ func (a *Client) Serve() {
 				start := time.Now()
 				conn, err := net.DialTimeout(dialReq.Protocol, dialReq.Address, dialTimeout)
 				if err != nil {
+					reason := metrics.DialFailureUnknown
+					if neterr, ok := err.(net.Error); ok && neterr.Timeout() {
+						reason = metrics.DialFailureTimeout
+					}
+					metrics.Metrics.ObserveDialFailure(reason)
 					klog.ErrorS(err, "error dialing backend", "dialID", dialReq.Random, "connectionID", connID, "dialAddress", dialReq.Address)
 					dialResp.GetDialResponse().Error = err.Error()
 					if err := a.Send(dialResp); err != nil {

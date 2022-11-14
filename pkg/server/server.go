@@ -34,6 +34,8 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/klog/v2"
+
+	commonmetrics "sigs.k8s.io/apiserver-network-proxy/konnectivity-client/pkg/common/metrics"
 	"sigs.k8s.io/apiserver-network-proxy/konnectivity-client/proto/client"
 	pkgagent "sigs.k8s.io/apiserver-network-proxy/pkg/agent"
 	"sigs.k8s.io/apiserver-network-proxy/pkg/server/metrics"
@@ -64,11 +66,17 @@ const (
 )
 
 func (c *ProxyClientConnection) send(pkt *client.Packet) error {
+	const segment = commonmetrics.SegmentToClient
+	metrics.Metrics.ObservePacket(segment, pkt.Type)
 	start := time.Now()
 	defer metrics.Metrics.ObserveFrontendWriteLatency(time.Since(start))
 	if c.Mode == "grpc" {
 		stream := c.Grpc
-		return stream.Send(pkt)
+		err := stream.Send(pkt)
+		if err != nil {
+			metrics.Metrics.ObserveStreamError(segment, err, pkt.Type)
+		}
+		return err
 	} else if c.Mode == "http-connect" {
 		if pkt.Type == client.PacketType_CLOSE_RSP {
 			return c.CloseHTTP()
@@ -396,7 +404,9 @@ func (s *ProxyServer) readFrontendToChannel(stream client.ProxyService_ProxyServ
 			close(stopCh)
 			return
 		}
+		const segment = commonmetrics.SegmentFromClient
 		if err != nil {
+			metrics.Metrics.ObserveStreamErrorNoPacket(segment, err)
 			if status.Code(err) == codes.Canceled {
 				klog.V(2).InfoS("Stream read from frontend cancelled", "userAgent", userAgent)
 			} else {
@@ -406,6 +416,7 @@ func (s *ProxyServer) readFrontendToChannel(stream client.ProxyService_ProxyServ
 			close(stopCh)
 			return
 		}
+		metrics.Metrics.ObservePacket(segment, in.Type)
 
 		select {
 		case recvCh <- in: // Send didn't block, carry on.
@@ -451,7 +462,10 @@ func (s *ProxyServer) serveRecvFrontend(stream client.ProxyService_ProxyServer, 
 						},
 					},
 				}
+				const segment = commonmetrics.SegmentToClient
+				metrics.Metrics.ObservePacket(segment, resp.Type)
 				if err := stream.Send(resp); err != nil {
+					metrics.Metrics.ObserveStreamError(segment, err, resp.Type)
 					klog.V(5).InfoS("Failed to send DIAL_RSP for no backend", "error", err, "dialID", random)
 				}
 				// The Dial is failing; no reason to keep this goroutine.
@@ -713,12 +727,15 @@ func (s *ProxyServer) readBackendToChannel(stream agent.AgentService_ConnectServ
 			close(stopCh)
 			return
 		}
+		const segment = commonmetrics.SegmentFromAgent
 		if err != nil {
+			metrics.Metrics.ObserveStreamErrorNoPacket(segment, err)
 			klog.ErrorS(err, "Receive stream from agent read failure")
 			stopCh <- err
 			close(stopCh)
 			return
 		}
+		metrics.Metrics.ObservePacket(segment, in.Type)
 
 		select {
 		case recvCh <- in: // Send didn't block, carry on.
@@ -871,6 +888,7 @@ func (s *ProxyServer) serveRecvBackend(backend Backend, stream agent.AgentServic
 	}
 	klog.V(5).InfoS("Close backend of agent", "backend", stream, "agentID", agentID)
 }
+
 func (s *ProxyServer) sendCloseRequest(stream agent.AgentService_ConnectServer, connectID int64, random int64, failMsg string) {
 	pkt := &client.Packet{
 		Type: client.PacketType_CLOSE_REQ,
@@ -880,7 +898,10 @@ func (s *ProxyServer) sendCloseRequest(stream agent.AgentService_ConnectServer, 
 			},
 		},
 	}
+	const segment = commonmetrics.SegmentToAgent
+	metrics.Metrics.ObservePacket(segment, pkt.Type)
 	if err := stream.Send(pkt); err != nil {
+		metrics.Metrics.ObserveStreamError(segment, err, pkt.Type)
 		klog.V(5).ErrorS(err, failMsg, "dialID", random, "agentID", agentID, "connectionID", connectID)
 	}
 }

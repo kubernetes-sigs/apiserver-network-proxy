@@ -27,6 +27,7 @@ import (
 	"google.golang.org/grpc/connectivity"
 	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/klog/v2"
+	"sigs.k8s.io/apiserver-network-proxy/pkg/agent/metrics"
 )
 
 // ClientSet consists of clients connected to each instance of an HA proxy server.
@@ -105,6 +106,7 @@ func (cs *ClientSet) addClientLocked(serverID string, c *Client) error {
 		return &DuplicateServerError{ServerID: serverID}
 	}
 	cs.clients[serverID] = c
+	metrics.Metrics.SetServerConnectionsCount(len(cs.clients))
 	return nil
 
 }
@@ -123,6 +125,7 @@ func (cs *ClientSet) RemoveClient(serverID string) {
 	}
 	cs.clients[serverID].Close()
 	delete(cs.clients, serverID)
+	metrics.Metrics.SetServerConnectionsCount(len(cs.clients))
 }
 
 type ClientSetConfig struct {
