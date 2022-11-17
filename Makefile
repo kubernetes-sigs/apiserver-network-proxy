@@ -56,7 +56,8 @@ mock_gen:
 
 .PHONY: test
 test:
-	GO111MODULE=on go test -race sigs.k8s.io/apiserver-network-proxy/...
+	go test -race ./...
+	cd konnectivity-client && go test -race ./...
 
 ## --------------------------------------
 ## Binaries
