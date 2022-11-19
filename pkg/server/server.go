@@ -586,7 +586,7 @@ func getAgentIdentifiers(stream agent.AgentService_ConnectServer) (pkgagent.Iden
 	return agentIdentifiers, nil
 }
 
-func (s *ProxyServer) validateAuthToken(ctx context.Context, token string) error {
+func (s *ProxyServer) validateAuthToken(ctx context.Context, token string) (username string, err error) {
 	trReq := &authv1.TokenReview{
 		Spec: authv1.TokenReviewSpec{
 			Token:     token,
@@ -595,38 +595,39 @@ func (s *ProxyServer) validateAuthToken(ctx context.Context, token string) error
 	}
 	r, err := s.AgentAuthenticationOptions.KubernetesClient.AuthenticationV1().TokenReviews().Create(ctx, trReq, metav1.CreateOptions{})
 	if err != nil {
-		return fmt.Errorf("Failed to authenticate request. err:%v", err)
+		return "", fmt.Errorf("Failed to authenticate request. err:%v", err)
 	}
 
 	if r.Status.Error != "" {
-		return fmt.Errorf("lookup failed: %s", r.Status.Error)
+		return "", fmt.Errorf("lookup failed: %s", r.Status.Error)
 	}
 
 	if !r.Status.Authenticated {
-		return fmt.Errorf("lookup failed: service account jwt not valid")
+		return "", fmt.Errorf("lookup failed: service account jwt not valid")
 	}
 
 	// The username is of format: system:serviceaccount:(NAMESPACE):(SERVICEACCOUNT)
-	parts := strings.Split(r.Status.User.Username, ":")
+	username = r.Status.User.Username
+	parts := strings.Split(username, ":")
 	if len(parts) != 4 {
-		return fmt.Errorf("lookup failed: unexpected username format")
+		return "", fmt.Errorf("lookup failed: unexpected username format")
 	}
 	// Validate the user that comes back from token review is a service account
 	if parts[0] != "system" || parts[1] != "serviceaccount" {
-		return fmt.Errorf("lookup failed: username returned is not a service account")
+		return "", fmt.Errorf("lookup failed: username returned is not a service account")
 	}
 
 	ns := parts[2]
 	sa := parts[3]
 	if s.AgentAuthenticationOptions.AgentNamespace != ns {
-		return fmt.Errorf("lookup failed: incoming request from %q namespace. Expected %q", ns, s.AgentAuthenticationOptions.AgentNamespace)
+		return "", fmt.Errorf("lookup failed: incoming request from %q namespace. Expected %q", ns, s.AgentAuthenticationOptions.AgentNamespace)
 	}
 
 	if s.AgentAuthenticationOptions.AgentServiceAccount != sa {
-		return fmt.Errorf("lookup failed: incoming request from %q service account. Expected %q", sa, s.AgentAuthenticationOptions.AgentServiceAccount)
+		return "", fmt.Errorf("lookup failed: incoming request from %q service account. Expected %q", sa, s.AgentAuthenticationOptions.AgentServiceAccount)
 	}
 
-	return nil
+	return username, nil
 }
 
 func (s *ProxyServer) authenticateAgentViaToken(ctx context.Context) error {
@@ -648,11 +649,12 @@ func (s *ProxyServer) authenticateAgentViaToken(ctx context.Context) error {
 		return fmt.Errorf("received token does not have %q prefix", header.AuthenticationTokenContextSchemePrefix)
 	}
 
-	if err := s.validateAuthToken(ctx, strings.TrimPrefix(authContext[0], header.AuthenticationTokenContextSchemePrefix)); err != nil {
+	username, err := s.validateAuthToken(ctx, strings.TrimPrefix(authContext[0], header.AuthenticationTokenContextSchemePrefix))
+	if err != nil {
 		return fmt.Errorf("Failed to validate authentication token, err:%v", err)
 	}
 
-	klog.V(2).Infoln("Client successfully authenticated via token")
+	klog.V(2).InfoS("Agent successfully authenticated via token", "username", username)
 	return nil
 }
 
