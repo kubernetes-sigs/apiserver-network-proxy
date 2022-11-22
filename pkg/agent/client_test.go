@@ -223,6 +223,45 @@ func TestClose_Client(t *testing.T) {
 
 }
 
+func TestConnectionMismatch(t *testing.T) {
+	var stream agent.AgentService_ConnectClient
+	stopCh := make(chan struct{})
+	cs := &ClientSet{
+		clients: make(map[string]*Client),
+		stopCh:  stopCh,
+	}
+	testClient := &Client{
+		connManager: newConnectionManager(),
+		stopCh:      stopCh,
+		cs:          cs,
+	}
+	testClient.stream, stream = pipe()
+
+	// Start agent
+	go testClient.Serve()
+	defer close(stopCh)
+
+	// Simulate sending a DATA packet to (Agent) Client
+	const connID = 12345
+	pkt := newDataPacket(connID, []byte("hello world"))
+	if err := stream.Send(pkt); err != nil {
+		t.Fatal(err)
+	}
+
+	// Expect to receive CLOSE_RSP packet from (Agent) Client
+	pkt, err := stream.Recv()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if pkt.Type != client.PacketType_CLOSE_RSP {
+		t.Errorf("expect PacketType_CLOSE_RSP; got %v", pkt.Type)
+	}
+	closeRsp := pkt.Payload.(*client.Packet_CloseResponse).CloseResponse
+	if closeRsp.ConnectID != connID {
+		t.Errorf("expect connID=%d; got %v", connID, closeRsp.ConnectID)
+	}
+}
+
 // brokenStream wraps a ConnectClient and returns an error on Send and/or Recv if the respective
 // error is non-nil.
 type brokenStream struct {

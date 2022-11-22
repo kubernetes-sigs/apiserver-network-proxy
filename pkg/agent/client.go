@@ -501,6 +501,18 @@ func (a *Client) Serve() {
 			ctx, ok := a.connManager.Get(data.ConnectID)
 			if ok {
 				ctx.send(data.Data)
+			} else {
+				klog.ErrorS(nil, "received DATA for unrecognized connection", "connectionID", data.ConnectID)
+				a.Send(&client.Packet{
+					Type: client.PacketType_CLOSE_RSP,
+					Payload: &client.Packet_CloseResponse{
+						CloseResponse: &client.CloseResponse{
+							ConnectID: data.ConnectID,
+							Error:     "unrecognized connectID",
+						},
+					},
+				})
+				continue
 			}
 
 		case client.PacketType_CLOSE_REQ:
