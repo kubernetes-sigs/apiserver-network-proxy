@@ -222,7 +222,11 @@ func (t *grpcTunnel) serve(tunnelCtx context.Context) {
 				//   2. grpcTunnel.DialContext() returned early due to a dial timeout or the client canceling the context
 				//
 				// In either scenario, we should return here and close the tunnel as it is no longer needed.
-				klog.V(1).InfoS("DialResp not recognized; dropped", "connectionID", resp.ConnectID, "dialID", resp.Random)
+				kvs := []interface{}{"dialID", resp.Random, "connectID", resp.ConnectID}
+				if resp.Error != "" {
+					kvs = append(kvs, "error", resp.Error)
+				}
+				klog.V(1).InfoS("DialResp not recognized; dropped", kvs...)
 				return
 			}
 
