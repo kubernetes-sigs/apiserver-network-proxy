@@ -384,13 +384,12 @@ func (a *Client) Serve() {
 			return
 		}
 
-		klog.V(5).InfoS("[tracing] recv packet", "type", pkt.Type)
-
 		if pkt == nil {
 			klog.V(3).InfoS("empty packet received")
 			continue
 		}
 
+		klog.V(5).InfoS("[tracing] recv packet", "type", pkt.Type)
 		metrics.Metrics.ObservePacket(commonmetrics.SegmentToAgent, pkt.Type)
 		switch pkt.Type {
 		case client.PacketType_DIAL_REQ:
