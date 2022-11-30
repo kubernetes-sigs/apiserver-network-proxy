@@ -786,7 +786,7 @@ func (a *unresponsiveAgent) Close() {
 
 // waitForConnectedServerCount waits for the agent ClientSet to have the expected number of health
 // server connections (HealthyClientsCount).
-func waitForConnectedServerCount(t *testing.T, expectedServerCount int, clientset *agent.ClientSet) {
+func waitForConnectedServerCount(t testing.TB, expectedServerCount int, clientset *agent.ClientSet) {
 	t.Helper()
 	err := wait.PollImmediate(100*time.Millisecond, wait.ForeverTestTimeout, func() (bool, error) {
 		hc := clientset.HealthyClientsCount()
@@ -804,7 +804,7 @@ func waitForConnectedServerCount(t *testing.T, expectedServerCount int, clientse
 
 // waitForConnectedAgentCount waits for the proxy server to have the expected number of registered
 // agents (backends). This assumes the ProxyServer is using a single ProxyStrategy.
-func waitForConnectedAgentCount(t *testing.T, expectedAgentCount int, proxy *server.ProxyServer) {
+func waitForConnectedAgentCount(t testing.TB, expectedAgentCount int, proxy *server.ProxyServer) {
 	t.Helper()
 	err := wait.PollImmediate(100*time.Millisecond, wait.ForeverTestTimeout, func() (bool, error) {
 		count := proxy.BackendManagers[0].NumBackends()
@@ -820,14 +820,14 @@ func waitForConnectedAgentCount(t *testing.T, expectedAgentCount int, proxy *ser
 	}
 }
 
-func assertNoDialFailures(t *testing.T) {
+func assertNoDialFailures(t testing.TB) {
 	t.Helper()
 	if err := metricstest.ExpectDialFailures(nil); err != nil {
 		t.Errorf("Unexpected %s metric: %v", metrics.DialFailuresMetric, err)
 	}
 }
 
-func expectCleanShutdown(t *testing.T) {
+func expectCleanShutdown(t testing.TB) {
 	metrics.Metrics.Reset()
 	currentGoRoutines := goleak.IgnoreCurrent()
 	t.Cleanup(func() {
