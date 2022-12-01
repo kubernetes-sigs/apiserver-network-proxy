@@ -129,6 +129,9 @@ func TestServeData_HTTP(t *testing.T) {
 		t.Errorf("expect nil closeErr; got %v", closeErr)
 	}
 
+	// give agent time to clean up.
+	time.Sleep(250 * time.Millisecond)
+
 	// Verify internal state is consistent
 	if _, ok := testClient.connManager.Get(connID); ok {
 		t.Error("client.connContext not released")

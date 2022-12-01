@@ -265,8 +265,8 @@ func baseServerProxyTestWithoutBackend(t *testing.T, validate func(*agentmock.Mo
 
 	proxyServer.Proxy(frontendConn)
 
-	// add a sleep to make sure `serveRecvFrontend` ends after `Proxy` finished.
-	time.Sleep(1 * time.Second)
+	// make sure `serveRecvFrontend` ends after `Proxy` finished.
+	time.Sleep(250 * time.Millisecond)
 }
 
 func baseServerProxyTestWithBackend(t *testing.T, validate func(*agentmock.MockAgentService_ConnectServer, *agentmock.MockAgentService_ConnectServer)) {
@@ -284,8 +284,8 @@ func baseServerProxyTestWithBackend(t *testing.T, validate func(*agentmock.MockA
 
 	proxyServer.Proxy(frontendConn)
 
-	// add a sleep to make sure `serveRecvFrontend` ends after `Proxy` finished.
-	time.Sleep(1 * time.Second)
+	// make sure `serveRecvFrontend` ends after `Proxy` finished.
+	time.Sleep(250 * time.Millisecond)
 }
 
 func TestServerProxyNoBackend(t *testing.T) {
