@@ -527,10 +527,10 @@ func TestServerProxyConnectionMismatch(t *testing.T) {
 			agentConn.EXPECT().Send(dialReq).Return(nil),
 			agentConn.EXPECT().Send(data).Return(nil),
 		)
-		agentConn.EXPECT().Send(closeReqPkt(firstConnectID)).Return(nil)
 		agentConn.EXPECT().Send(closeReqPkt(secondConnectID)).Return(nil)
-		frontendConn.EXPECT().Send(closeRspPkt(firstConnectID, "mismatched connection IDs")).Return(nil)
+		agentConn.EXPECT().Send(closeReqPkt(firstConnectID)).Return(nil)
 		frontendConn.EXPECT().Send(closeRspPkt(secondConnectID, "mismatched connection IDs")).Return(nil)
+		frontendConn.EXPECT().Send(closeRspPkt(firstConnectID, "mismatched connection IDs")).Return(nil)
 	})
 }
 
