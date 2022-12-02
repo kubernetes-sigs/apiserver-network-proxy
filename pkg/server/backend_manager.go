@@ -188,7 +188,7 @@ func (s *DefaultBackendStorage) AddBackend(identifier string, idType pkgagent.Id
 		klog.V(4).InfoS("fail to add backend", "backend", identifier, "error", &ErrWrongIDType{idType, s.idTypes})
 		return nil
 	}
-	klog.V(2).InfoS("Register backend for agent", "connection", conn, "agentID", identifier)
+	klog.V(5).InfoS("Register backend for agent", "connection", conn, "agentID", identifier)
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	_, ok := s.backends[identifier]
@@ -218,7 +218,7 @@ func (s *DefaultBackendStorage) RemoveBackend(identifier string, idType pkgagent
 		klog.ErrorS(&ErrWrongIDType{idType, s.idTypes}, "fail to remove backend")
 		return
 	}
-	klog.V(2).InfoS("Remove connection for agent", "connection", conn, "identifier", identifier)
+	klog.V(5).InfoS("Remove connection for agent", "connection", conn, "identifier", identifier)
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	backends, ok := s.backends[identifier]
@@ -299,7 +299,7 @@ func (s *DefaultBackendStorage) GetRandomBackend() (Backend, error) {
 		return nil, &ErrNotFound{}
 	}
 	agentID := s.agentIDs[s.random.Intn(len(s.agentIDs))]
-	klog.V(4).InfoS("Pick agent as backend", "agentID", agentID)
+	klog.V(5).InfoS("Pick agent as backend", "agentID", agentID)
 	// always return the first connection to an agent, because the agent
 	// will close later connections if there are multiple.
 	return s.backends[agentID][0], nil
