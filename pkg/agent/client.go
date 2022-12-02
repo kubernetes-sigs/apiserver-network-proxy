@@ -383,13 +383,12 @@ func (a *Client) Serve() {
 
 		switch pkt.Type {
 		case client.PacketType_DIAL_REQ:
-			klog.V(4).InfoS("received DIAL_REQ", "serverID", a.serverID, "agentID", a.agentID)
+			dialReq := pkt.GetDialRequest()
+			klog.V(3).InfoS("Received DIAL_REQ", "serverID", a.serverID, "agentID", a.agentID, "dialID", dialReq.Random, "dialAddress", dialReq.Address)
 			dialResp := &client.Packet{
 				Type:    client.PacketType_DIAL_RSP,
 				Payload: &client.Packet_DialResponse{DialResponse: &client.DialResponse{}},
 			}
-
-			dialReq := pkt.GetDialRequest()
 			dialResp.GetDialResponse().Random = dialReq.Random
 
 			connID := atomic.AddInt64(&a.nextConnID, 1)
@@ -404,7 +403,7 @@ func (a *Client) Serve() {
 				// block on purpose
 				<-dialDone
 				if connCtx.conn != nil {
-					klog.V(4).InfoS("close connection", "connectionID", connID)
+					klog.V(4).InfoS("close connection", "dialID", dialReq.Random, "connectionID", connID, "dialAddress", dialReq.Address)
 					var closePkt *client.Packet
 					if connID == 0 {
 						closePkt = &client.Packet{
@@ -444,15 +443,16 @@ func (a *Client) Serve() {
 				start := time.Now()
 				conn, err := net.DialTimeout(dialReq.Protocol, dialReq.Address, dialTimeout)
 				if err != nil {
-					klog.ErrorS(err, "error dialing backend", "dialID", dialReq.Random)
+					klog.ErrorS(err, "error dialing backend", "dialID", dialReq.Random, "connectionID", connID, "dialAddress", dialReq.Address)
 					dialResp.GetDialResponse().Error = err.Error()
 					if err := a.Send(dialResp); err != nil {
-						klog.ErrorS(err, "could not send dialResp")
+						klog.ErrorS(err, "could not send dialResp", "dialID", dialReq.Random, "connectionID", connID)
 					}
 					// Cannot invoke clean up as we have no conn yet.
 					return
 				}
 				metrics.Metrics.ObserveDialLatency(time.Since(start))
+				klog.V(3).InfoS("Endpoint connection established", "dialID", dialReq.Random, "connectionID", connID, "dialAddress", dialReq.Address)
 				connCtx.conn = conn
 				a.connManager.Add(connID, connCtx)
 				dialResp.GetDialResponse().ConnectID = connID
@@ -465,7 +465,7 @@ func (a *Client) Serve() {
 					"dialAddress", dialReq.Address,
 				)
 				if err := a.Send(dialResp); err != nil {
-					klog.ErrorS(err, "could not send dialResp")
+					klog.ErrorS(err, "could not send dialResp", "dialID", dialReq.Random)
 					// clean-up is normally called from remoteToProxy which we will never invoke.
 					// So we are invoking it here to force the clean-up to occur.
 					// However, cleanup will block until dialDone is closed.
@@ -473,7 +473,6 @@ func (a *Client) Serve() {
 					go runpprof.Do(context.Background(), labels, func(context.Context) { connCtx.cleanup() })
 					return
 				}
-				klog.V(3).InfoS("Proxying new connection", "connectionID", connID)
 				go runpprof.Do(context.Background(), labels, func(context.Context) { a.remoteToProxy(connID, connCtx) })
 				go runpprof.Do(context.Background(), labels, func(context.Context) { a.proxyToRemote(connID, connCtx) })
 			})
@@ -521,7 +520,7 @@ func (a *Client) remoteToProxy(connID int64, ctx *connContext) {
 		if panicInfo := recover(); panicInfo != nil {
 			klog.V(2).InfoS("Exiting remoteToProxy with recovery", "panicInfo", panicInfo, "connectionID", connID)
 		} else {
-			klog.V(3).InfoS("Exiting remoteToProxy", "connectionID", connID)
+			klog.V(4).InfoS("Exiting remoteToProxy", "connectionID", connID)
 		}
 	}()
 	defer ctx.cleanup()
@@ -564,7 +563,7 @@ func (a *Client) proxyToRemote(connID int64, ctx *connContext) {
 		if panicInfo := recover(); panicInfo != nil {
 			klog.V(2).InfoS("Exiting proxyToRemote with recovery", "panicInfo", panicInfo, "connectionID", connID)
 		} else {
-			klog.V(3).InfoS("Exiting proxyToRemote", "connectionID", connID)
+			klog.V(4).InfoS("Exiting proxyToRemote", "connectionID", connID)
 		}
 	}()
 	// Not safe to call cleanup here, as cleanup() closes the dataCh
