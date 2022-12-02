@@ -399,7 +399,7 @@ func (s *ProxyServer) Proxy(stream client.ProxyService_ProxyServer) error {
 	klog.V(5).InfoS("Proxy request from client", "userAgent", userAgent, "serverID", s.serverID)
 
 	recvCh := make(chan *client.Packet, xfrChannelSize)
-	stopCh := make(chan error)
+	stopCh := make(chan error, 1)
 
 	frontend := GrpcFrontend{
 		stream: stream,
@@ -408,25 +408,23 @@ func (s *ProxyServer) Proxy(stream client.ProxyService_ProxyServer) error {
 		"serverCount", strconv.Itoa(s.serverCount),
 		"userAgent", strings.Join(userAgent, ", "),
 	)
-	go runpprof.Do(context.Background(), labels, func(context.Context) { s.serveRecvFrontend(&frontend, recvCh) })
-
-	defer func() {
-		close(recvCh)
-	}()
-
 	// Start goroutine to receive packets from frontend and push to recvCh
 	go runpprof.Do(context.Background(), labels, func(context.Context) { s.readFrontendToChannel(&frontend, userAgent, recvCh, stopCh) })
+
+	s.serveRecvFrontend(&frontend, recvCh)
 
 	return <-stopCh
 }
 
 func (s *ProxyServer) readFrontendToChannel(frontend *GrpcFrontend, userAgent []string, recvCh chan *client.Packet, stopCh chan error) {
+	defer close(stopCh)
+	defer close(recvCh)
+
 	for {
 		in, err := frontend.Recv()
 		if err == io.EOF {
 			// TODO: Log an error if the frontend connection stops without first closing any open connections.
 			klog.V(2).InfoS("Receive stream from frontend closed", "userAgent", userAgent)
-			close(stopCh)
 			return
 		}
 		if err != nil {
@@ -436,7 +434,6 @@ func (s *ProxyServer) readFrontendToChannel(frontend *GrpcFrontend, userAgent []
 				klog.ErrorS(err, "Stream read from frontend failure", "userAgent", userAgent)
 			}
 			stopCh <- err
-			close(stopCh)
 			return
 		}
 
