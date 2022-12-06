@@ -136,7 +136,7 @@ func newServerMetrics() *ServerMetrics {
 			Namespace: Namespace,
 			Subsystem: Subsystem,
 			Name:      DialFailuresMetric,
-			Help:      "Number of dial failures observed. Multiple failures can occur for a single dial request.",
+			Help:      "Number of dial failures observed.",
 		},
 		[]string{
 			"reason",
@@ -219,8 +219,8 @@ type DialFailureReason string
 
 const (
 	DialFailureErrorResponse        DialFailureReason = "error_response"        // Dial failure reported by the agent back to the server.
-	DialFailureUnrecognizedResponse DialFailureReason = "unrecognized_response" // Dial repsonse received for unrecognozide dial ID.
-	DialFailureSendResponse         DialFailureReason = "send_rsp"              // Successful dial response from agent, but failed to send to frontend.
+	DialFailureUnrecognizedResponse DialFailureReason = "unrecognized_response" // Dial repsonse received for unrecognized dial ID.
+	DialFailureSendResponse         DialFailureReason = "send_rsp"              // Deprecated.
 	DialFailureBackendClose         DialFailureReason = "backend_close"         // Received a DIAL_CLS from the backend before the dial completed.
 	DialFailureFrontendClose        DialFailureReason = "frontend_close"        // Received a DIAL_CLS from the frontend before the dial completed.
 )

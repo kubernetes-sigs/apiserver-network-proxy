@@ -27,7 +27,7 @@ import (
 
 const (
 	dialFailureHeader = `
-# HELP konnectivity_network_proxy_server_dial_failure_count Number of dial failures observed. Multiple failures can occur for a single dial request.
+# HELP konnectivity_network_proxy_server_dial_failure_count Number of dial failures observed.
 # TYPE konnectivity_network_proxy_server_dial_failure_count counter`
 	dialFailureSample = `konnectivity_network_proxy_server_dial_failure_count{reason="%s"} %d`
 )

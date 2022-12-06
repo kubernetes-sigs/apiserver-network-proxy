@@ -784,9 +784,6 @@ func (s *ProxyServer) serveRecvBackend(backend Backend, stream agent.AgentServic
 				if err != nil {
 					klog.ErrorS(err, "DIAL_RSP send to frontend stream failure",
 						"dialID", resp.Random, "agentID", agentID, "connectionID", resp.ConnectID)
-					if !dialErr { // Avoid double-counting.
-						metrics.Metrics.ObserveDialFailure(metrics.DialFailureSendResponse)
-					}
 					// If we never finish setting up the tunnel for ConnectID, then the connection is dead.
 					// Currently, the agent will no resend DIAL_RSP, so connection is dead.
 					// We already attempted to tell the frontend that. We should ensure we tell the backend.
