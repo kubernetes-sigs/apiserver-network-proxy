@@ -42,10 +42,14 @@ type GrpcProxyAgentOptions struct {
 	ProxyServerPort int
 	AlpnProtos      []string
 
-	// Ports for the health and admin server
+	// Bind address for the health connections.
 	HealthServerHost string
+	// Port we listen for health connections on.
 	HealthServerPort int
-	AdminServerPort  int
+	// Bind address for the admin connections.
+	AdminBindAddress string
+	// Port we listen for admin connections on.
+	AdminServerPort int
 	// Enables pprof at host:adminPort/debug/pprof.
 	EnableProfiling bool
 	// If EnableProfiling is true, this enables the lock contention
@@ -100,6 +104,7 @@ func (o *GrpcProxyAgentOptions) Flags() *pflag.FlagSet {
 	flags.StringVar(&o.HealthServerHost, "health-server-host", o.HealthServerHost, "The host address to listen on, without port.")
 	flags.IntVar(&o.HealthServerPort, "health-server-port", o.HealthServerPort, "The port the health server is listening on.")
 	flags.IntVar(&o.AdminServerPort, "admin-server-port", o.AdminServerPort, "The port the admin server is listening on.")
+	flags.StringVar(&o.AdminBindAddress, "admin-bind-address", o.AdminBindAddress, "Bind address for admin connections. If empty, we will bind to all interfaces.")
 	flags.BoolVar(&o.EnableProfiling, "enable-profiling", o.EnableProfiling, "enable pprof at host:admin-port/debug/pprof")
 	flags.BoolVar(&o.EnableContentionProfiling, "enable-contention-profiling", o.EnableContentionProfiling, "enable contention profiling at host:admin-port/debug/pprof/block. \"--enable-profiling\" must also be set.")
 	flags.StringVar(&o.AgentID, "agent-id", o.AgentID, "The unique ID of this agent. Can also be set by the 'PROXY_AGENT_ID' environment variable. Default to a generated uuid if not set.")
@@ -123,6 +128,7 @@ func (o *GrpcProxyAgentOptions) Print() {
 	klog.V(1).Infof("ALPNProtos set to %+s.\n", o.AlpnProtos)
 	klog.V(1).Infof("HealthServerHost set to %s\n", o.HealthServerHost)
 	klog.V(1).Infof("HealthServerPort set to %d.\n", o.HealthServerPort)
+	klog.V(1).Infof("Admin bind address set to %q.\n", o.AdminBindAddress)
 	klog.V(1).Infof("AdminServerPort set to %d.\n", o.AdminServerPort)
 	klog.V(1).Infof("EnableProfiling set to %v.\n", o.EnableProfiling)
 	klog.V(1).Infof("EnableContentionProfiling set to %v.\n", o.EnableContentionProfiling)
@@ -213,6 +219,7 @@ func NewGrpcProxyAgentOptions() *GrpcProxyAgentOptions {
 		ProxyServerPort:           8091,
 		HealthServerHost:          "",
 		HealthServerPort:          8093,
+		AdminBindAddress:          "127.0.0.1",
 		AdminServerPort:           8094,
 		EnableProfiling:           false,
 		EnableContentionProfiling: false,
