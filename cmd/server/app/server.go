@@ -396,7 +396,7 @@ func (p *Proxy) runAdminServer(o *options.ProxyRunOptions, server *server.ProxyS
 		}
 	}
 	adminServer := &http.Server{
-		Addr:           fmt.Sprintf("127.0.0.1:%d", o.AdminPort),
+		Addr:           net.JoinHostPort(o.AdminBindAddress, strconv.Itoa(o.AdminPort)),
 		Handler:        muxHandler,
 		MaxHeaderBytes: 1 << 20,
 	}

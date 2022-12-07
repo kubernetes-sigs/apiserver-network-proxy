@@ -37,6 +37,7 @@ func TestDefaultServerOptions(t *testing.T) {
 	assertDefaultValue(t, "ProxyServerPort", defaultAgentOptions.ProxyServerPort, 8091)
 	assertDefaultValue(t, "HealthServerHost", defaultAgentOptions.HealthServerHost, "")
 	assertDefaultValue(t, "HealthServerPort", defaultAgentOptions.HealthServerPort, 8093)
+	assertDefaultValue(t, "AdminBindAddress", defaultAgentOptions.AdminBindAddress, "127.0.0.1")
 	assertDefaultValue(t, "AdminServerPort", defaultAgentOptions.AdminServerPort, 8094)
 	assertDefaultValue(t, "EnableProfiling", defaultAgentOptions.EnableProfiling, false)
 	assertDefaultValue(t, "EnableContentionProfiling", defaultAgentOptions.EnableContentionProfiling, false)

@@ -158,7 +158,7 @@ func (a *Agent) runAdminServer(o *options.GrpcProxyAgentOptions) error {
 	}
 
 	adminServer := &http.Server{
-		Addr:              fmt.Sprintf("127.0.0.1:%d", o.AdminServerPort),
+		Addr:              net.JoinHostPort(o.AdminBindAddress, strconv.Itoa(o.AdminServerPort)),
 		Handler:           muxHandler,
 		MaxHeaderBytes:    1 << 20,
 		ReadHeaderTimeout: ReadHeaderTimeout,
