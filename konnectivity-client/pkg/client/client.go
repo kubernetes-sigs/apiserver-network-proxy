@@ -29,6 +29,9 @@ import (
 
 	"google.golang.org/grpc"
 	"k8s.io/klog/v2"
+
+	"sigs.k8s.io/apiserver-network-proxy/konnectivity-client/pkg/client/metrics"
+	commonmetrics "sigs.k8s.io/apiserver-network-proxy/konnectivity-client/pkg/common/metrics"
 	"sigs.k8s.io/apiserver-network-proxy/konnectivity-client/proto/client"
 )
 
@@ -139,6 +142,11 @@ type clientConn interface {
 
 var _ clientConn = &grpc.ClientConn{}
 
+var (
+	// Expose metrics for client to register.
+	Metrics = metrics.Metrics
+)
+
 // CreateSingleUseGrpcTunnel creates a Tunnel to dial to a remote server through a
 // gRPC based proxy service.
 // Currently, a single tunnel supports a single connection, and the tunnel is closed when the connection is terminated
@@ -201,14 +209,22 @@ func (t *grpcTunnel) serve(tunnelCtx context.Context) {
 
 	for {
 		pkt, err := t.stream.Recv()
-		if err == io.EOF || t.isClosing() {
+		if err == io.EOF {
 			return
 		}
+		const segment = commonmetrics.SegmentToClient
+		isClosing := t.isClosing()
 		if err != nil || pkt == nil {
-			klog.ErrorS(err, "stream read failure")
+			if !isClosing {
+				klog.ErrorS(err, "stream read failure")
+			}
+			metrics.Metrics.ObserveStreamErrorNoPacket(segment, err)
 			return
 		}
-
+		metrics.Metrics.ObservePacket(segment, pkt.Type)
+		if isClosing {
+			return
+		}
 		klog.V(5).InfoS("[tracing] recv packet", "type", pkt.Type)
 
 		switch pkt.Type {
@@ -354,8 +370,11 @@ func (t *grpcTunnel) DialContext(requestCtx context.Context, protocol, address s
 	}
 	klog.V(5).InfoS("[tracing] send packet", "type", req.Type)
 
+	const segment = commonmetrics.SegmentFromClient
+	metrics.Metrics.ObservePacket(segment, req.Type)
 	err := t.stream.Send(req)
 	if err != nil {
+		metrics.Metrics.ObserveStreamError(segment, err, req.Type)
 		return nil, err
 	}
 
@@ -406,7 +425,10 @@ func (t *grpcTunnel) closeDial(dialID int64) {
 			},
 		},
 	}
+	const segment = commonmetrics.SegmentFromClient
+	metrics.Metrics.ObservePacket(segment, req.Type)
 	if err := t.stream.Send(req); err != nil {
+		metrics.Metrics.ObserveStreamError(segment, err, req.Type)
 		klog.V(5).InfoS("Failed to send DIAL_CLS", "err", err, "dialID", dialID)
 	}
 	t.closeTunnel()

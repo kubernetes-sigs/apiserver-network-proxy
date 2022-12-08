@@ -26,6 +26,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/prometheus/client_golang/prometheus"
 	"go.uber.org/goleak"
 	"google.golang.org/grpc"
 	"k8s.io/klog/v2"
@@ -446,6 +447,14 @@ func TestDial_Closed(t *testing.T) {
 			t.Errorf("Timed out waiting for tunnel to close")
 		}
 	}()
+}
+
+func TestRegisterMetrics(t *testing.T) {
+	Metrics.RegisterMetrics(prometheus.DefaultRegisterer, "namespace", "subsystem")
+}
+
+func TestLegacyRegisterMetrics(t *testing.T) {
+	Metrics.LegacyRegisterMetrics(prometheus.MustRegister, "namespace", "subsystem")
 }
 
 // TODO: Move to common testing library

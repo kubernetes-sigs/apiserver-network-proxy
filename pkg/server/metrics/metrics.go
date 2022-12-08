@@ -20,6 +20,9 @@ import (
 	"time"
 
 	"github.com/prometheus/client_golang/prometheus"
+
+	commonmetrics "sigs.k8s.io/apiserver-network-proxy/konnectivity-client/pkg/common/metrics"
+	"sigs.k8s.io/apiserver-network-proxy/konnectivity-client/proto/client"
 )
 
 const (
@@ -51,19 +54,21 @@ var (
 
 // ServerMetrics includes all the metrics of the proxy server.
 type ServerMetrics struct {
-	latencies         *prometheus.HistogramVec
+	endpointLatencies *prometheus.HistogramVec
 	frontendLatencies *prometheus.HistogramVec
-	connections       *prometheus.GaugeVec
+	grpcConnections   *prometheus.GaugeVec
 	httpConnections   prometheus.Gauge
 	backend           *prometheus.GaugeVec
 	pendingDials      *prometheus.GaugeVec
 	fullRecvChannels  *prometheus.GaugeVec
 	dialFailures      *prometheus.CounterVec
+	streamPackets     *prometheus.CounterVec
+	streamErrors      *prometheus.CounterVec
 }
 
 // newServerMetrics create a new ServerMetrics, configured with default metric names.
 func newServerMetrics() *ServerMetrics {
-	latencies := prometheus.NewHistogramVec(
+	endpointLatencies := prometheus.NewHistogramVec(
 		prometheus.HistogramOpts{
 			Namespace: Namespace,
 			Subsystem: Subsystem,
@@ -83,7 +88,7 @@ func newServerMetrics() *ServerMetrics {
 		},
 		[]string{},
 	)
-	connections := prometheus.NewGaugeVec(
+	grpcConnections := prometheus.NewGaugeVec(
 		prometheus.GaugeOpts{
 			Namespace: Namespace,
 			Subsystem: Subsystem,
@@ -142,77 +147,84 @@ func newServerMetrics() *ServerMetrics {
 			"reason",
 		},
 	)
-
-	prometheus.MustRegister(latencies)
+	streamPackets := commonmetrics.MakeStreamPacketsTotalMetric(Namespace, Subsystem)
+	streamErrors := commonmetrics.MakeStreamErrorsTotalMetric(Namespace, Subsystem)
+	prometheus.MustRegister(endpointLatencies)
 	prometheus.MustRegister(frontendLatencies)
-	prometheus.MustRegister(connections)
+	prometheus.MustRegister(grpcConnections)
 	prometheus.MustRegister(httpConnections)
 	prometheus.MustRegister(backend)
 	prometheus.MustRegister(pendingDials)
 	prometheus.MustRegister(fullRecvChannels)
 	prometheus.MustRegister(dialFailures)
+	prometheus.MustRegister(streamPackets)
+	prometheus.MustRegister(streamErrors)
 	return &ServerMetrics{
-		latencies:         latencies,
+		endpointLatencies: endpointLatencies,
 		frontendLatencies: frontendLatencies,
-		connections:       connections,
+		grpcConnections:   grpcConnections,
 		httpConnections:   httpConnections,
 		backend:           backend,
 		pendingDials:      pendingDials,
 		fullRecvChannels:  fullRecvChannels,
 		dialFailures:      dialFailures,
+		streamPackets:     streamPackets,
+		streamErrors:      streamErrors,
 	}
 }
 
 // Reset resets the metrics.
-func (a *ServerMetrics) Reset() {
-	a.latencies.Reset()
-	a.frontendLatencies.Reset()
-	a.connections.Reset()
-	a.backend.Reset()
-	a.pendingDials.Reset()
-	a.fullRecvChannels.Reset()
-	a.dialFailures.Reset()
+func (s *ServerMetrics) Reset() {
+	s.endpointLatencies.Reset()
+	s.frontendLatencies.Reset()
+	s.grpcConnections.Reset()
+	s.backend.Reset()
+	s.pendingDials.Reset()
+	s.fullRecvChannels.Reset()
+	s.dialFailures.Reset()
+	s.streamPackets.Reset()
+	s.streamErrors.Reset()
 }
 
 // ObserveDialLatency records the latency of dial to the remote endpoint.
-func (a *ServerMetrics) ObserveDialLatency(elapsed time.Duration) {
-	a.latencies.WithLabelValues().Observe(elapsed.Seconds())
+func (s *ServerMetrics) ObserveDialLatency(elapsed time.Duration) {
+	s.endpointLatencies.WithLabelValues().Observe(elapsed.Seconds())
 }
 
-// ObserveFrontendWriteLatency records the latency of dial to the remote endpoint.
-func (a *ServerMetrics) ObserveFrontendWriteLatency(elapsed time.Duration) {
-	a.frontendLatencies.WithLabelValues().Observe(elapsed.Seconds())
+// ObserveFrontendWriteLatency records the latency of blocking on stream send to the client.
+func (s *ServerMetrics) ObserveFrontendWriteLatency(elapsed time.Duration) {
+	s.frontendLatencies.WithLabelValues().Observe(elapsed.Seconds())
 }
 
 // ConnectionInc increments a new grpc client connection.
-func (a *ServerMetrics) ConnectionInc(serviceMethod string) {
-	a.connections.With(prometheus.Labels{"service_method": serviceMethod}).Inc()
+func (s *ServerMetrics) ConnectionInc(serviceMethod string) {
+	s.grpcConnections.With(prometheus.Labels{"service_method": serviceMethod}).Inc()
 }
 
 // ConnectionDec decrements a finished grpc client connection.
-func (a *ServerMetrics) ConnectionDec(serviceMethod string) {
-	a.connections.With(prometheus.Labels{"service_method": serviceMethod}).Dec()
+func (s *ServerMetrics) ConnectionDec(serviceMethod string) {
+	s.grpcConnections.With(prometheus.Labels{"service_method": serviceMethod}).Dec()
 }
 
 // HTTPConnectionDec increments a new HTTP CONNECTION connection.
-func (a *ServerMetrics) HTTPConnectionInc() { a.httpConnections.Inc() }
+func (s *ServerMetrics) HTTPConnectionInc() { s.httpConnections.Inc() }
 
 // HTTPConnectionDec decrements a finished HTTP CONNECTION connection.
-func (a *ServerMetrics) HTTPConnectionDec() { a.httpConnections.Dec() }
+func (s *ServerMetrics) HTTPConnectionDec() { s.httpConnections.Dec() }
 
 // SetBackendCount sets the number of backend connection.
-func (a *ServerMetrics) SetBackendCount(count int) {
-	a.backend.WithLabelValues().Set(float64(count))
+func (s *ServerMetrics) SetBackendCount(count int) {
+	s.backend.WithLabelValues().Set(float64(count))
 }
 
 // SetPendingDialCount sets the number of pending dials.
-func (a *ServerMetrics) SetPendingDialCount(count int) {
-	a.pendingDials.WithLabelValues().Set(float64(count))
+func (s *ServerMetrics) SetPendingDialCount(count int) {
+	s.pendingDials.WithLabelValues().Set(float64(count))
 }
 
 // FullRecvChannel retrieves the metric for counting full receive channels.
-func (a *ServerMetrics) FullRecvChannel(serviceMethod string) prometheus.Gauge {
-	return a.fullRecvChannels.With(prometheus.Labels{"service_method": serviceMethod})
+func (s *ServerMetrics) FullRecvChannel(serviceMethod string) prometheus.Gauge {
+	return s.fullRecvChannels.With(prometheus.Labels{"service_method": serviceMethod})
 }
 
 type DialFailureReason string
@@ -225,6 +237,18 @@ const (
 	DialFailureFrontendClose        DialFailureReason = "frontend_close"        // Received a DIAL_CLS from the frontend before the dial completed.
 )
 
-func (a *ServerMetrics) ObserveDialFailure(reason DialFailureReason) {
-	a.dialFailures.With(prometheus.Labels{"reason": string(reason)}).Inc()
+func (s *ServerMetrics) ObserveDialFailure(reason DialFailureReason) {
+	s.dialFailures.With(prometheus.Labels{"reason": string(reason)}).Inc()
+}
+
+func (s *ServerMetrics) ObservePacket(segment commonmetrics.Segment, packetType client.PacketType) {
+	commonmetrics.ObservePacket(s.streamPackets, segment, packetType)
+}
+
+func (s *ServerMetrics) ObserveStreamErrorNoPacket(segment commonmetrics.Segment, err error) {
+	commonmetrics.ObserveStreamErrorNoPacket(s.streamErrors, segment, err)
+}
+
+func (s *ServerMetrics) ObserveStreamError(segment commonmetrics.Segment, err error, packetType client.PacketType) {
+	commonmetrics.ObserveStreamError(s.streamErrors, segment, err, packetType)
 }
