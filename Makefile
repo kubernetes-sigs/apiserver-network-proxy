@@ -69,16 +69,16 @@ bin:
 .PHONY: build
 build: bin/proxy-agent bin/proxy-server bin/proxy-test-client bin/http-test-server
 
-bin/proxy-agent: proto/agent/agent.pb.go konnectivity-client/proto/client/client.pb.go bin cmd/agent/main.go
+bin/proxy-agent: proto/agent/agent_grpc.pb.go konnectivity-client/proto/client/client_grpc.pb.go bin cmd/agent/main.go
 	GO111MODULE=on go build -o bin/proxy-agent cmd/agent/main.go
 
-bin/proxy-test-client: konnectivity-client/proto/client/client.pb.go bin cmd/client/main.go
+bin/proxy-test-client: konnectivity-client/proto/client/client_grpc.pb.go bin cmd/client/main.go
 	GO111MODULE=on go build -o bin/proxy-test-client cmd/client/main.go
 
 bin/http-test-server: bin cmd/test-server/main.go
 	GO111MODULE=on go build -o bin/http-test-server cmd/test-server/main.go
 
-bin/proxy-server: proto/agent/agent.pb.go konnectivity-client/proto/client/client.pb.go bin cmd/server/main.go pkg/server/server.go pkg/server/metrics/metrics.go
+bin/proxy-server: proto/agent/agent_grpc.pb.go konnectivity-client/proto/client/client_grpc.pb.go bin cmd/server/main.go pkg/server/server.go pkg/server/metrics/metrics.go
 	GO111MODULE=on go build -o bin/proxy-server cmd/server/main.go
 
 ## --------------------------------------
@@ -103,19 +103,19 @@ mod-download:
 ## --------------------------------------
 
 .PHONY: gen
-gen: mod-download proto/agent/agent.pb.go konnectivity-client/proto/client/client.pb.go mock_gen
+gen: mod-download proto/agent/agent_grpc.pb.go proto/agent/agent.pb.go konnectivity-client/proto/client/client_grpc.pb.go konnectivity-client/proto/client/client.pb.go mock_gen
 
-konnectivity-client/proto/client/client.pb.go: konnectivity-client/proto/client/client.proto
+konnectivity-client/proto/client/client_grpc.pb.go konnectivity-client/proto/client/client.pb.go: konnectivity-client/proto/client/client.proto
 	mkdir -p ${GOPATH}/src
-	protoc -I . konnectivity-client/proto/client/client.proto --go_out=plugins=grpc:${GOPATH}/src
-	cat hack/go-license-header.txt ${GOPATH}/src/sigs.k8s.io/apiserver-network-proxy/konnectivity-client/proto/client/client.pb.go > konnectivity-client/proto/client/client.licensed.go
-	mv konnectivity-client/proto/client/client.licensed.go konnectivity-client/proto/client/client.pb.go
+	protoc -I . konnectivity-client/proto/client/client.proto --go_out=. --go_opt=paths=source_relative --go-grpc_out=require_unimplemented_servers=false:. --go-grpc_opt=paths=source_relative
+	cat hack/go-license-header.txt ${GOPATH}/src/apiserver-network-proxy/konnectivity-client/proto/client/client_grpc.pb.go > konnectivity-client/proto/client/client_grpc.licensed.go
+	mv konnectivity-client/proto/client/client_grpc.licensed.go konnectivity-client/proto/client/client_grpc.pb.go
 
-proto/agent/agent.pb.go: proto/agent/agent.proto
+proto/agent/agent_grpc.pb.go proto/agent/agent.pb.go: proto/agent/agent.proto
 	mkdir -p ${GOPATH}/src
-	protoc -I . proto/agent/agent.proto --go_out=plugins=grpc:${GOPATH}/src
-	cat hack/go-license-header.txt ${GOPATH}/src/sigs.k8s.io/apiserver-network-proxy/proto/agent/agent.pb.go > proto/agent/agent.licensed.go
-	mv proto/agent/agent.licensed.go proto/agent/agent.pb.go
+	protoc -I . proto/agent/agent.proto --go_out=. --go_opt=paths=source_relative --go-grpc_out=require_unimplemented_servers=false:. --go-grpc_opt=paths=source_relative
+	cat hack/go-license-header.txt ${GOPATH}/src/apiserver-network-proxy/proto/agent/agent_grpc.pb.go > proto/agent/agent_grpc.licensed.go
+	mv proto/agent/agent_grpc.licensed.go proto/agent/agent_grpc.pb.go
 
 ## --------------------------------------
 ## Certs
@@ -273,4 +273,4 @@ release-alias-tag: # Adds the tag to the last build tag. BASE_REF comes from the
 .PHONY: clean
 clean:
 	go clean -testcache
-	rm -rf proto/agent/agent.pb.go konnectivity-client/proto/client/client.pb.go easy-rsa.tar.gz easy-rsa cfssl cfssljson certs bin proto/agent/mocks
+	rm -rf proto/agent/agent.pb.go proto/agent/agent_grpc.pb.go konnectivity-client/proto/client/client.pb.go konnectivity-client/proto/client/client_grpc.pb.go easy-rsa.tar.gz easy-rsa cfssl cfssljson certs bin proto/agent/mocks

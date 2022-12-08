@@ -31,11 +31,15 @@ The [```mockgen```](https://github.com/golang/mock) tool must be installed on yo
 
 ### Protoc
 
-Proto definitions are compiled with `protoc`. Please ensure you have protoc installed ([Instructions](https://grpc.io/docs/protoc-installation/)) and the `proto-gen-go` library at the appropriate version.
+Proto definitions are compiled with `protoc`. Please ensure you have protoc installed ([Instructions](https://grpc.io/docs/languages/go/quickstart/)) and the `protoc-gen-go` and `protoc-gen-go-grpc` libraries at the appropriate version.
 
-Currently we are using proto-gen-go@v1.3.2
+Currently, we are using protoc-gen-go@v1.27.1
 
-`go get github.com/golang/protobuf/protoc-gen-go@v1.3.2`
+`go get google.golang.org/protobuf/cmd/protoc-gen-go@v1.27.1`
+
+Currently, we are using protoc-gen-go-grpc@v1.2
+
+`go get google.golang.org/grpc/cmd/protoc-gen-go-grpc@v1.2`
 
 ### Local builds
 
