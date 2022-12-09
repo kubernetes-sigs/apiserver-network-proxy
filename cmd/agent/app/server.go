@@ -152,6 +152,9 @@ func (a *Agent) runAdminServer(o *options.GrpcProxyAgentOptions) error {
 	if o.EnableProfiling {
 		muxHandler.HandleFunc("/debug/pprof", util.RedirectTo("/debug/pprof/"))
 		muxHandler.HandleFunc("/debug/pprof/", pprof.Index)
+		muxHandler.HandleFunc("/debug/pprof/profile", pprof.Profile)
+		muxHandler.HandleFunc("/debug/pprof/symbol", pprof.Symbol)
+		muxHandler.HandleFunc("/debug/pprof/trace", pprof.Trace)
 		if o.EnableContentionProfiling {
 			runtime.SetBlockProfileRate(1)
 		}
