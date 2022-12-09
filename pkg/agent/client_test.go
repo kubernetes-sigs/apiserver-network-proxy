@@ -1,3 +1,19 @@
+/*
+Copyright 2022 The Kubernetes Authors.
+
+Licensed under the Apache License, Version 2.0 (the "License");
+you may not use this file except in compliance with the License.
+You may obtain a copy of the License at
+
+    http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions and
+limitations under the License.
+*/
+
 package agent
 
 import (
@@ -9,7 +25,9 @@ import (
 	"testing"
 	"time"
 
+	"go.uber.org/goleak"
 	"google.golang.org/grpc"
+	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/klog/v2"
 	"sigs.k8s.io/apiserver-network-proxy/konnectivity-client/proto/client"
 	"sigs.k8s.io/apiserver-network-proxy/proto/agent"
@@ -19,9 +37,14 @@ func TestServeData_HTTP(t *testing.T) {
 	var err error
 	var stream agent.AgentService_ConnectClient
 	stopCh := make(chan struct{})
+	cs := &ClientSet{
+		clients: make(map[string]*Client),
+		stopCh:  stopCh,
+	}
 	testClient := &Client{
 		connManager: newConnectionManager(),
 		stopCh:      stopCh,
+		cs:          cs,
 	}
 	testClient.stream, stream = pipe()
 
@@ -115,9 +138,14 @@ func TestServeData_HTTP(t *testing.T) {
 func TestClose_Client(t *testing.T) {
 	var stream agent.AgentService_ConnectClient
 	stopCh := make(chan struct{})
+	cs := &ClientSet{
+		clients: make(map[string]*Client),
+		stopCh:  stopCh,
+	}
 	testClient := &Client{
 		connManager: newConnectionManager(),
 		stopCh:      stopCh,
+		cs:          cs,
 	}
 	testClient.stream, stream = pipe()
 
@@ -171,9 +199,9 @@ func TestClose_Client(t *testing.T) {
 	}
 
 	// Verify internal state is consistent
-	if _, ok := testClient.connManager.Get(connID); ok {
-		t.Error("client.connContext not released")
-	}
+	// connID will be removed when remoteToProxy on another goroutine exits.
+	// Wait a short period to see if the connection gets cleaned up.
+	waitForConnectionDeletion(t, testClient, connID)
 
 	// Verify remote conn is closed
 	if err := stream.Send(closePacket); err != nil {
@@ -193,6 +221,89 @@ func TestClose_Client(t *testing.T) {
 		t.Errorf("expect Unknown connectID; got %v", closeErr)
 	}
 
+}
+
+// brokenStream wraps a ConnectClient and returns an error on Send and/or Recv if the respective
+// error is non-nil.
+type brokenStream struct {
+	agent.AgentService_ConnectClient
+
+	sendErr, recvErr error
+}
+
+func (bs *brokenStream) Send(packet *client.Packet) error {
+	if bs.sendErr != nil {
+		return bs.sendErr
+	}
+	return bs.AgentService_ConnectClient.Send(packet)
+}
+
+func (bs *brokenStream) Recv() (*client.Packet, error) {
+	if bs.recvErr != nil {
+		return nil, bs.recvErr
+	}
+	return bs.AgentService_ConnectClient.Recv()
+}
+
+func TestFailedSend_DialResp_GRPC(t *testing.T) {
+	defer goleakVerifyNone(t, goleak.IgnoreCurrent())
+
+	stopCh := make(chan struct{})
+	cs := &ClientSet{
+		clients: make(map[string]*Client),
+		stopCh:  stopCh,
+	}
+	testClient := &Client{
+		connManager: newConnectionManager(),
+		stopCh:      stopCh,
+		cs:          cs,
+	}
+	defer func() {
+		close(stopCh)
+		// Give a.probe() time to clean up
+		// This is terrible and racy
+		time.Sleep(time.Second)
+	}()
+
+	clientStream, stream := pipe()
+	testClient.stream = &brokenStream{
+		AgentService_ConnectClient: clientStream,
+		sendErr:                    errors.New("expected send error"),
+	}
+
+	// Start agent
+	go testClient.Serve()
+
+	// Start test http server as remote service
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		t.Log("Request Received", "url", r.URL, "userAgent", r.UserAgent())
+		fmt.Fprint(w, "hello, world")
+	}))
+	defer ts.Close()
+
+	func() {
+		// goleak.IgnoreCurrent() needs to include all the goroutines which were started by testClient.Serve() above.
+		// That includes things like pkg/agent/client.go:614 +0x88. Sleep does not guarantee they will have started.
+		time.Sleep(time.Second)
+		defer goleakVerifyNone(t, goleak.IgnoreCurrent())
+
+		// Stimulate sending KAS DIAL_REQ to (Agent) Client
+		dialPacket := newDialPacket("tcp", strings.TrimPrefix(ts.URL, "http://"), 111)
+		err := stream.Send(dialPacket)
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		// Expect receiving DIAL_RSP packet from (Agent) Client
+		_, err = stream.Recv()
+		if err == nil {
+			t.Error("expected timeout error, got none")
+		}
+
+		if conns := len(testClient.connManager.List()); conns > 0 {
+			t.Errorf("Leaked %d connections", conns)
+		}
+	}()
 }
 
 // fakeStream implements AgentService_ConnectClient
@@ -259,5 +370,31 @@ func newClosePacket(connID int64) *client.Packet {
 				ConnectID: connID,
 			},
 		},
+	}
+}
+
+func waitForConnectionDeletion(t *testing.T, testClient *Client, connID int64) {
+	t.Helper()
+	err := wait.PollImmediate(100*time.Millisecond, 3*time.Second, func() (bool, error) {
+		_, ok := testClient.connManager.Get(connID)
+		return !ok, nil
+	})
+	if err != nil {
+		t.Error("client.connContext not released")
+	}
+}
+
+func goleakVerifyNone(t *testing.T, options ...goleak.Option) {
+	t.Helper()
+	var err error
+	waitErr := wait.PollImmediate(100*time.Millisecond, 3*time.Second, func() (bool, error) {
+		err = goleak.Find(options...)
+		if err == nil {
+			return true, nil
+		}
+		return false, nil
+	})
+	if waitErr != nil {
+		t.Error(err)
 	}
 }

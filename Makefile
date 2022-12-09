@@ -13,7 +13,10 @@
 # limitations under the License.
 
 ARCH ?= amd64
-ALL_ARCH = amd64 arm arm64 ppc64le s390x
+ARCH_LIST ?= amd64 arm arm64 ppc64le s390x
+RELEASE_ARCH_LIST = amd64 arm64
+# The output type could either be docker (local), or registry.
+OUTPUT_TYPE ?= docker
 
 ifeq ($(GOPATH),)
 export GOPATH := $(shell go env GOPATH)
@@ -21,8 +24,8 @@ endif
 GOOS ?= $(shell go env GOOS)
 GOARCH ?= $(shell go env GOARCH)
 INSTALL_LOCATION:=$(shell go env GOPATH)/bin
-GOLANGCI_LINT_VERSION ?= 1.35.2
-GOSEC_VERSION ?= 2.5.0
+GOLANGCI_LINT_VERSION ?= 1.45.2
+GOSEC_VERSION ?= 2.13.1
 
 REGISTRY ?= gcr.io/$(shell gcloud config get-value project)
 STAGING_REGISTRY := gcr.io/k8s-staging-kas-network-proxy
@@ -53,7 +56,8 @@ mock_gen:
 
 .PHONY: test
 test:
-	GO111MODULE=on go test -race sigs.k8s.io/apiserver-network-proxy/...
+	go test -race ./...
+	cd konnectivity-client && go test -race ./...
 
 ## --------------------------------------
 ## Binaries
@@ -118,11 +122,11 @@ proto/agent/agent.pb.go: proto/agent/agent.proto
 ## --------------------------------------
 
 easy-rsa.tar.gz:
-	curl -L -o easy-rsa.tar.gz --connect-timeout 20 --retry 6 --retry-delay 2 https://github.com/OpenVPN/easy-rsa/archive/refs/tags/v3.0.8.tar.gz
+	curl -L -o easy-rsa.tar.gz --connect-timeout 20 --retry 6 --retry-delay 2 https://storage.googleapis.com/kubernetes-release/easy-rsa/easy-rsa.tar.gz
 
 easy-rsa: easy-rsa.tar.gz
 	tar xvf easy-rsa.tar.gz
-	mv easy-rsa-3.0.8 easy-rsa
+	mv easy-rsa-master easy-rsa
 
 cfssl:
 	@if ! command -v cfssl &> /dev/null; then \
@@ -171,17 +175,21 @@ certs: easy-rsa cfssl cfssljson
 ## Docker
 ## --------------------------------------
 
+.PHONY: buildx-setup
+buildx-setup:
+	${DOCKER_CMD} buildx inspect img-builder > /dev/null || docker buildx create --name img-builder --use
+
 .PHONY: docker-build
-docker-build: docker-build/proxy-agent docker-build/proxy-server docker-build/proxy-test-client docker-build/http-test-server
+docker-build: docker-build/proxy-agent docker-build/proxy-server
 
 .PHONY: docker-push
-docker-push: docker-push/proxy-agent docker-push/proxy-server docker-push/proxy-test-client docker-push/http-test-server
+docker-push: docker-push/proxy-agent docker-push/proxy-server
 
 .PHONY: docker-build/proxy-agent
-docker-build/proxy-agent: cmd/agent/main.go proto/agent/agent.pb.go
+docker-build/proxy-agent: cmd/agent/main.go proto/agent/agent.pb.go buildx-setup
 	@[ "${TAG}" ] || ( echo "TAG is not set"; exit 1 )
 	echo "Building proxy-agent for ${ARCH}"
-	${DOCKER_CMD} build . --build-arg ARCH=$(ARCH) -f artifacts/images/agent-build.Dockerfile -t ${AGENT_FULL_IMAGE}-$(ARCH):${TAG}
+	${DOCKER_CMD} buildx build . --pull --output=type=$(OUTPUT_TYPE) --platform linux/$(ARCH) --build-arg ARCH=$(ARCH) -f artifacts/images/agent-build.Dockerfile -t ${AGENT_FULL_IMAGE}-$(ARCH):${TAG}
 
 .PHONY: docker-push/proxy-agent
 docker-push/proxy-agent: docker-build/proxy-agent
@@ -189,51 +197,33 @@ docker-push/proxy-agent: docker-build/proxy-agent
 	${DOCKER_CMD} push ${AGENT_FULL_IMAGE}-$(ARCH):${TAG}
 
 .PHONY: docker-build/proxy-server
-docker-build/proxy-server: cmd/server/main.go proto/agent/agent.pb.go
+docker-build/proxy-server: cmd/server/main.go proto/agent/agent.pb.go buildx-setup
 	@[ "${TAG}" ] || ( echo "TAG is not set"; exit 1 )
 	echo "Building proxy-server for ${ARCH}"
-	${DOCKER_CMD} build . --build-arg ARCH=$(ARCH) -f artifacts/images/server-build.Dockerfile -t ${SERVER_FULL_IMAGE}-$(ARCH):${TAG}
+	${DOCKER_CMD} buildx build . --pull --output=type=$(OUTPUT_TYPE) --platform linux/$(ARCH) --build-arg ARCH=$(ARCH) -f artifacts/images/server-build.Dockerfile -t ${SERVER_FULL_IMAGE}-$(ARCH):${TAG}
 
 .PHONY: docker-push/proxy-server
 docker-push/proxy-server: docker-build/proxy-server
 	@[ "${DOCKER_CMD}" ] || ( echo "DOCKER_CMD is not set"; exit 1 )
 	${DOCKER_CMD} push ${SERVER_FULL_IMAGE}-$(ARCH):${TAG}
 
-.PHONY: docker-build/proxy-test-client
-docker-build/proxy-test-client: cmd/client/main.go proto/agent/agent.pb.go
-	@[ "${TAG}" ] || ( echo "TAG is not set"; exit 1 )
-	echo "Building proxy-test-client for ${ARCH}"
-	${DOCKER_CMD} build . --build-arg ARCH=$(ARCH) -f artifacts/images/client-build.Dockerfile -t ${TEST_CLIENT_FULL_IMAGE}-$(ARCH):${TAG}
-
-.PHONY: docker-push/proxy-test-client
-docker-push/proxy-test-client: docker-build/proxy-test-client
-	@[ "${DOCKER_CMD}" ] || ( echo "DOCKER_CMD is not set"; exit 1 )
-	${DOCKER_CMD} push ${TEST_CLIENT_FULL_IMAGE}-$(ARCH):${TAG}
-
-.PHONY: docker-build/http-test-server
-docker-build/http-test-server: cmd/test-server/main.go
-	@[ "${TAG}" ] || ( echo "TAG is not set"; exit 1 )
-	echo "Building http-test-server for ${ARCH}"
-	${DOCKER_CMD} build . --build-arg ARCH=$(ARCH) -f artifacts/images/test-server-build.Dockerfile -t ${TEST_SERVER_FULL_IMAGE}-$(ARCH):${TAG}
-
-.PHONY: docker-push/http-test-server
-docker-push/http-test-server: docker-build/http-test-server
-	@[ "${DOCKER_CMD}" ] || ( echo "DOCKER_CMD is not set"; exit 1 )
-	${DOCKER_CMD} push ${TEST_SERVER_FULL_IMAGE}-$(ARCH):${TAG}
-
 ## --------------------------------------
 ## Docker — All ARCH
 ## --------------------------------------
 
+# As `docker buildx` is time and resource consuming, if not necessary, building specific arch images,
+# like `make docker-build-arch-aamd64`, is recommended.
 .PHONY: docker-build-all
-docker-build-all: $(addprefix docker-build/proxy-agent-,$(ALL_ARCH)) $(addprefix docker-build/proxy-server-,$(ALL_ARCH)) $(addprefix docker-build/proxy-test-client-,$(ALL_ARCH)) $(addprefix docker-build/http-test-server-,$(ALL_ARCH))
+docker-build-all: $(addprefix docker-build-arch-,$(ARCH_LIST))
 
 .PHONY: docker-push-all
-docker-push-all: $(addprefix docker-push/proxy-agent-,$(ALL_ARCH)) $(addprefix docker-push/proxy-server-,$(ALL_ARCH)) $(addprefix docker-push/proxy-test-client-,$(ALL_ARCH)) $(addprefix docker-push/http-test-server-,$(ALL_ARCH))
+docker-push-all: $(addprefix docker-push/proxy-agent-,$(ARCH_LIST)) $(addprefix docker-push/proxy-server-,$(ARCH_LIST))
 	$(MAKE) docker-push-manifest/proxy-agent
 	$(MAKE) docker-push-manifest/proxy-server
-	$(MAKE) docker-push-manifest/proxy-test-client
-	$(MAKE) docker-push-manifest/http-test-server
+
+docker-build-arch-%:
+	$(MAKE) docker-build/proxy-agent-$*
+	$(MAKE) docker-build/proxy-server-$*
 
 docker-build/proxy-agent-%:
 	$(MAKE) ARCH=$* docker-build/proxy-agent
@@ -247,46 +237,19 @@ docker-build/proxy-server-%:
 docker-push/proxy-server-%:
 	$(MAKE) ARCH=$* docker-push/proxy-server
 
-docker-build/proxy-test-client-%:
-	$(MAKE) ARCH=$* docker-build/proxy-test-client
-
-docker-push/proxy-test-client-%:
-	$(MAKE) ARCH=$* docker-push/proxy-test-client
-
-docker-build/http-test-server-%:
-	$(MAKE) ARCH=$* docker-build/http-test-server
-
-docker-push/http-test-server-%:
-	$(MAKE) ARCH=$* docker-push/http-test-server
-
-
 .PHONY: docker-push-manifest/proxy-agent
 docker-push-manifest/proxy-agent: ## Push the fat manifest docker image.
 	## Minimum docker version 18.06.0 is required for creating and pushing manifest images.
-	${DOCKER_CMD} manifest create --amend $(AGENT_FULL_IMAGE):$(TAG) $(shell echo $(ALL_ARCH) | sed -e "s~[^ ]*~$(AGENT_FULL_IMAGE)\-&:$(TAG)~g")
-	@for arch in $(ALL_ARCH); do ${DOCKER_CMD} manifest annotate --arch $${arch} ${AGENT_FULL_IMAGE}:${TAG} ${AGENT_FULL_IMAGE}-$${arch}:${TAG}; done
+	${DOCKER_CMD} manifest create --amend $(AGENT_FULL_IMAGE):$(TAG) $(shell echo $(ARCH_LIST) | sed -e "s~[^ ]*~$(AGENT_FULL_IMAGE)\-&:$(TAG)~g")
+	@for arch in $(ARCH_LIST); do ${DOCKER_CMD} manifest annotate --arch $${arch} ${AGENT_FULL_IMAGE}:${TAG} ${AGENT_FULL_IMAGE}-$${arch}:${TAG}; done
 	${DOCKER_CMD} manifest push --purge $(AGENT_FULL_IMAGE):$(TAG)
 
 .PHONY: docker-push-manifest/proxy-server
 docker-push-manifest/proxy-server: ## Push the fat manifest docker image.
 	## Minimum docker version 18.06.0 is required for creating and pushing manifest images.
-	${DOCKER_CMD} manifest create --amend $(SERVER_FULL_IMAGE):$(TAG) $(shell echo $(ALL_ARCH) | sed -e "s~[^ ]*~$(SERVER_FULL_IMAGE)\-&:$(TAG)~g")
-	@for arch in $(ALL_ARCH); do ${DOCKER_CMD} manifest annotate --arch $${arch} ${SERVER_FULL_IMAGE}:${TAG} ${SERVER_FULL_IMAGE}-$${arch}:${TAG}; done
+	${DOCKER_CMD} manifest create --amend $(SERVER_FULL_IMAGE):$(TAG) $(shell echo $(ARCH_LIST) | sed -e "s~[^ ]*~$(SERVER_FULL_IMAGE)\-&:$(TAG)~g")
+	@for arch in $(ARCH_LIST); do ${DOCKER_CMD} manifest annotate --arch $${arch} ${SERVER_FULL_IMAGE}:${TAG} ${SERVER_FULL_IMAGE}-$${arch}:${TAG}; done
 	${DOCKER_CMD} manifest push --purge $(SERVER_FULL_IMAGE):$(TAG)
-
-.PHONY: docker-push-manifest/proxy-test-client
-docker-push-manifest/proxy-test-client: ## Push the fat manifest docker image.
-	## Minimum docker version 18.06.0 is required for creating and pushing manifest images.
-	${DOCKER_CMD} manifest create --amend $(TEST_CLIENT_FULL_IMAGE):$(TAG) $(shell echo $(ALL_ARCH) | sed -e "s~[^ ]*~$(TEST_CLIENT_FULL_IMAGE)\-&:$(TAG)~g")
-	@for arch in $(ALL_ARCH); do ${DOCKER_CMD} manifest annotate --arch $${arch} ${TEST_CLIENT_FULL_IMAGE}:${TAG} ${TEST_CLIENT_FULL_IMAGE}-$${arch}:${TAG}; done
-	${DOCKER_CMD} manifest push --purge $(TEST_CLIENT_FULL_IMAGE):$(TAG)
-
-.PHONY: docker-push-manifest/http-test-server
-docker-push-manifest/http-test-server: ## Push the fat manifest docker image.
-	## Minimum docker version 18.06.0 is required for creating and pushing manifest images.
-	${DOCKER_CMD} manifest create --amend $(TEST_SERVER_FULL_IMAGE):$(TAG) $(shell echo $(ALL_ARCH) | sed -e "s~[^ ]*~$(TEST_SERVER_FULL_IMAGE)\-&:$(TAG)~g")
-	@for arch in $(ALL_ARCH); do ${DOCKER_CMD} manifest annotate --arch $${arch} ${TEST_SERVER_FULL_IMAGE}:${TAG} ${TEST_SERVER_FULL_IMAGE}-$${arch}:${TAG}; done
-	${DOCKER_CMD} manifest push --purge $(TEST_SERVER_FULL_IMAGE):$(TAG)
 
 ## --------------------------------------
 ## Release
@@ -294,7 +257,7 @@ docker-push-manifest/http-test-server: ## Push the fat manifest docker image.
 
 .PHONY: release-staging
 release-staging: ## Builds and push container images to the staging bucket.
-	REGISTRY=$(STAGING_REGISTRY) $(MAKE) docker-push-all release-alias-tag
+	REGISTRY=$(STAGING_REGISTRY) ARCH_LIST="$(RELEASE_ARCH_LIST)" $(MAKE) docker-push-all release-alias-tag
 
 .PHONY: release-alias-tag
 release-alias-tag: # Adds the tag to the last build tag. BASE_REF comes from the cloudbuild.yaml

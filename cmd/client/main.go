@@ -28,6 +28,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	runpprof "runtime/pprof"
 	"strconv"
 	"sync"
 	"time"
@@ -254,7 +255,11 @@ func (c *Client) run(o *GrpcProxyClientOptions) error {
 	for i := 1; i <= o.testRequests; i++ {
 		i := i
 		wg.Add(1)
-		go func() {
+		labels := runpprof.Labels(
+			"core", "testClient",
+			"testID", strconv.Itoa(i),
+		)
+		go runpprof.Do(context.Background(), labels, func(context.Context) {
 			defer wg.Done()
 			dialer, err := c.getDialer(o)
 			if err != nil {
@@ -289,7 +294,7 @@ func (c *Client) run(o *GrpcProxyClientOptions) error {
 				time.Sleep(wait)
 			}
 			ch <- nil
-		}()
+		})
 	}
 	wg.Wait()
 	close(ch)
@@ -404,13 +409,18 @@ func (c *Client) getUDSDialer(o *GrpcProxyClientOptions) (func(ctx context.Conte
 	ch := make(chan os.Signal, 1)
 	signal.Notify(ch)
 
-	go func() {
+	labels := runpprof.Labels(
+		"core", "testUdsDialer",
+		"requestPath", o.requestPath,
+		"udsName", o.proxyUdsName,
+	)
+	go runpprof.Do(context.Background(), labels, func(context.Context) {
 		<-ch
 		if proxyConn != nil {
 			err := proxyConn.Close()
 			klog.ErrorS(err, "connection closed")
 		}
-	}()
+	})
 
 	switch o.mode {
 	case "grpc":
@@ -482,13 +492,18 @@ func (c *Client) getMTLSDialer(o *GrpcProxyClientOptions) (func(ctx context.Cont
 	ch := make(chan os.Signal, 1)
 	signal.Notify(ch)
 
-	go func() {
+	labels := runpprof.Labels(
+		"core", "testMTLSDialer",
+		"requestPath", o.requestPath,
+		"requestPort", strconv.Itoa(o.requestPort),
+	)
+	go runpprof.Do(context.Background(), labels, func(context.Context) {
 		<-ch
 		if proxyConn != nil {
 			err := proxyConn.Close()
 			klog.ErrorS(err, "connection closed")
 		}
-	}()
+	})
 
 	switch o.mode {
 	case "grpc":

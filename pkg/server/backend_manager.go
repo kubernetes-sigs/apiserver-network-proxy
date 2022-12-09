@@ -25,6 +25,8 @@ import (
 	"time"
 
 	"k8s.io/klog/v2"
+
+	commonmetrics "sigs.k8s.io/apiserver-network-proxy/konnectivity-client/pkg/common/metrics"
 	client "sigs.k8s.io/apiserver-network-proxy/konnectivity-client/proto/client"
 	pkgagent "sigs.k8s.io/apiserver-network-proxy/pkg/agent"
 	"sigs.k8s.io/apiserver-network-proxy/pkg/server/metrics"
@@ -85,7 +87,13 @@ type backend struct {
 func (b *backend) Send(p *client.Packet) error {
 	b.mu.Lock()
 	defer b.mu.Unlock()
-	return b.conn.Send(p)
+	const segment = commonmetrics.SegmentToAgent
+	metrics.Metrics.ObservePacket(segment, p.Type)
+	err := b.conn.Send(p)
+	if err != nil {
+		metrics.Metrics.ObserveStreamError(segment, err, p.Type)
+	}
+	return err
 }
 
 func (b *backend) Context() context.Context {
@@ -188,7 +196,7 @@ func (s *DefaultBackendStorage) AddBackend(identifier string, idType pkgagent.Id
 		klog.V(4).InfoS("fail to add backend", "backend", identifier, "error", &ErrWrongIDType{idType, s.idTypes})
 		return nil
 	}
-	klog.V(2).InfoS("Register backend for agent", "connection", conn, "agentID", identifier)
+	klog.V(5).InfoS("Register backend for agent", "connection", conn, "agentID", identifier)
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	_, ok := s.backends[identifier]
@@ -218,7 +226,7 @@ func (s *DefaultBackendStorage) RemoveBackend(identifier string, idType pkgagent
 		klog.ErrorS(&ErrWrongIDType{idType, s.idTypes}, "fail to remove backend")
 		return
 	}
-	klog.V(2).InfoS("Remove connection for agent", "connection", conn, "identifier", identifier)
+	klog.V(5).InfoS("Remove connection for agent", "connection", conn, "identifier", identifier)
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	backends, ok := s.backends[identifier]
@@ -272,7 +280,7 @@ type ErrNotFound struct{}
 
 // Error returns the error message.
 func (e *ErrNotFound) Error() string {
-	return "No backend available"
+	return "No agent available"
 }
 
 type ErrWrongIDType struct {
@@ -293,13 +301,13 @@ func ignoreNotFound(err error) error {
 
 // GetRandomBackend returns a random backend connection from all connected agents.
 func (s *DefaultBackendStorage) GetRandomBackend() (Backend, error) {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	if len(s.backends) == 0 {
 		return nil, &ErrNotFound{}
 	}
 	agentID := s.agentIDs[s.random.Intn(len(s.agentIDs))]
-	klog.V(4).InfoS("Pick agent as backend", "agentID", agentID)
+	klog.V(5).InfoS("Pick agent as backend", "agentID", agentID)
 	// always return the first connection to an agent, because the agent
 	// will close later connections if there are multiple.
 	return s.backends[agentID][0], nil

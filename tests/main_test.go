@@ -17,29 +17,16 @@ limitations under the License.
 package tests
 
 import (
+	"flag"
 	"testing"
+
+	"k8s.io/klog/v2"
 )
 
-func TestReadiness(t *testing.T) {
-	stopCh := make(chan struct{})
-	defer close(stopCh)
+func TestMain(m *testing.M) {
+	fs := flag.NewFlagSet("mock-flags", flag.PanicOnError)
+	klog.InitFlags(fs)
+	fs.Set("v", "1") // Set klog verbosity.
 
-	proxy, server, cleanup, err := runGRPCProxyServerWithServerCount(1)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer cleanup()
-
-	ready, _ := server.Readiness.Ready()
-	if ready {
-		t.Fatalf("expected not ready")
-	}
-
-	clientset := runAgent(proxy.agent, stopCh)
-	waitForConnectedServerCount(t, 1, clientset)
-
-	ready, _ = server.Readiness.Ready()
-	if !ready {
-		t.Fatalf("expected ready")
-	}
+	m.Run()
 }

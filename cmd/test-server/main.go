@@ -194,9 +194,10 @@ func (p *TestServer) runTestServer(ctx context.Context, o *TestServerRunOptions)
 	muxHandler.HandleFunc("/error", returnError)
 	muxHandler.HandleFunc("/close", closeNoResponse)
 	server := &http.Server{
-		Addr:           fmt.Sprintf("127.0.0.1:%d", o.serverPort),
-		Handler:        muxHandler,
-		MaxHeaderBytes: 1 << 20,
+		Addr:              fmt.Sprintf("127.0.0.1:%d", o.serverPort),
+		Handler:           muxHandler,
+		MaxHeaderBytes:    1 << 20,
+		ReadHeaderTimeout: 60 * time.Second,
 	}
 
 	go func() {

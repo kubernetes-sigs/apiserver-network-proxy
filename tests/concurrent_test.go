@@ -1,3 +1,19 @@
+/*
+Copyright 2022 The Kubernetes Authors.
+
+Licensed under the Apache License, Version 2.0 (the "License");
+you may not use this file except in compliance with the License.
+You may obtain a copy of the License at
+
+    http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions and
+limitations under the License.
+*/
+
 package tests
 
 import (
@@ -7,14 +23,12 @@ import (
 	"net/http/httptest"
 	"sync"
 	"testing"
-	"time"
 
 	"google.golang.org/grpc"
-	"k8s.io/apimachinery/pkg/util/wait"
 	"sigs.k8s.io/apiserver-network-proxy/konnectivity-client/pkg/client"
 )
 
-func TestProxy_Concurrency(t *testing.T) {
+func TestProxy_ConcurrencyGRPC(t *testing.T) {
 	ctx := context.Background()
 	length := 1 << 20
 	chunks := 10
@@ -30,10 +44,8 @@ func TestProxy_Concurrency(t *testing.T) {
 	}
 	defer cleanup()
 
-	runAgent(proxy.agent, stopCh)
-
-	// Wait for agent to register on proxy server
-	time.Sleep(time.Second)
+	clientset := runAgent(proxy.agent, stopCh)
+	waitForConnectedServerCount(t, 1, clientset)
 
 	// run test client
 	tunnel, err := client.CreateSingleUseGrpcTunnel(ctx, proxy.front, grpc.WithInsecure())
@@ -75,6 +87,49 @@ func TestProxy_Concurrency(t *testing.T) {
 	wg.Wait()
 }
 
+func TestProxy_ConcurrencyHTTP(t *testing.T) {
+	ctx := context.Background()
+	length := 1 << 20
+	chunks := 10
+	server := httptest.NewServer(newSizedServer(length, chunks))
+	defer server.Close()
+
+	stopCh := make(chan struct{})
+	defer close(stopCh)
+
+	proxy, cleanup, err := runHTTPConnProxyServer()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer cleanup()
+
+	clientset := runAgent(proxy.agent, stopCh)
+	waitForConnectedServerCount(t, 1, clientset)
+
+	// run test clients
+	var wg sync.WaitGroup
+	verify := func() {
+		defer wg.Done()
+		tunnel, err := createHTTPConnectClient(ctx, proxy.front, server.URL)
+		if err != nil {
+			t.Error(err)
+		}
+		data, err := clientRequest(tunnel, server.URL)
+		if err != nil {
+			t.Error(err)
+		} else if len(data) != length*chunks {
+			t.Errorf("expect data length %d; got %d", length*chunks, len(data))
+		}
+	}
+
+	concurrency := 10
+	wg.Add(concurrency)
+	for i := 0; i < concurrency; i++ {
+		go verify()
+	}
+	wg.Wait()
+}
+
 // This test verifies that when one stream between a proxy agent and the proxy
 // server terminates, the proxy server does not terminate other frontends
 // supported by the same proxy agent but on different streams.
@@ -99,9 +154,8 @@ func TestAgent_MultipleConn(t *testing.T) {
 	for _, tc := range testcases {
 		t.Run(tc.name, func(t *testing.T) {
 			ctx := context.Background()
-			echoServer := newEchoServer("hello")
-			echoServer.wchan = make(chan struct{})
-			server := httptest.NewServer(echoServer)
+			waitServer := newWaitingServer()
+			server := httptest.NewServer(waitServer)
 			defer server.Close()
 
 			stopCh := make(chan struct{})
@@ -113,17 +167,15 @@ func TestAgent_MultipleConn(t *testing.T) {
 			}
 			defer cleanup()
 
-			runAgentWithID("multipleAgentConn", proxy.agent, stopCh)
+			cs1 := runAgentWithID("multipleAgentConn", proxy.agent, stopCh)
+			waitForConnectedServerCount(t, 1, cs1)
 			defer close(stopCh)
-
-			// Wait for agent to register on proxy server
-			wait.Poll(100*time.Millisecond, 5*time.Second, func() (bool, error) {
-				ready, _ := proxy.server.Readiness.Ready()
-				return ready, nil
-			})
 
 			// run test client
 			c, err := tc.clientFunction(ctx, proxy.front, server.URL)
+			if err != nil {
+				t.Fatal(err)
+			}
 
 			fcnStopCh := make(chan struct{})
 
@@ -134,15 +186,17 @@ func TestAgent_MultipleConn(t *testing.T) {
 				}
 				close(fcnStopCh)
 			}()
+			<-waitServer.requestReceivedCh
 
 			// Running an agent with the same ID simulates a second connection from the same agent.
 			// This simulates the scenario where a proxy agent established connections with HA proxy server
 			// and creates multiple connections with the same proxy server
-			runAgentWithID("multipleAgentConn", proxy.agent, stopCh2)
+			cs2 := runAgentWithID("multipleAgentConn", proxy.agent, stopCh2)
+			waitForConnectedServerCount(t, 1, cs2)
 			close(stopCh2)
 			// Wait for the server to run cleanup routine
-			time.Sleep(1 * time.Second)
-			close(echoServer.wchan)
+			waitForConnectedAgentCount(t, 1, proxy.server)
+			close(waitServer.respondCh)
 
 			<-fcnStopCh
 		})
