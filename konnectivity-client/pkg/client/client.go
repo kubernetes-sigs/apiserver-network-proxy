@@ -248,7 +248,7 @@ func (t *grpcTunnel) serve(tunnelCtx context.Context) {
 
 			result := dialResult{connid: resp.ConnectID}
 			if resp.Error != "" {
-				result.err = &dialFailure{resp.Error, DialFailureEndpoint}
+				result.err = &dialFailure{resp.Error, metrics.DialFailureEndpoint}
 			}
 			select {
 			// try to send to the result channel
@@ -283,7 +283,7 @@ func (t *grpcTunnel) serve(tunnelCtx context.Context) {
 				klog.V(1).InfoS("DIAL_CLS after dial finished", "dialID", resp.Random)
 			} else {
 				result := dialResult{
-					err: &dialFailure{"dial closed", DialFailureDialClosed},
+					err: &dialFailure{"dial closed", metrics.DialFailureDialClosed},
 				}
 				select {
 				case pendingDial.resultCh <- result:
@@ -336,6 +336,15 @@ func (t *grpcTunnel) serve(tunnelCtx context.Context) {
 // Dial connects to the address on the named network, similar to
 // what net.Dial does. The only supported protocol is tcp.
 func (t *grpcTunnel) DialContext(requestCtx context.Context, protocol, address string) (net.Conn, error) {
+	conn, err := t.dialContext(requestCtx, protocol, address)
+	if err != nil {
+		_, reason := GetDialFailureReason(err)
+		metrics.Metrics.ObserveDialFailure(reason)
+	}
+	return conn, err
+}
+
+func (t *grpcTunnel) dialContext(requestCtx context.Context, protocol, address string) (net.Conn, error) {
 	select {
 	case <-t.done:
 		return nil, errors.New("tunnel is closed")
@@ -398,14 +407,14 @@ func (t *grpcTunnel) DialContext(requestCtx context.Context, protocol, address s
 	case <-time.After(30 * time.Second):
 		klog.V(5).InfoS("Timed out waiting for DialResp", "dialID", random)
 		go t.closeDial(random)
-		return nil, &dialFailure{"dial timeout, backstop", DialFailureTimeout}
+		return nil, &dialFailure{"dial timeout, backstop", metrics.DialFailureTimeout}
 	case <-requestCtx.Done():
 		klog.V(5).InfoS("Context canceled waiting for DialResp", "ctxErr", requestCtx.Err(), "dialID", random)
 		go t.closeDial(random)
-		return nil, &dialFailure{"dial timeout, context", DialFailureContext}
+		return nil, &dialFailure{"dial timeout, context", metrics.DialFailureContext}
 	case <-t.done:
 		klog.V(5).InfoS("Tunnel closed while waiting for DialResp", "dialID", random)
-		return nil, &dialFailure{"tunnel closed", DialFailureTunnelClosed}
+		return nil, &dialFailure{"tunnel closed", metrics.DialFailureTunnelClosed}
 	}
 
 	return c, nil
@@ -443,38 +452,19 @@ func (t *grpcTunnel) isClosing() bool {
 	return atomic.LoadUint32(&t.closing) != 0
 }
 
-func GetDialFailureReason(err error) (isDialFailure bool, reason DialFailureReason) {
+func GetDialFailureReason(err error) (isDialFailure bool, reason metrics.DialFailureReason) {
 	var df *dialFailure
 	if errors.As(err, &df) {
 		return true, df.reason
 	}
-	return false, DialFailureUnknown
+	return false, metrics.DialFailureUnknown
 }
 
 type dialFailure struct {
 	msg    string
-	reason DialFailureReason
+	reason metrics.DialFailureReason
 }
 
 func (df *dialFailure) Error() string {
 	return df.msg
 }
-
-type DialFailureReason string
-
-const (
-	DialFailureUnknown DialFailureReason = "unknown"
-	// DialFailureTimeout indicates the hard 30 second timeout was hit.
-	DialFailureTimeout DialFailureReason = "timeout"
-	// DialFailureContext indicates that the context was cancelled or reached it's deadline before
-	// the dial response was returned.
-	DialFailureContext DialFailureReason = "context"
-	// DialFailureEndpoint indicates that the konnectivity-agent was unable to reach the backend endpoint.
-	DialFailureEndpoint DialFailureReason = "endpoint"
-	// DialFailureDialClosed indicates that the client received a CloseDial response, indicating the
-	// connection was closed before the dial could complete.
-	DialFailureDialClosed DialFailureReason = "dialclosed"
-	// DialFailureTunnelClosed indicates that the client connection was closed before the dial could
-	// complete.
-	DialFailureTunnelClosed DialFailureReason = "tunnelclosed"
-)
