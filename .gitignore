@@ -5,3 +5,10 @@
 /easy-rsa-master/
 /easy-rsa.tar.gz
 /easy-rsa
+
+# editor and IDE paraphernalia
+.idea
+.vscode
+
+# macOS paraphernalia
+.DS_Store
