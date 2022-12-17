@@ -106,15 +106,13 @@ mod-download:
 gen: mod-download proto/agent/agent_grpc.pb.go proto/agent/agent.pb.go konnectivity-client/proto/client/client_grpc.pb.go konnectivity-client/proto/client/client.pb.go mock_gen
 
 konnectivity-client/proto/client/client_grpc.pb.go konnectivity-client/proto/client/client.pb.go: konnectivity-client/proto/client/client.proto
-	mkdir -p ${GOPATH}/src
 	protoc -I . konnectivity-client/proto/client/client.proto --go_out=. --go_opt=paths=source_relative --go-grpc_out=require_unimplemented_servers=false:. --go-grpc_opt=paths=source_relative
-	cat hack/go-license-header.txt ${GOPATH}/src/apiserver-network-proxy/konnectivity-client/proto/client/client_grpc.pb.go > konnectivity-client/proto/client/client_grpc.licensed.go
+	cat hack/go-license-header.txt konnectivity-client/proto/client/client_grpc.pb.go > konnectivity-client/proto/client/client_grpc.licensed.go
 	mv konnectivity-client/proto/client/client_grpc.licensed.go konnectivity-client/proto/client/client_grpc.pb.go
 
 proto/agent/agent_grpc.pb.go proto/agent/agent.pb.go: proto/agent/agent.proto
-	mkdir -p ${GOPATH}/src
 	protoc -I . proto/agent/agent.proto --go_out=. --go_opt=paths=source_relative --go-grpc_out=require_unimplemented_servers=false:. --go-grpc_opt=paths=source_relative
-	cat hack/go-license-header.txt ${GOPATH}/src/apiserver-network-proxy/proto/agent/agent_grpc.pb.go > proto/agent/agent_grpc.licensed.go
+	cat hack/go-license-header.txt proto/agent/agent_grpc.pb.go > proto/agent/agent_grpc.licensed.go
 	mv proto/agent/agent_grpc.licensed.go proto/agent/agent_grpc.pb.go
 
 ## --------------------------------------
@@ -273,4 +271,4 @@ release-alias-tag: # Adds the tag to the last build tag. BASE_REF comes from the
 .PHONY: clean
 clean:
 	go clean -testcache
-	rm -rf proto/agent/agent.pb.go proto/agent/agent_grpc.pb.go konnectivity-client/proto/client/client.pb.go konnectivity-client/proto/client/client_grpc.pb.go easy-rsa.tar.gz easy-rsa cfssl cfssljson certs bin proto/agent/mocks
+	rm -rf proto/agent/agent.pb.go proto/agent/agent_grpc.pb.go konnectivity-client/proto/client/client.pb.go konnectivity-client/proto/client/client_grpc.pb.go konnectivity-client/proto/client/client_grpc.licensed.go proto/agent/agent_grpc.licensed.go easy-rsa.tar.gz easy-rsa cfssl cfssljson certs bin proto/agent/mocks
