@@ -399,9 +399,10 @@ func (p *Proxy) runAdminServer(o *options.ProxyRunOptions, server *server.ProxyS
 		}
 	}
 	adminServer := &http.Server{
-		Addr:           net.JoinHostPort(o.AdminBindAddress, strconv.Itoa(o.AdminPort)),
-		Handler:        muxHandler,
-		MaxHeaderBytes: 1 << 20,
+		Addr:              net.JoinHostPort(o.AdminBindAddress, strconv.Itoa(o.AdminPort)),
+		Handler:           muxHandler,
+		MaxHeaderBytes:    1 << 20,
+		ReadHeaderTimeout: ReadHeaderTimeout,
 	}
 
 	labels := runpprof.Labels(
