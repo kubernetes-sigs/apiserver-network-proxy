@@ -134,6 +134,9 @@ type grpcTunnel struct {
 	// closing should only be accessed through atomic methods.
 	// TODO: switch this to an atomic.Bool once the client is exclusively buit with go1.19+
 	closing uint32
+
+	// Stores the current metrics.ClientConnectionStatus
+	prevStatus atomic.Value
 }
 
 type clientConn interface {
@@ -185,7 +188,7 @@ func CreateSingleUseGrpcTunnelWithContext(createCtx, tunnelCtx context.Context, 
 }
 
 func newUnstartedTunnel(stream client.ProxyService_ProxyClient, c clientConn) *grpcTunnel {
-	return &grpcTunnel{
+	t := grpcTunnel{
 		stream:             stream,
 		clientConn:         c,
 		pendingDial:        pendingDialManager{pendingDials: make(map[int64]pendingDial)},
@@ -193,6 +196,36 @@ func newUnstartedTunnel(stream client.ProxyService_ProxyClient, c clientConn) *g
 		readTimeoutSeconds: 10,
 		done:               make(chan struct{}),
 	}
+	s := metrics.ClientConnectionStatusCreated
+	t.prevStatus.Store(s)
+	metrics.Metrics.GetClientConnectionsMetric().WithLabelValues(string(s)).Inc()
+	return &t
+}
+
+func (t *grpcTunnel) updateMetric(status metrics.ClientConnectionStatus) {
+	select {
+	case <-t.Done():
+		return
+	default:
+	}
+
+	prevStatus := t.prevStatus.Swap(status).(metrics.ClientConnectionStatus)
+
+	m := metrics.Metrics.GetClientConnectionsMetric()
+	m.WithLabelValues(string(prevStatus)).Dec()
+	m.WithLabelValues(string(status)).Inc()
+}
+
+// closeMetric should be called exactly once to finalize client_connections metric.
+func (t *grpcTunnel) closeMetric() {
+	select {
+	case <-t.Done():
+		return
+	default:
+	}
+	prevStatus := t.prevStatus.Load().(metrics.ClientConnectionStatus)
+
+	metrics.Metrics.GetClientConnectionsMetric().WithLabelValues(string(prevStatus)).Dec()
 }
 
 func (t *grpcTunnel) serve(tunnelCtx context.Context) {
@@ -203,6 +236,8 @@ func (t *grpcTunnel) serve(tunnelCtx context.Context) {
 		// we never received a CLOSE_RSP for it, so we need to
 		// close any channels remaining for these connections.
 		t.conns.closeAll()
+
+		t.closeMetric()
 
 		close(t.done)
 	}()
@@ -249,6 +284,8 @@ func (t *grpcTunnel) serve(tunnelCtx context.Context) {
 			result := dialResult{connid: resp.ConnectID}
 			if resp.Error != "" {
 				result.err = &dialFailure{resp.Error, metrics.DialFailureEndpoint}
+			} else {
+				t.updateMetric(metrics.ClientConnectionStatusOk)
 			}
 			select {
 			// try to send to the result channel
@@ -354,6 +391,8 @@ func (t *grpcTunnel) dialContext(requestCtx context.Context, protocol, address s
 	if protocol != "tcp" {
 		return nil, errors.New("protocol not supported")
 	}
+
+	t.updateMetric(metrics.ClientConnectionStatusDialing)
 
 	random := rand.Int63() /* #nosec G404 */
 

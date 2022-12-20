@@ -30,6 +30,11 @@ const (
 # HELP konnectivity_network_proxy_client_dial_failure_total Number of dial failures observed, by reason (example: remote endpoint error)
 # TYPE konnectivity_network_proxy_client_dial_failure_total counter`
 	clientDialFailureSample = `konnectivity_network_proxy_client_dial_failure_total{reason="%s"} %d`
+
+	clientConnsHeader = `
+# HELP konnectivity_network_proxy_client_client_connections Number of open client connections, by status (Example: dialing)
+# TYPE konnectivity_network_proxy_client_client_connections gauge`
+	clientConnsSample = `konnectivity_network_proxy_client_client_connections{status="%s"} %d`
 )
 
 func ExpectClientDialFailures(expected map[metrics.DialFailureReason]int) error {
@@ -42,6 +47,18 @@ func ExpectClientDialFailures(expected map[metrics.DialFailureReason]int) error 
 
 func ExpectClientDialFailure(reason metrics.DialFailureReason, count int) error {
 	return ExpectClientDialFailures(map[metrics.DialFailureReason]int{reason: count})
+}
+
+func ExpectClientConnections(expected map[metrics.ClientConnectionStatus]int) error {
+	expect := clientConnsHeader + "\n"
+	for r, v := range expected {
+		expect += fmt.Sprintf(clientConnsSample+"\n", r, v)
+	}
+	return ExpectMetric(metrics.Namespace, metrics.Subsystem, "client_connections", expect)
+}
+
+func ExpectClientConnection(status metrics.ClientConnectionStatus, count int) error {
+	return ExpectClientConnections(map[metrics.ClientConnectionStatus]int{status: count})
 }
 
 func ExpectMetric(namespace, subsystem, name, expected string) error {

@@ -56,6 +56,10 @@ func TestDial(t *testing.T) {
 
 	tunnel := newUnstartedTunnel(s, s.conn())
 
+	if err := metricstest.ExpectClientConnection(metrics.ClientConnectionStatusCreated, 1); err != nil {
+		t.Error(err)
+	}
+
 	go tunnel.serve(ctx)
 	go ts.serve()
 
@@ -72,9 +76,17 @@ func TestDial(t *testing.T) {
 		t.Errorf("expect packet.address %v; got %v", "127.0.0.1:80", ts.packets[0].GetDialRequest().Address)
 	}
 
+	if err := metricstest.ExpectClientConnections(map[metrics.ClientConnectionStatus]int{
+		metrics.ClientConnectionStatusCreated: 0,
+		metrics.ClientConnectionStatusDialing: 0,
+		metrics.ClientConnectionStatusOk:      1,
+	}); err != nil {
+		t.Error(err)
+	}
 	if err := metricstest.ExpectClientDialFailures(nil); err != nil {
 		t.Error(err)
 	}
+	metrics.Metrics.Reset() // For clean shutdown.
 }
 
 // TestDialRace exercises the scenario where serve() observes and handles DIAL_RSP
@@ -107,6 +119,10 @@ func TestDialRace(t *testing.T) {
 
 	if ts.packets[0].GetDialRequest().Address != "127.0.0.1:80" {
 		t.Errorf("expect packet.address %v; got %v", "127.0.0.1:80", ts.packets[0].GetDialRequest().Address)
+	}
+
+	if err := metricstest.ExpectClientDialFailures(nil); err != nil {
+		t.Error(err)
 	}
 }
 
@@ -201,6 +217,14 @@ func TestClose(t *testing.T) {
 		t.Fatalf("expect nil; got %v", err)
 	}
 
+	if err := metricstest.ExpectClientConnections(map[metrics.ClientConnectionStatus]int{
+		metrics.ClientConnectionStatusCreated: 0,
+		metrics.ClientConnectionStatusDialing: 0,
+		metrics.ClientConnectionStatusOk:      1,
+	}); err != nil {
+		t.Error(err)
+	}
+
 	if err := conn.Close(); err != nil {
 		t.Error(err)
 	}
@@ -211,6 +235,16 @@ func TestClose(t *testing.T) {
 	if ts.packets[1].GetCloseRequest().ConnectID != 100 {
 		t.Errorf("expect connectID=100; got %d", ts.packets[1].GetCloseRequest().ConnectID)
 	}
+
+	<-tunnel.Done()
+	if err := metricstest.ExpectClientConnections(map[metrics.ClientConnectionStatus]int{
+		metrics.ClientConnectionStatusCreated: 0,
+		metrics.ClientConnectionStatusDialing: 0,
+		metrics.ClientConnectionStatusOk:      0,
+	}); err != nil {
+		t.Error(err)
+	}
+	metrics.Metrics.Reset() // For clean shutdown.
 }
 
 func TestCloseTimeout(t *testing.T) {
@@ -254,6 +288,15 @@ func TestCloseTimeout(t *testing.T) {
 		t.Errorf("expected %v but got %v", errConnCloseTimeout, err)
 	}
 
+	<-tunnel.Done()
+	if err := metricstest.ExpectClientConnections(map[metrics.ClientConnectionStatus]int{
+		metrics.ClientConnectionStatusCreated: 0,
+		metrics.ClientConnectionStatusDialing: 0,
+		metrics.ClientConnectionStatusOk:      0,
+	}); err != nil {
+		t.Error(err)
+	}
+	metrics.Metrics.Reset() // For clean shutdown.
 }
 
 func TestCreateSingleUseGrpcTunnel_NoLeakOnFailure(t *testing.T) {
@@ -300,6 +343,7 @@ func TestDialAfterTunnelCancelled(t *testing.T) {
 	if err == nil {
 		t.Fatalf("expect err when dialing after tunnel closed")
 	}
+
 	// TODO(jkh52): verify dial failure metric.
 	metrics.Metrics.Reset() // For clean shutdown.
 
@@ -678,6 +722,8 @@ func expectCleanShutdown(t testing.TB) {
 	t.Cleanup(func() {
 		goleak.VerifyNone(t, currentGoRoutines)
 		assertNoClientDialFailures(t)
+		// The tunnels gauge metric is intentionally not included here, to avoid
+		// brittle gauge assertions. Tests should directly verify it.
 		metrics.Metrics.Reset()
 	})
 }
