@@ -24,7 +24,7 @@ endif
 GOOS ?= $(shell go env GOOS)
 GOARCH ?= $(shell go env GOARCH)
 INSTALL_LOCATION:=$(shell go env GOPATH)/bin
-GOLANGCI_LINT_VERSION ?= 1.45.2
+GOLANGCI_LINT_VERSION ?= 1.50.1
 GOSEC_VERSION ?= 2.13.1
 
 REGISTRY ?= gcr.io/$(shell gcloud config get-value project)
@@ -88,7 +88,7 @@ bin/proxy-server: proto/agent/agent_grpc.pb.go konnectivity-client/proto/client/
 .PHONY: lint
 lint:
 	curl -sSfL https://raw.githubusercontent.com/golangci/golangci-lint/master/install.sh | sh -s -- -b $(INSTALL_LOCATION) v$(GOLANGCI_LINT_VERSION)
-	$(INSTALL_LOCATION)/golangci-lint run --no-config --disable-all --enable=gofmt,golint,gosec,govet,unused --fix --verbose --timeout 3m
+	$(INSTALL_LOCATION)/golangci-lint run --no-config --disable-all --enable=gofmt,revive,gosec,govet,unused --fix --verbose --timeout 3m
 
 ## --------------------------------------
 ## Go

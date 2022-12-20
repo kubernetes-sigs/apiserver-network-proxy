@@ -17,11 +17,11 @@ limitations under the License.
 package options
 
 import (
-	"testing"
-	"reflect"
-	"time"
-	"github.com/stretchr/testify/assert"
 	"fmt"
+	"github.com/stretchr/testify/assert"
+	"reflect"
+	"testing"
+	"time"
 )
 
 /*
