@@ -42,6 +42,7 @@ type ClientMetrics struct {
 	streamPackets *prometheus.CounterVec
 	streamErrors  *prometheus.CounterVec
 	dialFailures  *prometheus.CounterVec
+	clientConns   *prometheus.GaugeVec
 }
 
 type DialFailureReason string
@@ -63,6 +64,19 @@ const (
 	DialFailureTunnelClosed DialFailureReason = "tunnelclosed"
 )
 
+type ClientConnectionStatus string
+
+const (
+	// The connection is created but has not yet been dialed.
+	ClientConnectionStatusCreated ClientConnectionStatus = "created"
+	// The connection is pending dial response.
+	ClientConnectionStatusDialing ClientConnectionStatus = "dialing"
+	// The connection is established.
+	ClientConnectionStatusOk ClientConnectionStatus = "ok"
+	// The connection is closing.
+	ClientConnectionStatusClosing ClientConnectionStatus = "closing"
+)
+
 func newMetrics() *ClientMetrics {
 	// The denominator (total dials started) for both
 	// dial_failure_total and dial_duration_seconds is the
@@ -79,10 +93,22 @@ func newMetrics() *ClientMetrics {
 			"reason",
 		},
 	)
+	clientConns := prometheus.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Namespace: Namespace,
+			Subsystem: Subsystem,
+			Name:      "client_connections",
+			Help:      "Number of open client connections, by status (Example: dialing)",
+		},
+		[]string{
+			"status",
+		},
+	)
 	return &ClientMetrics{
 		streamPackets: commonmetrics.MakeStreamPacketsTotalMetric(Namespace, Subsystem),
 		streamErrors:  commonmetrics.MakeStreamErrorsTotalMetric(Namespace, Subsystem),
 		dialFailures:  dialFailures,
+		clientConns:   clientConns,
 	}
 }
 
@@ -92,6 +118,7 @@ func (c *ClientMetrics) RegisterMetrics(r prometheus.Registerer) {
 		r.MustRegister(c.streamPackets)
 		r.MustRegister(c.streamErrors)
 		r.MustRegister(c.dialFailures)
+		r.MustRegister(c.clientConns)
 	})
 }
 
@@ -102,6 +129,7 @@ func (c *ClientMetrics) LegacyRegisterMetrics(mustRegisterFn func(...prometheus.
 		mustRegisterFn(c.streamPackets)
 		mustRegisterFn(c.streamErrors)
 		mustRegisterFn(c.dialFailures)
+		mustRegisterFn(c.clientConns)
 	})
 }
 
@@ -110,10 +138,15 @@ func (c *ClientMetrics) Reset() {
 	c.streamPackets.Reset()
 	c.streamErrors.Reset()
 	c.dialFailures.Reset()
+	c.clientConns.Reset()
 }
 
 func (c *ClientMetrics) ObserveDialFailure(reason DialFailureReason) {
 	c.dialFailures.WithLabelValues(string(reason)).Inc()
+}
+
+func (c *ClientMetrics) GetClientConnectionsMetric() *prometheus.GaugeVec {
+	return c.clientConns
 }
 
 func (c *ClientMetrics) ObservePacket(segment commonmetrics.Segment, packetType client.PacketType) {
