@@ -391,14 +391,18 @@ func (p *Proxy) runAdminServer(o *options.ProxyRunOptions, server *server.ProxyS
 	if o.EnableProfiling {
 		muxHandler.HandleFunc("/debug/pprof", util.RedirectTo("/debug/pprof/"))
 		muxHandler.HandleFunc("/debug/pprof/", netpprof.Index)
+		muxHandler.HandleFunc("/debug/pprof/profile", netpprof.Profile)
+		muxHandler.HandleFunc("/debug/pprof/symbol", netpprof.Symbol)
+		muxHandler.HandleFunc("/debug/pprof/trace", netpprof.Trace)
 		if o.EnableContentionProfiling {
 			runtime.SetBlockProfileRate(1)
 		}
 	}
 	adminServer := &http.Server{
-		Addr:           net.JoinHostPort(o.AdminBindAddress, strconv.Itoa(o.AdminPort)),
-		Handler:        muxHandler,
-		MaxHeaderBytes: 1 << 20,
+		Addr:              net.JoinHostPort(o.AdminBindAddress, strconv.Itoa(o.AdminPort)),
+		Handler:           muxHandler,
+		MaxHeaderBytes:    1 << 20,
+		ReadHeaderTimeout: ReadHeaderTimeout,
 	}
 
 	labels := runpprof.Labels(

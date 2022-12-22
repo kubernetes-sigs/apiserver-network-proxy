@@ -20,13 +20,17 @@ import (
 	"flag"
 	"testing"
 
+	"github.com/prometheus/client_golang/prometheus"
 	"k8s.io/klog/v2"
+
+	metricsclient "sigs.k8s.io/apiserver-network-proxy/konnectivity-client/pkg/client/metrics"
 )
 
 func TestMain(m *testing.M) {
 	fs := flag.NewFlagSet("mock-flags", flag.PanicOnError)
 	klog.InitFlags(fs)
 	fs.Set("v", "1") // Set klog verbosity.
+	metricsclient.Metrics.RegisterMetrics(prometheus.DefaultRegisterer)
 
 	m.Run()
 }

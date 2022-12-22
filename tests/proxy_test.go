@@ -36,6 +36,9 @@ import (
 	"google.golang.org/grpc/metadata"
 	"k8s.io/apimachinery/pkg/util/wait"
 	"sigs.k8s.io/apiserver-network-proxy/konnectivity-client/pkg/client"
+	"sigs.k8s.io/apiserver-network-proxy/konnectivity-client/pkg/client/metrics"
+	metricsclient "sigs.k8s.io/apiserver-network-proxy/konnectivity-client/pkg/client/metrics"
+	clientmetricstest "sigs.k8s.io/apiserver-network-proxy/konnectivity-client/pkg/common/metrics/testing"
 	clientproto "sigs.k8s.io/apiserver-network-proxy/konnectivity-client/proto/client"
 	"sigs.k8s.io/apiserver-network-proxy/pkg/agent"
 	metricsagent "sigs.k8s.io/apiserver-network-proxy/pkg/agent/metrics"
@@ -192,8 +195,7 @@ func TestProxyHandleDialError_GRPC(t *testing.T) {
 	if err := metricstest.ExpectAgentDialFailure(metricsagent.DialFailureUnknown, 1); err != nil {
 		t.Error(err)
 	}
-	metricsserver.Metrics.Reset() // For clean shutdown.
-	metricsagent.Metrics.Reset()
+	resetAllMetrics() // For clean shutdown.
 }
 
 func TestProxyHandle_DoneContext_GRPC(t *testing.T) {
@@ -325,7 +327,7 @@ func TestProxyDial_RequestCancelled_GRPC(t *testing.T) {
 		_, err = tunnel.DialContext(ctx, "tcp", blackhole)
 		if err == nil {
 			t.Error("Expected error when context is cancelled, did not receive error")
-		} else if _, reason := client.GetDialFailureReason(err); reason != client.DialFailureContext {
+		} else if _, reason := client.GetDialFailureReason(err); reason != metricsclient.DialFailureContext {
 			t.Errorf("Unexpected error: %v", err)
 		}
 
@@ -336,11 +338,13 @@ func TestProxyDial_RequestCancelled_GRPC(t *testing.T) {
 		}
 	}()
 
+	if err := clientmetricstest.ExpectClientDialFailure(metrics.DialFailureContext, 1); err != nil {
+		t.Error(err)
+	}
 	if err := metricstest.ExpectServerDialFailure(metricsserver.DialFailureFrontendClose, 1); err != nil {
 		t.Error(err)
 	}
-	metricsserver.Metrics.Reset() // For clean shutdown.
-	metricsagent.Metrics.Reset()
+	resetAllMetrics() // For clean shutdown.
 }
 
 func TestProxyDial_AgentTimeout_GRPC(t *testing.T) {
@@ -371,18 +375,20 @@ func TestProxyDial_AgentTimeout_GRPC(t *testing.T) {
 		_, err = tunnel.DialContext(context.Background(), "tcp", blackhole)
 		if err == nil {
 			t.Error("Expected error when context is cancelled, did not receive error")
-		} else if _, reason := client.GetDialFailureReason(err); reason != client.DialFailureEndpoint {
+		} else if _, reason := client.GetDialFailureReason(err); reason != metricsclient.DialFailureEndpoint {
 			t.Errorf("Unexpected error: %v", err)
 		}
 
+		if err := clientmetricstest.ExpectClientDialFailure(metrics.DialFailureEndpoint, 1); err != nil {
+			t.Error(err)
+		}
 		if err := metricstest.ExpectServerDialFailure(metricsserver.DialFailureErrorResponse, 1); err != nil {
 			t.Error(err)
 		}
 		if err := metricstest.ExpectAgentDialFailure(metricsagent.DialFailureTimeout, 1); err != nil {
 			t.Error(err)
 		}
-		metricsserver.Metrics.Reset() // For clean shutdown.
-		metricsagent.Metrics.Reset()
+		resetAllMetrics() // For clean shutdown.
 
 		select {
 		case <-tunnel.Done():
@@ -639,8 +645,7 @@ func TestFailedDial_HTTPCONN(t *testing.T) {
 	if err := metricstest.ExpectAgentDialFailure(metricsagent.DialFailureUnknown, 1); err != nil {
 		t.Error(err)
 	}
-	metricsserver.Metrics.Reset() // For clean shutdown.
-	metricsagent.Metrics.Reset()
+	resetAllMetrics() // For clean shutdown.
 }
 
 func localAddr(addr net.Addr) string {
@@ -834,6 +839,13 @@ func waitForConnectedAgentCount(t testing.TB, expectedAgentCount int, proxy *ser
 	}
 }
 
+func assertNoClientDialFailures(t testing.TB) {
+	t.Helper()
+	if err := clientmetricstest.ExpectClientDialFailures(nil); err != nil {
+		t.Errorf("Unexpected %s metric: %v", "dial_failure_total", err)
+	}
+}
+
 func assertNoServerDialFailures(t testing.TB) {
 	t.Helper()
 	if err := metricstest.ExpectServerDialFailures(nil); err != nil {
@@ -847,12 +859,19 @@ func assertNoAgentDialFailures(t testing.TB) {
 		t.Errorf("Unexpected %s metric: %v", "endpoint_dial_failure_total", err)
 	}
 }
-func expectCleanShutdown(t testing.TB) {
+
+func resetAllMetrics() {
+	metricsclient.Metrics.Reset()
 	metricsserver.Metrics.Reset()
 	metricsagent.Metrics.Reset()
+}
+
+func expectCleanShutdown(t testing.TB) {
+	resetAllMetrics()
 	currentGoRoutines := goleak.IgnoreCurrent()
 	t.Cleanup(func() {
 		goleak.VerifyNone(t, currentGoRoutines)
+		assertNoClientDialFailures(t)
 		assertNoServerDialFailures(t)
 		assertNoAgentDialFailures(t)
 	})
