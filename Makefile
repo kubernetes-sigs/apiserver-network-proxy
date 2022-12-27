@@ -261,8 +261,6 @@ release-staging: ## Builds and push container images to the staging bucket.
 release-alias-tag: # Adds the tag to the last build tag. BASE_REF comes from the cloudbuild.yaml
 	gcloud container images add-tag $(AGENT_FULL_IMAGE):$(TAG) $(AGENT_FULL_IMAGE):$(BASE_REF)
 	gcloud container images add-tag $(SERVER_FULL_IMAGE):$(TAG) $(SERVER_FULL_IMAGE):$(BASE_REF)
-	gcloud container images add-tag $(TEST_CLIENT_FULL_IMAGE):$(TAG) $(TEST_CLIENT_FULL_IMAGE):$(BASE_REF)
-	gcloud container images add-tag $(TEST_SERVER_FULL_IMAGE):$(TAG) $(TEST_SERVER_FULL_IMAGE):$(BASE_REF)
 
 ## --------------------------------------
 ## Cleanup / Verification
