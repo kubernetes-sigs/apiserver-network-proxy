@@ -216,11 +216,6 @@ func (cs *ClientSet) connectOnce() error {
 	}
 	cs.serverCount = serverCount
 	if err := cs.AddClient(c.serverID, c); err != nil {
-		if dse, ok := err.(*DuplicateServerError); ok {
-			klog.V(4).InfoS("closing connection to duplicate server", "serverID", dse.ServerID)
-		} else {
-			klog.ErrorS(err, "closing connection failure when adding a client")
-		}
 		c.Close()
 		return err
 	}
