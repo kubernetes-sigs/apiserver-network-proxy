@@ -235,7 +235,7 @@ func (a *Client) Connect() (int, error) {
 		if ctx, err = a.initializeAuthContext(ctx); err != nil {
 			err := conn.Close()
 			if err != nil {
-				klog.ErrorS(err, "failed to close connection")
+				klog.ErrorS(err, "failed to close gRPC connection", "agentID", a.agentID)
 			}
 			return 0, err
 		}
@@ -258,18 +258,18 @@ func (a *Client) Connect() (int, error) {
 	a.conn = conn
 	a.stream = stream
 	a.serverID = serverID
-	klog.V(2).InfoS("Connect to", "server", serverID)
+	klog.V(2).InfoS("Connect to server", "serverID", serverID)
 	return serverCount, nil
 }
 
-// Close closes the underlying connection.
+// Close closes the Connect gRPC connection.
 func (a *Client) Close() {
 	if a.conn == nil {
 		klog.Errorln("Unexpected empty AgentClient.conn")
 	}
 	err := a.conn.Close()
 	if err != nil {
-		klog.ErrorS(err, "failed to close underlying connection")
+		klog.ErrorS(err, "failed to close gRPC connection", "serverID", a.serverID, "agentID", a.agentID)
 	}
 	close(a.stopCh)
 }
@@ -377,10 +377,10 @@ func (a *Client) Serve() {
 		pkt, err := a.Recv()
 		if err != nil {
 			if err == io.EOF {
-				klog.V(2).InfoS("received EOF, exit")
+				klog.V(2).InfoS("received EOF, exit", "serverID", a.serverID, "agentID", a.agentID)
 				return
 			}
-			klog.ErrorS(err, "could not read stream")
+			klog.ErrorS(err, "could not read stream", "serverID", a.serverID, "agentID", a.agentID)
 			return
 		}
 
@@ -412,32 +412,33 @@ func (a *Client) Serve() {
 			connCtx.cleanFunc = func() {
 				// block on purpose
 				<-dialDone
-				if connCtx.conn != nil {
-					klog.V(4).InfoS("close connection", "dialID", dialReq.Random, "connectionID", connID, "dialAddress", dialReq.Address)
-					var closePkt *client.Packet
-					if connID == 0 {
-						closePkt = &client.Packet{
-							Type:    client.PacketType_DIAL_CLS,
-							Payload: &client.Packet_CloseDial{CloseDial: &client.CloseDial{}},
-						}
-						closePkt.GetCloseDial().Random = dialReq.Random
-					} else {
-						closePkt = &client.Packet{
-							Type:    client.PacketType_CLOSE_RSP,
-							Payload: &client.Packet_CloseResponse{CloseResponse: &client.CloseResponse{}},
-						}
-						closePkt.GetCloseResponse().ConnectID = connID
+				if connCtx.conn == nil {
+					// TODO: move this guard lower
+					klog.ErrorS(fmt.Errorf("remote connection is nil"), "could not send CLOSE_RESP to nil connection")
+					return
+				}
+				klog.V(4).InfoS("close connection", "dialID", dialReq.Random, "connectionID", connID, "dialAddress", dialReq.Address)
+				var closePkt *client.Packet
+				if connID == 0 {
+					closePkt = &client.Packet{
+						Type:    client.PacketType_DIAL_CLS,
+						Payload: &client.Packet_CloseDial{CloseDial: &client.CloseDial{}},
 					}
-					if err := a.Send(closePkt); err != nil {
-						klog.ErrorS(err, "close response failure", "")
-					}
-					close(dataCh)
-					a.connManager.Delete(connID)
-					if err := connCtx.conn.Close(); err != nil {
-						klog.ErrorS(err, "failed to close connection")
-					}
+					closePkt.GetCloseDial().Random = dialReq.Random
 				} else {
-					klog.ErrorS(fmt.Errorf("connection is nil"), "cannot send CLOSE_RESP to nil connection")
+					closePkt = &client.Packet{
+						Type:    client.PacketType_CLOSE_RSP,
+						Payload: &client.Packet_CloseResponse{CloseResponse: &client.CloseResponse{}},
+					}
+					closePkt.GetCloseResponse().ConnectID = connID
+				}
+				if err := a.Send(closePkt); err != nil {
+					klog.ErrorS(err, "close response failure", "")
+				}
+				close(dataCh)
+				a.connManager.Delete(connID)
+				if err := connCtx.conn.Close(); err != nil {
+					klog.ErrorS(err, "failed to close connection to remote", "dialID", dialReq.Random, "connectID", connID)
 				}
 			}
 			labels := runpprof.Labels(
@@ -458,10 +459,11 @@ func (a *Client) Serve() {
 						reason = metrics.DialFailureTimeout
 					}
 					metrics.Metrics.ObserveDialFailure(reason)
-					klog.ErrorS(err, "error dialing backend", "dialID", dialReq.Random, "connectionID", connID, "dialAddress", dialReq.Address)
+					// Do not log agent errors for remote unavailable.
+					klog.V(1).InfoS("error dialing backend", "error", err, "dialID", dialReq.Random, "connectionID", connID, "dialAddress", dialReq.Address)
 					dialResp.GetDialResponse().Error = err.Error()
 					if err := a.Send(dialResp); err != nil {
-						klog.ErrorS(err, "could not send dialResp", "dialID", dialReq.Random, "connectionID", connID)
+						klog.ErrorS(err, "could not send DIAL_RSP with error", "dialID", dialReq.Random, "connectionID", connID, "dialAddress", dialReq.Address)
 					}
 					// Cannot invoke clean up as we have no conn yet.
 					return
@@ -480,7 +482,7 @@ func (a *Client) Serve() {
 					"dialAddress", dialReq.Address,
 				)
 				if err := a.Send(dialResp); err != nil {
-					klog.ErrorS(err, "could not send dialResp", "dialID", dialReq.Random)
+					klog.ErrorS(err, "could not send DIAL_RSP", "dialID", dialReq.Random, "connectionID", connID, "dialAddress", dialReq.Address)
 					// clean-up is normally called from remoteToProxy which we will never invoke.
 					// So we are invoking it here to force the clean-up to occur.
 					// However, cleanup will block until dialDone is closed.
@@ -519,7 +521,7 @@ func (a *Client) Serve() {
 				resp.GetCloseResponse().ConnectID = connID
 				resp.GetCloseResponse().Error = "Unknown connectID"
 				if err := a.Send(resp); err != nil {
-					klog.ErrorS(err, "close response send failure", err)
+					klog.ErrorS(err, "could not send CLOSE_RSP", err, "connectionID", connID)
 					continue
 				}
 			}
@@ -550,7 +552,7 @@ func (a *Client) remoteToProxy(connID int64, ctx *connContext) {
 		klog.V(5).InfoS("received data from remote", "bytes", n, "connectionID", connID)
 
 		if err == io.EOF {
-			klog.V(2).InfoS("connection EOF", "connectionID", connID)
+			klog.V(2).InfoS("remote connection EOF", "connectionID", connID)
 			return
 		} else if err != nil {
 			// "use of closed network connection" errors are expected upon receiving CLOSE_REQ
@@ -567,7 +569,7 @@ func (a *Client) remoteToProxy(connID int64, ctx *connContext) {
 				ConnectID: connID,
 			}}
 			if err := a.Send(resp); err != nil {
-				klog.ErrorS(err, "stream send failure", "connectionID", connID)
+				klog.ErrorS(err, "could not send DATA", "connectionID", connID)
 			}
 		}
 	}
