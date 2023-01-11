@@ -39,6 +39,7 @@ import (
 
 	client "sigs.k8s.io/apiserver-network-proxy/konnectivity-client/proto/client"
 	"sigs.k8s.io/apiserver-network-proxy/pkg/server/metrics"
+	metricstest "sigs.k8s.io/apiserver-network-proxy/pkg/testing/metrics"
 	agentmock "sigs.k8s.io/apiserver-network-proxy/proto/agent/mocks"
 	"sigs.k8s.io/apiserver-network-proxy/proto/header"
 )
@@ -321,6 +322,10 @@ func TestServerProxyNoBackend(t *testing.T) {
 
 	}
 	baseServerProxyTestWithoutBackend(t, validate)
+
+	if err := metricstest.ExpectServerDialFailure(metrics.DialFailureNoAgent, 1); err != nil {
+		t.Error(err)
+	}
 }
 
 func TestServerProxyNormalClose(t *testing.T) {

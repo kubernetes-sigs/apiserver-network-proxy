@@ -452,6 +452,7 @@ func (s *ProxyServer) serveRecvFrontend(stream client.ProxyService_ProxyServer, 
 			backend, err = s.getBackend(address)
 			if err != nil {
 				klog.ErrorS(err, "Failed to get a backend", "dialID", random)
+				metrics.Metrics.ObserveDialFailure(metrics.DialFailureNoAgent)
 
 				resp := &client.Packet{
 					Type: client.PacketType_DIAL_RSP,
