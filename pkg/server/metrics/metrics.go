@@ -230,6 +230,7 @@ func (s *ServerMetrics) FullRecvChannel(serviceMethod string) prometheus.Gauge {
 type DialFailureReason string
 
 const (
+	DialFailureNoAgent              DialFailureReason = "no_agent"              // No available agent is connected.
 	DialFailureErrorResponse        DialFailureReason = "error_response"        // Dial failure reported by the agent back to the server.
 	DialFailureUnrecognizedResponse DialFailureReason = "unrecognized_response" // Dial repsonse received for unrecognozide dial ID.
 	DialFailureSendResponse         DialFailureReason = "send_rsp"              // Successful dial response from agent, but failed to send to frontend.
