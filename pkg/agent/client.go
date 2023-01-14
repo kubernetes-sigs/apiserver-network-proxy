@@ -602,9 +602,14 @@ func (a *Client) proxyToRemote(connID int64, ctx *connContext) {
 		// As the read side of the dataCh channel, we cannot close it.
 		// However serve() may be blocked writing to the channel,
 		// so we need to consume the channel until it is closed.
+		discardedPktCount := 0
 		for range ctx.dataCh {
 			// Ignore values as this indicates there was a problem
 			// with the remote connection.
+			discardedPktCount++
+		}
+		if discardedPktCount > 0 {
+			klog.V(2).InfoS("Discard packets while exiting proxyToRemote", "pktCount", discardedPktCount, "connectionID", connID)
 		}
 	}()
 

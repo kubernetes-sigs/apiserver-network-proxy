@@ -441,6 +441,9 @@ func TestServerProxyRecvChanFull(t *testing.T) {
 			}),
 
 			frontendConn.EXPECT().Recv().Return(closeReqPkt(1), nil),
+			// Ensure that the go-routines don't deadlock if more packets are received before closing the connection.
+			// This is a bit contrived, but exercises a possible failure scenario.
+			frontendConn.EXPECT().Recv().Return(data, nil).Times(xfrChannelSize+1),
 			frontendConn.EXPECT().Recv().Return(nil, io.EOF),
 		)
 		gomock.InOrder(
@@ -455,9 +458,6 @@ func TestServerProxyRecvChanFull(t *testing.T) {
 				return nil
 			}),
 			agentConn.EXPECT().Send(data).Return(nil).Times(xfrChannelSize+1), // Expect the remaining packets to be sent.
-			agentConn.EXPECT().Send(closeReqPkt(1)).Return(nil),
-			// This extra close is unwanted and should be removed; see
-			// https://github.com/kubernetes-sigs/apiserver-network-proxy/pull/307
 			agentConn.EXPECT().Send(closeReqPkt(1)).Return(nil),
 		)
 	}

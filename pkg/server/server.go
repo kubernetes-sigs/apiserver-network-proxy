@@ -433,21 +433,26 @@ func (s *ProxyServer) readFrontendToChannel(stream client.ProxyService_ProxyServ
 func (s *ProxyServer) serveRecvFrontend(stream client.ProxyService_ProxyServer, recvCh <-chan *client.Packet) {
 	klog.V(5).Infoln("start serving frontend stream")
 
-	defer func() {
-		// As the read side of the recvCh channel, we cannot close it.
-		// However readFrontendToChannel() may be blocked writing to the channel,
-		// so we need to consume the channel until it is closed.
-		for range recvCh {
-			// Ignore values as this indicates there was a problem
-			// with the remote connection.
-		}
-	}()
-
 	var firstConnID int64
 	// The first packet should be a DIAL_REQ, we will randomly get a
 	// backend from the BackendManger then.
 	var backend Backend
 	var err error
+
+	defer func() {
+		// As the read side of the recvCh channel, we cannot close it.
+		// However readFrontendToChannel() may be blocked writing to the channel,
+		// so we need to consume the channel until it is closed.
+		discardedPktCount := 0
+		for range recvCh {
+			// Ignore values as this indicates there was a problem
+			// with the remote connection.
+			discardedPktCount++
+		}
+		if discardedPktCount > 0 {
+			klog.V(2).InfoS("Discard packets while exiting serveRecvFrontend", "pktCount", discardedPktCount, "connectionID", firstConnID)
+		}
+	}()
 
 	for pkt := range recvCh {
 		switch pkt.Type {
@@ -512,6 +517,8 @@ func (s *ProxyServer) serveRecvFrontend(stream client.ProxyService_ProxyServer, 
 			} else {
 				klog.V(5).InfoS("CLOSE_REQ sent to backend", "connectionID", connID)
 			}
+			klog.V(3).InfoS("Closing frontend streaming per CLOSE_REQ", "connectionID", connID)
+			return
 
 		case client.PacketType_DIAL_CLS:
 			random := pkt.GetCloseDial().Random
@@ -539,7 +546,7 @@ func (s *ProxyServer) serveRecvFrontend(stream client.ProxyService_ProxyServer, 
 			if firstConnID == 0 {
 				firstConnID = connID
 			} else if firstConnID != connID {
-				klog.ErrorS(nil, "Data does not match first connection id", "fistConnectionID", firstConnID, "connectionID", connID)
+				klog.ErrorS(nil, "Data does not match first connection id", "firstConnectionID", firstConnID, "connectionID", connID)
 				// Something went very wrong if we get here. Close both connections to avoid leaks.
 				s.sendBackendClose(backend, connID, 0, "mismatched connection IDs")
 				s.sendBackendClose(backend, firstConnID, 0, "mismatched connection IDs")
@@ -771,6 +778,18 @@ func (s *ProxyServer) readBackendToChannel(stream agent.AgentService_ConnectServ
 // route the packet back to the correct client
 func (s *ProxyServer) serveRecvBackend(backend Backend, stream agent.AgentService_ConnectServer, agentID string, recvCh <-chan *client.Packet) {
 	defer func() {
+		// Drain recvCh to ensure that readBackendToChannel is not blocked on a channel write.
+		// This should never happen, as termination of this function should only be initiated by closing recvCh.
+		discardedPktCount := 0
+		for range recvCh {
+			discardedPktCount++
+		}
+		if discardedPktCount > 0 {
+			klog.V(2).InfoS("Discard packets while exiting serveRecvBackend", "pktCount", discardedPktCount, "agentID", agentID)
+		}
+	}()
+
+	defer func() {
 		// Close all connected frontends when the agent connection is closed
 		// TODO(#126): Frontends in PendingDial state that have not been added to the
 		//             list of frontends should also be closed.
@@ -874,7 +893,7 @@ func (s *ProxyServer) serveRecvBackend(backend Backend, stream agent.AgentServic
 			klog.V(5).InfoS("Received data from agent", "bytes", len(resp.Data), "agentID", agentID, "connectionID", resp.ConnectID)
 			frontend, err := s.getFrontend(agentID, resp.ConnectID)
 			if err != nil {
-				klog.V(2).InfoS("could not get frontend client; closing conenction", "agentID", agentID, "connectionID", resp.ConnectID, "error", err)
+				klog.V(2).InfoS("could not get frontend client; closing connection", "agentID", agentID, "connectionID", resp.ConnectID, "error", err)
 				s.sendBackendClose(stream, resp.ConnectID, 0, "missing frontend")
 				break
 			}
