@@ -502,7 +502,7 @@ func (a *Client) Serve() {
 			if ok {
 				ctx.send(data.Data)
 			} else {
-				klog.ErrorS(nil, "received DATA for unrecognized connection", "connectionID", data.ConnectID)
+				klog.V(2).InfoS("received DATA for unrecognized connection", "connectionID", data.ConnectID)
 				a.Send(&client.Packet{
 					Type: client.PacketType_CLOSE_RSP,
 					Payload: &client.Packet_CloseResponse{

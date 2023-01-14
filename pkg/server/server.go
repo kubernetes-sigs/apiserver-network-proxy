@@ -874,7 +874,7 @@ func (s *ProxyServer) serveRecvBackend(backend Backend, stream agent.AgentServic
 			klog.V(5).InfoS("Received data from agent", "bytes", len(resp.Data), "agentID", agentID, "connectionID", resp.ConnectID)
 			frontend, err := s.getFrontend(agentID, resp.ConnectID)
 			if err != nil {
-				klog.ErrorS(err, "could not get frontend client; closing conenction", "agentID", agentID, "connectionID", resp.ConnectID)
+				klog.V(2).InfoS("could not get frontend client; closing conenction", "agentID", agentID, "connectionID", resp.ConnectID, "error", err)
 				s.sendBackendClose(stream, resp.ConnectID, 0, "missing frontend")
 				break
 			}
