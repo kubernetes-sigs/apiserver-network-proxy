@@ -338,15 +338,20 @@ func (t *grpcTunnel) serve(tunnelCtx context.Context) {
 			conn, ok := t.conns.get(resp.ConnectID)
 
 			if !ok {
-				klog.ErrorS(nil, "Connection not recognized", "connectionID", resp.ConnectID)
-				t.stream.Send(&client.Packet{
+				klog.ErrorS(nil, "Connection not recognized", "connectionID", resp.ConnectID, "packetType", "DATA")
+				req := &client.Packet{
 					Type: client.PacketType_CLOSE_REQ,
 					Payload: &client.Packet_CloseRequest{
 						CloseRequest: &client.CloseRequest{
 							ConnectID: resp.ConnectID,
 						},
 					},
-				})
+				}
+				const segment = commonmetrics.SegmentFromClient
+				metrics.Metrics.ObservePacket(segment, req.Type)
+				if err := t.stream.Send(req); err != nil {
+					metrics.Metrics.ObserveStreamError(segment, err, req.Type)
+				}
 				continue
 			}
 			timer := time.NewTimer((time.Duration)(t.readTimeoutSeconds) * time.Second)
@@ -365,7 +370,7 @@ func (t *grpcTunnel) serve(tunnelCtx context.Context) {
 			conn, ok := t.conns.get(resp.ConnectID)
 
 			if !ok {
-				klog.V(1).InfoS("Connection not recognized", "connectionID", resp.ConnectID)
+				klog.V(1).InfoS("Connection not recognized", "connectionID", resp.ConnectID, "packetType", "CLOSE_RSP")
 				continue
 			}
 			close(conn.readCh)
