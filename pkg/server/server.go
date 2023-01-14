@@ -507,8 +507,7 @@ func (s *ProxyServer) serveRecvFrontend(stream client.ProxyService_ProxyServer, 
 			connID := pkt.GetCloseRequest().ConnectID
 			klog.V(5).InfoS("Received CLOSE_REQ", "connectionID", connID)
 			if backend == nil {
-				klog.V(2).InfoS("Backend has not been initialized for requested connection. Client should send a Dial Request first",
-					"connectionID", connID)
+				klog.V(2).InfoS("Backend has not been initialized for this connection", "connectionID", connID)
 				s.sendFrontendClose(stream, connID, "backend uninitialized")
 				continue
 			}
@@ -540,7 +539,7 @@ func (s *ProxyServer) serveRecvFrontend(stream client.ProxyService_ProxyServer, 
 			data := pkt.GetData().Data
 			klog.V(5).InfoS("Received data from connection", "bytes", len(data), "connectionID", connID)
 			if backend == nil {
-				klog.V(2).InfoS("Backend has not been initialized for the connection. Client should send a Dial Request first", "connectionID", connID)
+				klog.V(2).InfoS("Backend has not been initialized for this connection", "connectionID", connID)
 				s.sendFrontendClose(stream, connID, "backend not initialized")
 				return
 			}
