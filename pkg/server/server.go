@@ -509,11 +509,13 @@ func (s *ProxyServer) serveRecvFrontend(stream client.ProxyService_ProxyServer, 
 			if backend == nil {
 				klog.V(2).InfoS("Backend has not been initialized for requested connection. Client should send a Dial Request first",
 					"connectionID", connID)
+				s.sendFrontendClose(stream, connID, "backend uninitialized")
 				continue
 			}
 			if err := backend.Send(pkt); err != nil {
 				// TODO: retry with other backends connecting to this agent.
 				klog.ErrorS(err, "CLOSE_REQ to Backend failed", "connectionID", connID)
+				s.sendFrontendClose(stream, connID, "CLOSE_REQ to backend failed")
 			} else {
 				klog.V(5).InfoS("CLOSE_REQ sent to backend", "connectionID", connID)
 			}

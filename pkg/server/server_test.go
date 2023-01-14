@@ -361,9 +361,6 @@ func TestServerProxyNormalClose(t *testing.T) {
 			agentConn.EXPECT().Send(dialReq).Return(nil).Times(1),
 			agentConn.EXPECT().Send(data).Return(nil).Times(1),
 			agentConn.EXPECT().Send(closeReqPkt(connectID)).Return(nil).Times(1),
-			// This extra close is unwanted and should be removed; see
-			// https://github.com/kubernetes-sigs/apiserver-network-proxy/pull/307
-			agentConn.EXPECT().Send(closeReqPkt(connectID)).Return(nil).Times(1),
 		)
 	}
 	baseServerProxyTestWithBackend(t, validate)
