@@ -47,15 +47,16 @@ func TestProxy_ConcurrencyGRPC(t *testing.T) {
 	clientset := runAgent(proxy.agent, stopCh)
 	waitForConnectedServerCount(t, 1, clientset)
 
-	// run test client
-	tunnel, err := client.CreateSingleUseGrpcTunnel(ctx, proxy.front, grpc.WithInsecure())
-	if err != nil {
-		t.Fatal(err)
-	}
-
 	var wg sync.WaitGroup
 	verify := func() {
 		defer wg.Done()
+
+		// run test client
+		tunnel, err := client.CreateSingleUseGrpcTunnel(ctx, proxy.front, grpc.WithInsecure())
+		if err != nil {
+			t.Error(err)
+			return
+		}
 
 		c := &http.Client{
 			Transport: &http.Transport{
@@ -66,11 +67,13 @@ func TestProxy_ConcurrencyGRPC(t *testing.T) {
 		r, err := c.Get(server.URL)
 		if err != nil {
 			t.Error(err)
+			return
 		}
 
 		data, err := ioutil.ReadAll(r.Body)
 		if err != nil {
 			t.Error(err)
+			return
 		}
 		defer r.Body.Close()
 

@@ -141,6 +141,40 @@ func (s fakeSlowSend) Send(p *client.Packet) error {
 	return err
 }
 
+func TestAlreadyDialed(t *testing.T) {
+	expectCleanShutdown(t)
+
+	ctx := context.Background()
+	s, ps := pipe()
+	ts := testServer(ps, 100)
+
+	defer ps.Close()
+	defer s.Close()
+
+	// artificially delay after calling Send, ensure handoff of result from serve to DialContext still works
+	slowStream := fakeSlowSend{s}
+	tunnel := newUnstartedTunnel(slowStream, &fakeConn{})
+
+	go tunnel.serve(ctx)
+	go ts.serve()
+
+	_, err := tunnel.DialContext(ctx, "tcp", "127.0.0.1:80")
+	if err != nil {
+		t.Fatalf("expect nil; got %v", err)
+	}
+
+	// Duplicate
+	_, err = tunnel.DialContext(ctx, "tcp", "127.0.0.1:80")
+	if err == nil {
+		t.Fatalf("expect duplicate dial error, got nil")
+	}
+
+	if err := metricstest.ExpectClientDialFailure(metrics.DialFailureAlreadyStarted, 1); err != nil {
+		t.Error(err)
+	}
+	metrics.Metrics.Reset() // For clean shutdown.
+}
+
 func TestData(t *testing.T) {
 	expectCleanShutdown(t)
 
