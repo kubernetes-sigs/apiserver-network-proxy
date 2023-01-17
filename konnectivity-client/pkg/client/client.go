@@ -118,6 +118,8 @@ func (cm *connectionManager) closeAll() {
 // grpcTunnel implements Tunnel
 type grpcTunnel struct {
 	stream      client.ProxyService_ProxyClient
+	sendLock    sync.Mutex
+	recvLock    sync.Mutex
 	clientConn  clientConn
 	pendingDial pendingDialManager
 	conns       connectionManager
@@ -243,20 +245,17 @@ func (t *grpcTunnel) serve(tunnelCtx context.Context) {
 	}()
 
 	for {
-		pkt, err := t.stream.Recv()
+		pkt, err := t.Recv()
 		if err == io.EOF {
 			return
 		}
-		const segment = commonmetrics.SegmentToClient
 		isClosing := t.isClosing()
 		if err != nil || pkt == nil {
 			if !isClosing {
 				klog.ErrorS(err, "stream read failure")
 			}
-			metrics.Metrics.ObserveStreamErrorNoPacket(segment, err)
 			return
 		}
-		metrics.Metrics.ObservePacket(segment, pkt.Type)
 		if isClosing {
 			return
 		}
@@ -418,18 +417,15 @@ func (t *grpcTunnel) dialContext(requestCtx context.Context, protocol, address s
 	}
 	klog.V(5).InfoS("[tracing] send packet", "type", req.Type)
 
-	const segment = commonmetrics.SegmentFromClient
-	metrics.Metrics.ObservePacket(segment, req.Type)
-	err := t.stream.Send(req)
+	err := t.Send(req)
 	if err != nil {
-		metrics.Metrics.ObserveStreamError(segment, err, req.Type)
 		return nil, err
 	}
 
 	klog.V(5).Infoln("DIAL_REQ sent to proxy server")
 
 	c := &conn{
-		stream:      t.stream,
+		tunnel:      t,
 		random:      random,
 		closeTunnel: t.closeTunnel,
 	}
@@ -473,10 +469,7 @@ func (t *grpcTunnel) closeDial(dialID int64) {
 			},
 		},
 	}
-	const segment = commonmetrics.SegmentFromClient
-	metrics.Metrics.ObservePacket(segment, req.Type)
-	if err := t.stream.Send(req); err != nil {
-		metrics.Metrics.ObserveStreamError(segment, err, req.Type)
+	if err := t.Send(req); err != nil {
 		klog.V(5).InfoS("Failed to send DIAL_CLS", "err", err, "dialID", dialID)
 	}
 	t.closeTunnel()
@@ -489,6 +482,30 @@ func (t *grpcTunnel) closeTunnel() {
 
 func (t *grpcTunnel) isClosing() bool {
 	return atomic.LoadUint32(&t.closing) != 0
+}
+
+func (t *grpcTunnel) Send(pkt *client.Packet) error {
+	t.sendLock.Lock()
+	defer t.sendLock.Unlock()
+
+	const segment = commonmetrics.SegmentFromClient
+	metrics.Metrics.ObservePacket(segment, pkt.Type)
+	err := t.stream.Send(pkt)
+	if err != nil && err != io.EOF {
+		metrics.Metrics.ObserveStreamError(segment, err, pkt.Type)
+	}
+	return err
+}
+
+func (t *grpcTunnel) Recv() (*client.Packet, error) {
+	t.recvLock.Lock()
+	defer t.recvLock.Unlock()
+
+	pkt, err := t.stream.Recv()
+	if err != nil && err != io.EOF {
+		metrics.Metrics.ObserveStreamErrorNoPacket(commonmetrics.SegmentToClient, err)
+	}
+	return pkt, err
 }
 
 func GetDialFailureReason(err error) (isDialFailure bool, reason metrics.DialFailureReason) {
