@@ -544,6 +544,11 @@ func (s *ProxyServer) serveRecvFrontend(stream client.ProxyService_ProxyServer, 
 				return
 			}
 
+			if connID == 0 {
+				klog.ErrorS(nil, "Received packet missing ConnectID from frontend", "packetType", "DATA")
+				continue
+			}
+
 			if firstConnID == 0 {
 				firstConnID = connID
 			} else if firstConnID != connID {
@@ -892,6 +897,11 @@ func (s *ProxyServer) serveRecvBackend(backend Backend, stream agent.AgentServic
 		case client.PacketType_DATA:
 			resp := pkt.GetData()
 			klog.V(5).InfoS("Received data from agent", "bytes", len(resp.Data), "agentID", agentID, "connectionID", resp.ConnectID)
+			if resp.ConnectID == 0 {
+				klog.ErrorS(nil, "Received packet missing ConnectID from agent", "packetType", "DATA")
+				continue
+			}
+
 			frontend, err := s.getFrontend(agentID, resp.ConnectID)
 			if err != nil {
 				klog.V(2).InfoS("could not get frontend client; closing connection", "agentID", agentID, "connectionID", resp.ConnectID, "error", err)

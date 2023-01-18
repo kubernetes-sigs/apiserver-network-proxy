@@ -497,6 +497,10 @@ func (a *Client) Serve() {
 		case client.PacketType_DATA:
 			data := pkt.GetData()
 			klog.V(4).InfoS("received DATA", "connectionID", data.ConnectID)
+			if data.ConnectID == 0 {
+				klog.ErrorS(nil, "Received packet missing ConnectID from frontend", "packetType", "DATA")
+				continue
+			}
 
 			ctx, ok := a.connManager.Get(data.ConnectID)
 			if ok {

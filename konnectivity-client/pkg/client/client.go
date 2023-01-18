@@ -334,6 +334,10 @@ func (t *grpcTunnel) serve(tunnelCtx context.Context) {
 
 		case client.PacketType_DATA:
 			resp := pkt.GetData()
+			if resp.ConnectID == 0 {
+				klog.ErrorS(nil, "Received packet missing ConnectID", "packetType", "DATA")
+				continue
+			}
 			// TODO: flow control
 			conn, ok := t.conns.get(resp.ConnectID)
 
