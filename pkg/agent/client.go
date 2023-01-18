@@ -497,10 +497,26 @@ func (a *Client) Serve() {
 		case client.PacketType_DATA:
 			data := pkt.GetData()
 			klog.V(4).InfoS("received DATA", "connectionID", data.ConnectID)
+			if data.ConnectID == 0 {
+				klog.ErrorS(nil, "Received packet missing ConnectID from frontend", "packetType", "DATA")
+				continue
+			}
 
 			ctx, ok := a.connManager.Get(data.ConnectID)
 			if ok {
 				ctx.send(data.Data)
+			} else {
+				klog.V(2).InfoS("received DATA for unrecognized connection", "connectionID", data.ConnectID)
+				a.Send(&client.Packet{
+					Type: client.PacketType_CLOSE_RSP,
+					Payload: &client.Packet_CloseResponse{
+						CloseResponse: &client.CloseResponse{
+							ConnectID: data.ConnectID,
+							Error:     "unrecognized connectID",
+						},
+					},
+				})
+				continue
 			}
 
 		case client.PacketType_CLOSE_REQ:
@@ -590,9 +606,14 @@ func (a *Client) proxyToRemote(connID int64, ctx *connContext) {
 		// As the read side of the dataCh channel, we cannot close it.
 		// However serve() may be blocked writing to the channel,
 		// so we need to consume the channel until it is closed.
+		discardedPktCount := 0
 		for range ctx.dataCh {
 			// Ignore values as this indicates there was a problem
 			// with the remote connection.
+			discardedPktCount++
+		}
+		if discardedPktCount > 0 {
+			klog.V(2).InfoS("Discard packets while exiting proxyToRemote", "pktCount", discardedPktCount, "connectionID", connID)
 		}
 	}()
 

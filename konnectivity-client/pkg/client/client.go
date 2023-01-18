@@ -334,11 +334,23 @@ func (t *grpcTunnel) serve(tunnelCtx context.Context) {
 
 		case client.PacketType_DATA:
 			resp := pkt.GetData()
+			if resp.ConnectID == 0 {
+				klog.ErrorS(nil, "Received packet missing ConnectID", "packetType", "DATA")
+				continue
+			}
 			// TODO: flow control
 			conn, ok := t.conns.get(resp.ConnectID)
 
 			if !ok {
-				klog.V(1).InfoS("Connection not recognized", "connectionID", resp.ConnectID)
+				klog.ErrorS(nil, "Connection not recognized", "connectionID", resp.ConnectID, "packetType", "DATA")
+				t.Send(&client.Packet{
+					Type: client.PacketType_CLOSE_REQ,
+					Payload: &client.Packet_CloseRequest{
+						CloseRequest: &client.CloseRequest{
+							ConnectID: resp.ConnectID,
+						},
+					},
+				})
 				continue
 			}
 			timer := time.NewTimer((time.Duration)(t.readTimeoutSeconds) * time.Second)
@@ -357,7 +369,7 @@ func (t *grpcTunnel) serve(tunnelCtx context.Context) {
 			conn, ok := t.conns.get(resp.ConnectID)
 
 			if !ok {
-				klog.V(1).InfoS("Connection not recognized", "connectionID", resp.ConnectID)
+				klog.V(1).InfoS("Connection not recognized", "connectionID", resp.ConnectID, "packetType", "CLOSE_RSP")
 				continue
 			}
 			close(conn.readCh)
