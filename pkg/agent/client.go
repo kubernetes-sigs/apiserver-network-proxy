@@ -293,12 +293,17 @@ func (a *Client) Recv() (*client.Packet, error) {
 	a.recvLock.Lock()
 	defer a.recvLock.Unlock()
 
+	const segment = commonmetrics.SegmentToAgent
 	pkt, err := a.stream.Recv()
 	if err != nil && err != io.EOF {
 		metrics.Metrics.ObserveServerFailureDeprecated(metrics.DirectionFromServer)
-		metrics.Metrics.ObserveStreamErrorNoPacket(commonmetrics.SegmentToAgent, err)
+		metrics.Metrics.ObserveStreamErrorNoPacket(segment, err)
 	}
-	return pkt, err
+	if err != nil {
+		return nil, err
+	}
+	metrics.Metrics.ObservePacket(segment, pkt.Type)
+	return pkt, nil
 }
 
 func serverCount(stream agent.AgentService_ConnectClient) (int, error) {
@@ -390,7 +395,6 @@ func (a *Client) Serve() {
 		}
 
 		klog.V(5).InfoS("[tracing] recv packet", "type", pkt.Type)
-		metrics.Metrics.ObservePacket(commonmetrics.SegmentToAgent, pkt.Type)
 		switch pkt.Type {
 		case client.PacketType_DIAL_REQ:
 			dialReq := pkt.GetDialRequest()
