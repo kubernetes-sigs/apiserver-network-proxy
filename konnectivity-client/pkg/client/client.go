@@ -501,11 +501,16 @@ func (t *grpcTunnel) Recv() (*client.Packet, error) {
 	t.recvLock.Lock()
 	defer t.recvLock.Unlock()
 
+	const segment = commonmetrics.SegmentToClient
 	pkt, err := t.stream.Recv()
 	if err != nil && err != io.EOF {
-		metrics.Metrics.ObserveStreamErrorNoPacket(commonmetrics.SegmentToClient, err)
+		metrics.Metrics.ObserveStreamErrorNoPacket(segment, err)
 	}
-	return pkt, err
+	if err != nil {
+		return pkt, err
+	}
+	metrics.Metrics.ObservePacket(segment, pkt.Type)
+	return pkt, nil
 }
 
 func GetDialFailureReason(err error) (isDialFailure bool, reason metrics.DialFailureReason) {
