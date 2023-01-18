@@ -19,6 +19,7 @@ package server
 import (
 	"context"
 	"fmt"
+	"io"
 	"math/rand"
 	"strings"
 	"sync"
@@ -90,7 +91,7 @@ func (b *backend) Send(p *client.Packet) error {
 	const segment = commonmetrics.SegmentToAgent
 	metrics.Metrics.ObservePacket(segment, p.Type)
 	err := b.conn.Send(p)
-	if err != nil {
+	if err != nil && err != io.EOF {
 		metrics.Metrics.ObserveStreamError(segment, err, p.Type)
 	}
 	return err
