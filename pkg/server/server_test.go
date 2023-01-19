@@ -39,6 +39,7 @@ import (
 
 	client "sigs.k8s.io/apiserver-network-proxy/konnectivity-client/proto/client"
 	"sigs.k8s.io/apiserver-network-proxy/pkg/server/metrics"
+	metricstest "sigs.k8s.io/apiserver-network-proxy/pkg/testing/metrics"
 	agentmock "sigs.k8s.io/apiserver-network-proxy/proto/agent/mocks"
 	"sigs.k8s.io/apiserver-network-proxy/proto/header"
 )
@@ -321,6 +322,10 @@ func TestServerProxyNoBackend(t *testing.T) {
 
 	}
 	baseServerProxyTestWithoutBackend(t, validate)
+
+	if err := metricstest.ExpectServerDialFailure(metrics.DialFailureNoAgent, 1); err != nil {
+		t.Error(err)
+	}
 }
 
 func TestServerProxyNormalClose(t *testing.T) {
@@ -349,16 +354,13 @@ func TestServerProxyNormalClose(t *testing.T) {
 		gomock.InOrder(
 			frontendConn.EXPECT().Recv().Return(dialReq, nil).Times(1),
 			frontendConn.EXPECT().Recv().Return(data, nil).Times(1),
-			frontendConn.EXPECT().Recv().Return(closePacket(connectID), nil).Times(1),
+			frontendConn.EXPECT().Recv().Return(closeReqPkt(connectID), nil).Times(1),
 			frontendConn.EXPECT().Recv().Return(nil, io.EOF).Times(1),
 		)
 		gomock.InOrder(
 			agentConn.EXPECT().Send(dialReq).Return(nil).Times(1),
 			agentConn.EXPECT().Send(data).Return(nil).Times(1),
-			agentConn.EXPECT().Send(closePacket(connectID)).Return(nil).Times(1),
-			// This extra close is unwanted and should be removed; see
-			// https://github.com/kubernetes-sigs/apiserver-network-proxy/pull/307
-			agentConn.EXPECT().Send(closePacket(connectID)).Return(nil).Times(1),
+			agentConn.EXPECT().Send(closeReqPkt(connectID)).Return(nil).Times(1),
 		)
 	}
 	baseServerProxyTestWithBackend(t, validate)
@@ -435,7 +437,10 @@ func TestServerProxyRecvChanFull(t *testing.T) {
 				return data, nil
 			}),
 
-			frontendConn.EXPECT().Recv().Return(closePacket(1), nil),
+			frontendConn.EXPECT().Recv().Return(closeReqPkt(1), nil),
+			// Ensure that the go-routines don't deadlock if more packets are received before closing the connection.
+			// This is a bit contrived, but exercises a possible failure scenario.
+			frontendConn.EXPECT().Recv().Return(data, nil).Times(xfrChannelSize+1),
 			frontendConn.EXPECT().Recv().Return(nil, io.EOF),
 		)
 		gomock.InOrder(
@@ -450,21 +455,100 @@ func TestServerProxyRecvChanFull(t *testing.T) {
 				return nil
 			}),
 			agentConn.EXPECT().Send(data).Return(nil).Times(xfrChannelSize+1), // Expect the remaining packets to be sent.
-			agentConn.EXPECT().Send(closePacket(1)).Return(nil),
-			// This extra close is unwanted and should be removed; see
-			// https://github.com/kubernetes-sigs/apiserver-network-proxy/pull/307
-			agentConn.EXPECT().Send(closePacket(1)).Return(nil),
+			agentConn.EXPECT().Send(closeReqPkt(1)).Return(nil),
 		)
 	}
 	baseServerProxyTestWithBackend(t, validate)
 }
 
-func closePacket(connectID int64) *client.Packet {
+func TestServerProxyNoDial(t *testing.T) {
+	baseServerProxyTestWithBackend(t, func(frontendConn, agentConn *agentmock.MockAgentService_ConnectServer) {
+		const connectID = 123456
+		data := &client.Packet{
+			Type: client.PacketType_DATA,
+			Payload: &client.Packet_Data{
+				Data: &client.Data{
+					ConnectID: connectID,
+				},
+			},
+		}
+
+		gomock.InOrder(
+			frontendConn.EXPECT().Recv().Return(data, nil),
+			frontendConn.EXPECT().Recv().Return(nil, io.EOF),
+		)
+		frontendConn.EXPECT().Send(closeRspPkt(connectID, "backend not initialized")).Return(nil)
+	})
+}
+
+func TestServerProxyConnectionMismatch(t *testing.T) {
+	baseServerProxyTestWithBackend(t, func(frontendConn, agentConn *agentmock.MockAgentService_ConnectServer) {
+		const firstConnectID = 123456
+		const secondConnectID = 654321
+		dialReq := &client.Packet{
+			Type: client.PacketType_DIAL_REQ,
+			Payload: &client.Packet_DialRequest{
+				DialRequest: &client.DialRequest{
+					Protocol: "tcp",
+					Address:  "127.0.0.1:8080",
+					Random:   111,
+				},
+			},
+		}
+		data := &client.Packet{
+			Type: client.PacketType_DATA,
+			Payload: &client.Packet_Data{
+				Data: &client.Data{
+					ConnectID: firstConnectID,
+					Data:      []byte("hello"),
+				},
+			},
+		}
+		mismatchedData := &client.Packet{
+			Type: client.PacketType_DATA,
+			Payload: &client.Packet_Data{
+				Data: &client.Data{
+					ConnectID: secondConnectID,
+					Data:      []byte("world"),
+				},
+			},
+		}
+
+		gomock.InOrder(
+			frontendConn.EXPECT().Recv().Return(dialReq, nil),
+			frontendConn.EXPECT().Recv().Return(data, nil),
+			frontendConn.EXPECT().Recv().Return(mismatchedData, nil),
+			frontendConn.EXPECT().Recv().Return(nil, io.EOF),
+		)
+		gomock.InOrder(
+			agentConn.EXPECT().Send(dialReq).Return(nil),
+			agentConn.EXPECT().Send(data).Return(nil),
+		)
+		agentConn.EXPECT().Send(closeReqPkt(secondConnectID)).Return(nil)
+		agentConn.EXPECT().Send(closeReqPkt(firstConnectID)).Return(nil)
+		frontendConn.EXPECT().Send(closeRspPkt(secondConnectID, "mismatched connection IDs")).Return(nil)
+		frontendConn.EXPECT().Send(closeRspPkt(firstConnectID, "mismatched connection IDs")).Return(nil)
+	})
+}
+
+func closeReqPkt(connectID int64) *client.Packet {
 	return &client.Packet{
 		Type: client.PacketType_CLOSE_REQ,
 		Payload: &client.Packet_CloseRequest{
 			CloseRequest: &client.CloseRequest{
 				ConnectID: connectID,
 			}},
+	}
+}
+
+func closeRspPkt(connectID int64, errMsg string) *client.Packet {
+	return &client.Packet{
+		Type: client.PacketType_CLOSE_RSP,
+		Payload: &client.Packet_CloseResponse{
+			CloseResponse: &client.CloseResponse{
+				ConnectID: connectID,
+				Error:     errMsg,
+			},
+		},
 	}
 }

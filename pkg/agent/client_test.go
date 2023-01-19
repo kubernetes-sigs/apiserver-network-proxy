@@ -59,7 +59,7 @@ func TestServeData_HTTP(t *testing.T) {
 	}))
 	defer ts.Close()
 
-	// Stimulate sending KAS DIAL_REQ to (Agent) Client
+	// Simulate sending KAS DIAL_REQ to (Agent) Client
 	dialPacket := newDialPacket("tcp", ts.URL[len("http://"):], 111)
 	err = stream.Send(dialPacket)
 	if err != nil {
@@ -67,17 +67,17 @@ func TestServeData_HTTP(t *testing.T) {
 	}
 
 	// Expect receiving DIAL_RSP packet from (Agent) Client
-	pkg, err := stream.Recv()
+	pkt, err := stream.Recv()
 	if err != nil {
 		t.Fatal(err.Error())
 	}
-	if pkg == nil {
+	if pkt == nil {
 		t.Fatal("unexpected nil packet")
 	}
-	if pkg.Type != client.PacketType_DIAL_RSP {
-		t.Errorf("expect PacketType_DIAL_RSP; got %v", pkg.Type)
+	if pkt.Type != client.PacketType_DIAL_RSP {
+		t.Errorf("expect PacketType_DIAL_RSP; got %v", pkt.Type)
 	}
-	dialRsp := pkg.Payload.(*client.Packet_DialResponse)
+	dialRsp := pkt.Payload.(*client.Packet_DialResponse)
 	connID := dialRsp.DialResponse.ConnectID
 	if dialRsp.DialResponse.Random != 111 {
 		t.Errorf("expect random=111; got %v", dialRsp.DialResponse.Random)
@@ -91,14 +91,14 @@ func TestServeData_HTTP(t *testing.T) {
 	}
 
 	// Expect receiving http response via (Agent) Client
-	pkg, _ = stream.Recv()
-	if pkg == nil {
+	pkt, _ = stream.Recv()
+	if pkt == nil {
 		t.Fatal("unexpected nil packet")
 	}
-	if pkg.Type != client.PacketType_DATA {
-		t.Errorf("expect PacketType_DATA; got %v", pkg.Type)
+	if pkt.Type != client.PacketType_DATA {
+		t.Errorf("expect PacketType_DATA; got %v", pkt.Type)
 	}
-	data := pkg.Payload.(*client.Packet_Data).Data.Data
+	data := pkt.Payload.(*client.Packet_Data).Data.Data
 
 	// Verify response data
 	//
@@ -117,14 +117,14 @@ func TestServeData_HTTP(t *testing.T) {
 	ts.Close()
 
 	// Verify receiving CLOSE_RSP
-	pkg, _ = stream.Recv()
-	if pkg == nil {
+	pkt, _ = stream.Recv()
+	if pkt == nil {
 		t.Fatal("unexpected nil packet")
 	}
-	if pkg.Type != client.PacketType_CLOSE_RSP {
-		t.Errorf("expect PacketType_CLOSE_RSP; got %v", pkg.Type)
+	if pkt.Type != client.PacketType_CLOSE_RSP {
+		t.Errorf("expect PacketType_CLOSE_RSP; got %v", pkt.Type)
 	}
-	closeErr := pkg.Payload.(*client.Packet_CloseResponse).CloseResponse.Error
+	closeErr := pkt.Payload.(*client.Packet_CloseResponse).CloseResponse.Error
 	if closeErr != "" {
 		t.Errorf("expect nil closeErr; got %v", closeErr)
 	}
@@ -159,7 +159,7 @@ func TestClose_Client(t *testing.T) {
 	}))
 	defer ts.Close()
 
-	// Stimulate sending KAS DIAL_REQ to (Agent) Client
+	// Simulate sending KAS DIAL_REQ to (Agent) Client
 	dialPacket := newDialPacket("tcp", ts.URL[len("http://"):], 111)
 	err := stream.Send(dialPacket)
 	if err != nil {
@@ -167,14 +167,14 @@ func TestClose_Client(t *testing.T) {
 	}
 
 	// Expect receiving DIAL_RSP packet from (Agent) Client
-	pkg, _ := stream.Recv()
-	if pkg == nil {
+	pkt, _ := stream.Recv()
+	if pkt == nil {
 		t.Fatal("unexpected nil packet")
 	}
-	if pkg.Type != client.PacketType_DIAL_RSP {
-		t.Errorf("expect PacketType_DIAL_RSP; got %v", pkg.Type)
+	if pkt.Type != client.PacketType_DIAL_RSP {
+		t.Errorf("expect PacketType_DIAL_RSP; got %v", pkt.Type)
 	}
-	dialRsp := pkg.Payload.(*client.Packet_DialResponse)
+	dialRsp := pkt.Payload.(*client.Packet_DialResponse)
 	connID := dialRsp.DialResponse.ConnectID
 	if dialRsp.DialResponse.Random != 111 {
 		t.Errorf("expect random=111; got %v", dialRsp.DialResponse.Random)
@@ -186,14 +186,14 @@ func TestClose_Client(t *testing.T) {
 	}
 
 	// Expect receiving close response via (Agent) Client
-	pkg, _ = stream.Recv()
-	if pkg == nil {
+	pkt, _ = stream.Recv()
+	if pkt == nil {
 		t.Error("unexpected nil packet")
 	}
-	if pkg.Type != client.PacketType_CLOSE_RSP {
-		t.Errorf("expect PacketType_CLOSE_RSP; got %v", pkg.Type)
+	if pkt.Type != client.PacketType_CLOSE_RSP {
+		t.Errorf("expect PacketType_CLOSE_RSP; got %v", pkt.Type)
 	}
-	closeErr := pkg.Payload.(*client.Packet_CloseResponse).CloseResponse.Error
+	closeErr := pkt.Payload.(*client.Packet_CloseResponse).CloseResponse.Error
 	if closeErr != "" {
 		t.Errorf("expect nil closeErr; got %v", closeErr)
 	}
@@ -209,18 +209,57 @@ func TestClose_Client(t *testing.T) {
 	}
 
 	// Expect receiving close response via (Agent) Client
-	pkg, _ = stream.Recv()
-	if pkg == nil {
+	pkt, _ = stream.Recv()
+	if pkt == nil {
 		t.Error("unexpected nil packet")
 	}
-	if pkg.Type != client.PacketType_CLOSE_RSP {
-		t.Errorf("expect PacketType_CLOSE_RSP; got %+v", pkg)
+	if pkt.Type != client.PacketType_CLOSE_RSP {
+		t.Errorf("expect PacketType_CLOSE_RSP; got %+v", pkt)
 	}
-	closeErr = pkg.Payload.(*client.Packet_CloseResponse).CloseResponse.Error
+	closeErr = pkt.Payload.(*client.Packet_CloseResponse).CloseResponse.Error
 	if closeErr != "Unknown connectID" {
 		t.Errorf("expect Unknown connectID; got %v", closeErr)
 	}
 
+}
+
+func TestConnectionMismatch(t *testing.T) {
+	var stream agent.AgentService_ConnectClient
+	stopCh := make(chan struct{})
+	cs := &ClientSet{
+		clients: make(map[string]*Client),
+		stopCh:  stopCh,
+	}
+	testClient := &Client{
+		connManager: newConnectionManager(),
+		stopCh:      stopCh,
+		cs:          cs,
+	}
+	testClient.stream, stream = pipe()
+
+	// Start agent
+	go testClient.Serve()
+	defer close(stopCh)
+
+	// Simulate sending a DATA packet to (Agent) Client
+	const connID = 12345
+	pkt := newDataPacket(connID, []byte("hello world"))
+	if err := stream.Send(pkt); err != nil {
+		t.Fatal(err)
+	}
+
+	// Expect to receive CLOSE_RSP packet from (Agent) Client
+	pkt, err := stream.Recv()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if pkt.Type != client.PacketType_CLOSE_RSP {
+		t.Errorf("expect PacketType_CLOSE_RSP; got %v", pkt.Type)
+	}
+	closeRsp := pkt.Payload.(*client.Packet_CloseResponse).CloseResponse
+	if closeRsp.ConnectID != connID {
+		t.Errorf("expect connID=%d; got %v", connID, closeRsp.ConnectID)
+	}
 }
 
 // brokenStream wraps a ConnectClient and returns an error on Send and/or Recv if the respective
@@ -287,7 +326,7 @@ func TestFailedSend_DialResp_GRPC(t *testing.T) {
 		time.Sleep(time.Second)
 		defer goleakVerifyNone(t, goleak.IgnoreCurrent())
 
-		// Stimulate sending KAS DIAL_REQ to (Agent) Client
+		// Simulate sending KAS DIAL_REQ to (Agent) Client
 		dialPacket := newDialPacket("tcp", strings.TrimPrefix(ts.URL, "http://"), 111)
 		err := stream.Send(dialPacket)
 		if err != nil {
@@ -329,9 +368,9 @@ func (s *fakeStream) Send(packet *client.Packet) error {
 
 func (s *fakeStream) Recv() (*client.Packet, error) {
 	select {
-	case pkg := <-s.r:
-		klog.V(4).InfoS("[DEBUG] recv", "packet", pkg)
-		return pkg, nil
+	case pkt := <-s.r:
+		klog.V(4).InfoS("[DEBUG] recv", "packet", pkt)
+		return pkt, nil
 	case <-time.After(5 * time.Second):
 		return nil, errors.New("timeout recv")
 	}

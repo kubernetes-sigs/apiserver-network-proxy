@@ -439,6 +439,21 @@ func (s *ProxyServer) serveRecvFrontend(stream client.ProxyService_ProxyServer, 
 	var backend Backend
 	var err error
 
+	defer func() {
+		// As the read side of the recvCh channel, we cannot close it.
+		// However readFrontendToChannel() may be blocked writing to the channel,
+		// so we need to consume the channel until it is closed.
+		discardedPktCount := 0
+		for range recvCh {
+			// Ignore values as this indicates there was a problem
+			// with the remote connection.
+			discardedPktCount++
+		}
+		if discardedPktCount > 0 {
+			klog.V(2).InfoS("Discard packets while exiting serveRecvFrontend", "pktCount", discardedPktCount, "connectionID", firstConnID)
+		}
+	}()
+
 	for pkt := range recvCh {
 		switch pkt.Type {
 		case client.PacketType_DIAL_REQ:
@@ -452,6 +467,7 @@ func (s *ProxyServer) serveRecvFrontend(stream client.ProxyService_ProxyServer, 
 			backend, err = s.getBackend(address)
 			if err != nil {
 				klog.ErrorS(err, "Failed to get a backend", "dialID", random)
+				metrics.Metrics.ObserveDialFailure(metrics.DialFailureNoAgent)
 
 				resp := &client.Packet{
 					Type: client.PacketType_DIAL_RSP,
@@ -491,16 +507,19 @@ func (s *ProxyServer) serveRecvFrontend(stream client.ProxyService_ProxyServer, 
 			connID := pkt.GetCloseRequest().ConnectID
 			klog.V(5).InfoS("Received CLOSE_REQ", "connectionID", connID)
 			if backend == nil {
-				klog.V(2).InfoS("Backend has not been initialized for requested connection. Client should send a Dial Request first",
-					"connectionID", connID)
+				klog.V(2).InfoS("Backend has not been initialized for this connection", "connectionID", connID)
+				s.sendFrontendClose(stream, connID, "backend uninitialized")
 				continue
 			}
 			if err := backend.Send(pkt); err != nil {
 				// TODO: retry with other backends connecting to this agent.
 				klog.ErrorS(err, "CLOSE_REQ to Backend failed", "connectionID", connID)
+				s.sendFrontendClose(stream, connID, "CLOSE_REQ to backend failed")
 			} else {
 				klog.V(5).InfoS("CLOSE_REQ sent to backend", "connectionID", connID)
 			}
+			klog.V(3).InfoS("Closing frontend streaming per CLOSE_REQ", "connectionID", connID)
+			return
 
 		case client.PacketType_DIAL_CLS:
 			random := pkt.GetCloseDial().Random
@@ -519,16 +538,29 @@ func (s *ProxyServer) serveRecvFrontend(stream client.ProxyService_ProxyServer, 
 			connID := pkt.GetData().ConnectID
 			data := pkt.GetData().Data
 			klog.V(5).InfoS("Received data from connection", "bytes", len(data), "connectionID", connID)
+			if backend == nil {
+				klog.V(2).InfoS("Backend has not been initialized for this connection", "connectionID", connID)
+				s.sendFrontendClose(stream, connID, "backend not initialized")
+				return
+			}
+
+			if connID == 0 {
+				klog.ErrorS(nil, "Received packet missing ConnectID from frontend", "packetType", "DATA")
+				continue
+			}
+
 			if firstConnID == 0 {
 				firstConnID = connID
 			} else if firstConnID != connID {
-				klog.V(5).InfoS("Data does not match first connection id", "fistConnectionID", firstConnID, "connectionID", connID)
+				klog.ErrorS(nil, "Data does not match first connection id", "firstConnectionID", firstConnID, "connectionID", connID)
+				// Something went very wrong if we get here. Close both connections to avoid leaks.
+				s.sendBackendClose(backend, connID, 0, "mismatched connection IDs")
+				s.sendBackendClose(backend, firstConnID, 0, "mismatched connection IDs")
+				s.sendFrontendClose(stream, connID, "mismatched connection IDs")
+				s.sendFrontendClose(stream, firstConnID, "mismatched connection IDs")
+				return
 			}
 
-			if backend == nil {
-				klog.V(2).InfoS("Backend has not been initialized for the connection. Client should send a Dial Request first", "connectionID", connID)
-				continue
-			}
 			if err := backend.Send(pkt); err != nil {
 				// TODO: retry with other backends connecting to this agent.
 				klog.ErrorS(err, "DATA to Backend failed", "connectionID", connID)
@@ -752,6 +784,18 @@ func (s *ProxyServer) readBackendToChannel(stream agent.AgentService_ConnectServ
 // route the packet back to the correct client
 func (s *ProxyServer) serveRecvBackend(backend Backend, stream agent.AgentService_ConnectServer, agentID string, recvCh <-chan *client.Packet) {
 	defer func() {
+		// Drain recvCh to ensure that readBackendToChannel is not blocked on a channel write.
+		// This should never happen, as termination of this function should only be initiated by closing recvCh.
+		discardedPktCount := 0
+		for range recvCh {
+			discardedPktCount++
+		}
+		if discardedPktCount > 0 {
+			klog.V(2).InfoS("Discard packets while exiting serveRecvBackend", "pktCount", discardedPktCount, "agentID", agentID)
+		}
+	}()
+
+	defer func() {
 		// Close all connected frontends when the agent connection is closed
 		// TODO(#126): Frontends in PendingDial state that have not been added to the
 		//             list of frontends should also be closed.
@@ -786,7 +830,7 @@ func (s *ProxyServer) serveRecvBackend(backend Backend, stream agent.AgentServic
 				klog.V(2).InfoS("DIAL_RSP not recognized; dropped", "dialID", resp.Random, "agentID", agentID, "connectionID", resp.ConnectID)
 				metrics.Metrics.ObserveDialFailure(metrics.DialFailureUnrecognizedResponse)
 				if resp.ConnectID != 0 {
-					s.sendCloseRequest(stream, resp.ConnectID, resp.Random, "failed to notify agent of closing due to unknown dial id")
+					s.sendBackendClose(stream, resp.ConnectID, resp.Random, "unknown dial id")
 				}
 			} else {
 				dialErr := false
@@ -807,7 +851,7 @@ func (s *ProxyServer) serveRecvBackend(backend Backend, stream agent.AgentServic
 					// If we never finish setting up the tunnel for ConnectID, then the connection is dead.
 					// Currently, the agent will no resend DIAL_RSP, so connection is dead.
 					// We already attempted to tell the frontend that. We should ensure we tell the backend.
-					s.sendCloseRequest(stream, resp.ConnectID, resp.Random, "failed to notify agent of closing due to dial error")
+					s.sendBackendClose(stream, resp.ConnectID, resp.Random, "dial error")
 					dialErr = true
 				}
 				// Avoid adding the frontend if there was an error dialing the destination
@@ -853,9 +897,15 @@ func (s *ProxyServer) serveRecvBackend(backend Backend, stream agent.AgentServic
 		case client.PacketType_DATA:
 			resp := pkt.GetData()
 			klog.V(5).InfoS("Received data from agent", "bytes", len(resp.Data), "agentID", agentID, "connectionID", resp.ConnectID)
+			if resp.ConnectID == 0 {
+				klog.ErrorS(nil, "Received packet missing ConnectID from agent", "packetType", "DATA")
+				continue
+			}
+
 			frontend, err := s.getFrontend(agentID, resp.ConnectID)
 			if err != nil {
-				klog.ErrorS(err, "could not get frontend client", "agentID", agentID, "connectionID", resp.ConnectID)
+				klog.V(2).InfoS("could not get frontend client; closing connection", "agentID", agentID, "connectionID", resp.ConnectID, "error", err)
+				s.sendBackendClose(stream, resp.ConnectID, 0, "missing frontend")
 				break
 			}
 			if err := frontend.send(pkt); err != nil {
@@ -889,7 +939,7 @@ func (s *ProxyServer) serveRecvBackend(backend Backend, stream agent.AgentServic
 	klog.V(5).InfoS("Close backend of agent", "backend", stream, "agentID", agentID)
 }
 
-func (s *ProxyServer) sendCloseRequest(stream agent.AgentService_ConnectServer, connectID int64, random int64, failMsg string) {
+func (s *ProxyServer) sendBackendClose(stream Backend, connectID int64, random int64, reason string) {
 	pkt := &client.Packet{
 		Type: client.PacketType_CLOSE_REQ,
 		Payload: &client.Packet_CloseRequest{
@@ -902,6 +952,24 @@ func (s *ProxyServer) sendCloseRequest(stream agent.AgentService_ConnectServer, 
 	metrics.Metrics.ObservePacket(segment, pkt.Type)
 	if err := stream.Send(pkt); err != nil {
 		metrics.Metrics.ObserveStreamError(segment, err, pkt.Type)
-		klog.V(5).ErrorS(err, failMsg, "dialID", random, "agentID", agentID, "connectionID", connectID)
+		klog.V(5).ErrorS(err, "Failed to send close to agent", "closeReason", reason, "dialID", random, "agentID", agentID, "connectionID", connectID)
+	}
+}
+
+func (s *ProxyServer) sendFrontendClose(stream client.ProxyService_ProxyServer, connectID int64, reason string) {
+	pkt := &client.Packet{
+		Type: client.PacketType_CLOSE_RSP,
+		Payload: &client.Packet_CloseResponse{
+			CloseResponse: &client.CloseResponse{
+				ConnectID: connectID,
+				Error:     reason,
+			},
+		},
+	}
+	const segment = commonmetrics.SegmentToClient
+	metrics.Metrics.ObservePacket(segment, pkt.Type)
+	if err := stream.Send(pkt); err != nil {
+		metrics.Metrics.ObserveStreamError(segment, err, pkt.Type)
+		klog.V(5).ErrorS(err, "Failed to send close to frontend", "closeReason", reason, "connectionID", connectID)
 	}
 }

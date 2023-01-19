@@ -4,16 +4,38 @@ Please note this guide is only intended for the admins of this repository, and r
 
 Creating a new release of network proxy involves releasing a new version of the client library (konnectivity-client) and new images for the proxy agent and server. Generally we also want to upgrade kubernetes/kubernetes with the latest version of the images and library, but this is a GCE specific change.
 
-1. The first step involves creating a new git tag for the release, following semvar for go libraries. A tag is required for both the repository and the konnectivity-client library. For example releasing the `0.0.15` version will have two tags `v0.0.15` and `konnectivity-client/v0.0.15` on the appropriate commit.
+1. The first step involves creating a new git tag for the release, following semver for go libraries. A tag is required for both the repository and the konnectivity-client library. For example releasing the `0.0.15` version will have two tags `v0.0.15` and `konnectivity-client/v0.0.15` on the appropriate commit.
 
-    The exact commands are
+    In the master branch, choose the appropriate commit, and determine a patch version for the latest minor version (currently 0.1).
+
+    Example commands for `HEAD` of `master` branch. (Assumes you have `git remote add upstream git@github.com:kubernetes-sigs/apiserver-network-proxy.git`.)
 
     ```
-    # Check out the appropriate commit (usually head of master)
-    git tag -a v0.0.15
-    git tag konnectivity-client/v0.0.15
-    git push upstream v0.0.15
-    git push upstream konnectivity-client/v0.0.15
+    # Assuming v0.1.1 exists
+    export TAG=v0.1.2
+    export MESSAGE="Meaningful description of change."
+
+    git fetch upstream
+    git tag -a "${TAG}" -m "${MESSAGE}" upstream/master
+    git tag -a "konnectivity-client/${TAG}" -m "${MESSAGE}" upstream/master
+    git push upstream "${TAG}"
+    git push upstream "konnectivity-client/${TAG}"
+    ```
+
+    In a release branch, the process is similar but corresponds to earlier minor versions.
+
+    Example commands for `HEAD` of `release-0.0` branch:
+
+    ```
+    # Assuming v0.0.35 exists
+    export TAG=v0.0.36
+    export MESSAGE="Meaningful description of change."
+
+    git fetch upstream
+    git tag -a "${TAG}" -m "${MESSAGE}" upstream/release-0.0
+    git tag -a "konnectivity-client/${TAG}" -m "${MESSAGE}" upstream/release-0.0
+    git push upstream "${TAG}"
+    git push upstream "konnectivity-client/${TAG}"
     ```
 
     Once the two tags are created, the konnectivity-client can be imported as a library in kubernetes/kubernetes and other go programs.
@@ -41,6 +63,6 @@ Creating a new release of network proxy involves releasing a new version of the 
 
     ```
     ./hack/pin-dependency.sh sigs.k8s.io/apiserver-network-proxy/konnectivity-client v0.0.15
-    make clean generated_files
+    ./hack/update-codegen.sh
     ./hack/update-vendor.sh
     ```
