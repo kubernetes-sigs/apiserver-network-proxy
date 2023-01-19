@@ -442,7 +442,7 @@ func (a *Client) Serve() {
 				close(dataCh)
 				a.connManager.Delete(connID)
 				if err := eConn.conn.Close(); err != nil {
-					klog.ErrorS(err, "failed to close connection to remote", "dialID", dialReq.Random, "connectID", connID)
+					klog.ErrorS(err, "failed to close connection to remote", "dialID", dialReq.Random, "connectionID", connID)
 				}
 			}
 			labels := runpprof.Labels(
