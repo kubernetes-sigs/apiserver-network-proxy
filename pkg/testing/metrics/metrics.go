@@ -36,6 +36,11 @@ const (
 # HELP konnectivity_network_proxy_agent_endpoint_dial_failure_total Number of failures dialing the remote endpoint, by reason (example: timeout).
 # TYPE konnectivity_network_proxy_agent_endpoint_dial_failure_total counter`
 	agentDialFailureSample = `konnectivity_network_proxy_agent_endpoint_dial_failure_total{reason="%s"} %d`
+
+	agentEndpointConnections = `
+# HELP konnectivity_network_proxy_agent_open_endpoint_connections Current number of open endpoint connections.
+# TYPE konnectivity_network_proxy_agent_open_endpoint_connections gauge
+konnectivity_network_proxy_agent_open_endpoint_connections %d`
 )
 
 func ExpectServerDialFailures(expected map[server.DialFailureReason]int) error {
@@ -60,6 +65,11 @@ func ExpectAgentDialFailures(expected map[agent.DialFailureReason]int) error {
 
 func ExpectAgentDialFailure(reason agent.DialFailureReason, count int) error {
 	return ExpectAgentDialFailures(map[agent.DialFailureReason]int{reason: count})
+}
+
+func ExpectAgentEndpointConnections(count int) error {
+	expect := fmt.Sprintf(agentEndpointConnections+"\n", count)
+	return ExpectMetric(agent.Namespace, agent.Subsystem, "open_endpoint_connections", expect)
 }
 
 func ExpectMetric(namespace, subsystem, name, expected string) error {
