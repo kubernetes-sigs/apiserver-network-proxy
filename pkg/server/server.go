@@ -98,15 +98,34 @@ type ProxyClientConnection struct {
 	dialAddress string // cached for logging
 }
 
-const (
-	destHost key = iota
-)
+func (c *ProxyClientConnection) Backend() Backend {
+	return c.backend
+}
+
+func (c *ProxyClientConnection) Connected() <-chan struct{} {
+	return c.connected
+}
+
+// ConnectionID must not be called prior to the connected channel being closed.
+func (c *ProxyClientConnection) ConnectionID() int64 {
+	return c.connectID
+}
+
+// AgentID must not be called prior to the connected channel being closed.
+// TODO: Find a better way of exposing this, possibly through the Backend interface.
+func (c *ProxyClientConnection) AgentID() string {
+	return c.agentID
+}
 
 func (c *ProxyClientConnection) send(pkt *client.Packet) error {
 	start := time.Now()
 	defer metrics.Metrics.ObserveFrontendWriteLatency(time.Since(start))
 	return c.frontend.Send(pkt)
 }
+
+const (
+	destHost key = iota
+)
 
 func NewPendingDialManager() *PendingDialManager {
 	return &PendingDialManager{
@@ -461,9 +480,8 @@ func (s *ProxyServer) NewPendingDial(frontend Frontend, dialRequest *client.Pack
 	s.PendingDial.Add(random, connection)
 	if err := backend.Send(dialRequest); err != nil {
 		return nil, fmt.Errorf("DIAL_REQ to Backend failed: %w", err)
-	} else {
-		klog.V(5).InfoS("DIAL_REQ sent to backend", "dialID", random)
 	}
+	klog.V(5).InfoS("DIAL_REQ sent to backend", "dialID", random)
 
 	return connection, nil
 }

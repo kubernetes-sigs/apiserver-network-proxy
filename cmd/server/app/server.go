@@ -48,6 +48,7 @@ import (
 	"sigs.k8s.io/apiserver-network-proxy/cmd/server/app/options"
 	"sigs.k8s.io/apiserver-network-proxy/konnectivity-client/proto/client"
 	"sigs.k8s.io/apiserver-network-proxy/pkg/server"
+	httpserver "sigs.k8s.io/apiserver-network-proxy/pkg/server/http"
 	"sigs.k8s.io/apiserver-network-proxy/pkg/util"
 	"sigs.k8s.io/apiserver-network-proxy/proto/agent"
 )
@@ -230,7 +231,7 @@ func (p *Proxy) runUDSFrontendServer(ctx context.Context, o *options.ProxyRunOpt
 		// http-connect
 		server := &http.Server{
 			ReadHeaderTimeout: ReadHeaderTimeout,
-			Handler: &server.Tunnel{
+			Handler: &httpserver.Tunnel{
 				Server: s,
 			},
 		}
@@ -328,7 +329,7 @@ func (p *Proxy) runMTLSFrontendServer(ctx context.Context, o *options.ProxyRunOp
 			ReadHeaderTimeout: ReadHeaderTimeout,
 			Addr:              addr,
 			TLSConfig:         tlsConfig,
-			Handler: &server.Tunnel{
+			Handler: &httpserver.Tunnel{
 				Server: s,
 			},
 			TLSNextProto: make(map[string]func(*http.Server, *tls.Conn, http.Handler)),

@@ -14,7 +14,7 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package server
+package http
 
 import (
 	"fmt"
@@ -27,6 +27,7 @@ import (
 	"k8s.io/klog/v2"
 	commonmetrics "sigs.k8s.io/apiserver-network-proxy/konnectivity-client/pkg/common/metrics"
 	"sigs.k8s.io/apiserver-network-proxy/konnectivity-client/proto/client"
+	"sigs.k8s.io/apiserver-network-proxy/pkg/server"
 	"sigs.k8s.io/apiserver-network-proxy/pkg/server/metrics"
 )
 
@@ -71,7 +72,7 @@ func (h *httpFrontend) close() {
 // Tunnel implements Proxy based on HTTP Connect, which tunnels the traffic to
 // the agent registered in ProxyServer.
 type Tunnel struct {
-	Server *ProxyServer
+	Server *server.ProxyServer
 }
 
 func (t *Tunnel) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -123,7 +124,7 @@ func (t *Tunnel) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, fmt.Sprintf("failed to establish tunnel: %v", err), http.StatusInternalServerError)
 		return
 	}
-	backend := connection.backend
+	backend := connection.Backend()
 
 	ctxt := backend.Context()
 	if ctxt.Err() != nil {
@@ -137,30 +138,33 @@ func (t *Tunnel) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 
 	select {
-	case <-connection.connected: // Waiting for response before we begin full communication.
+	case <-connection.Connected(): // Waiting for response before we begin full communication.
 	case <-frontend.closed: // Connection was closed before being established
+		t.Server.PendingDial.Remove(random)
+		return
 	}
+
+	connID := connection.ConnectionID()
+	agentID := connection.AgentID()
 
 	defer func() {
 		packet := &client.Packet{
 			Type: client.PacketType_CLOSE_REQ,
 			Payload: &client.Packet_CloseRequest{
 				CloseRequest: &client.CloseRequest{
-					ConnectID: connection.connectID,
+					ConnectID: connID,
 				},
 			},
 		}
 
 		if err = backend.Send(packet); err != nil {
-			klog.V(2).InfoS("failed to send close request packet", "host", r.Host, "agentID", connection.agentID, "connectionID", connection.connectID)
+			klog.V(2).InfoS("failed to send close request packet", "host", r.Host, "agentID", agentID, "connectionID", connID)
 		}
 	}()
 
 	klog.V(3).InfoS("Starting proxy to host", "host", r.Host)
 	pkt := make([]byte, 1<<15) // Match GRPC Window size
 
-	connID := connection.connectID
-	agentID := connection.agentID
 	var acc int
 
 	for {
@@ -192,8 +196,8 @@ func (t *Tunnel) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		klog.V(5).InfoS("Forwarding data on tunnel to agent",
 			"bytes", n,
 			"totalBytes", acc,
-			"agentID", connection.agentID,
-			"connectionID", connection.connectID)
+			"agentID", agentID,
+			"connectionID", connID)
 	}
 
 	klog.V(5).InfoS("Stopping transfer to host", "host", r.Host, "agentID", agentID, "connectionID", connID)

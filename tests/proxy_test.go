@@ -43,6 +43,7 @@ import (
 	"sigs.k8s.io/apiserver-network-proxy/pkg/agent"
 	metricsagent "sigs.k8s.io/apiserver-network-proxy/pkg/agent/metrics"
 	"sigs.k8s.io/apiserver-network-proxy/pkg/server"
+	httpserver "sigs.k8s.io/apiserver-network-proxy/pkg/server/http"
 	metricsserver "sigs.k8s.io/apiserver-network-proxy/pkg/server/metrics"
 	metricstest "sigs.k8s.io/apiserver-network-proxy/pkg/testing/metrics"
 	agentproto "sigs.k8s.io/apiserver-network-proxy/proto/agent"
@@ -725,7 +726,7 @@ func runHTTPConnProxyServer() (proxy, func(), error) {
 	// http-connect
 	active := int32(0)
 	proxy.getActiveHTTPConnectConns = func() int { return int(atomic.LoadInt32(&active)) }
-	handler := &server.Tunnel{
+	handler := &httpserver.Tunnel{
 		Server: s,
 	}
 	httpServer := &http.Server{
