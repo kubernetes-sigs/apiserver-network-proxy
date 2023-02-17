@@ -308,22 +308,22 @@ func (s *ProxyServer) addFrontend(agentID string, connID int64, p *ProxyClientCo
 	s.frontends[agentID][connID] = p
 }
 
-func (s *ProxyServer) removeFrontend(agentID string, connID int64) {
+func (s *ProxyServer) removeFrontend(agentID string, connID int64) *ProxyClientConnection {
+	var ret *ProxyClientConnection
 	s.fmu.Lock()
 	defer s.fmu.Unlock()
 	conns, ok := s.frontends[agentID]
 	if !ok {
-		klog.V(2).InfoS("Cannot find agent in the frontends", "agentID", agentID)
-		return
+		return nil
 	}
-	if _, ok := conns[connID]; !ok {
-		klog.V(2).InfoS("Cannot find connection for agent in the frontends", "connectionID", connID, "agentID", agentID)
-		return
+	if ret, ok = conns[connID]; !ok {
+		return nil
 	}
 	delete(s.frontends[agentID], connID)
 	if len(s.frontends[agentID]) == 0 {
 		delete(s.frontends, agentID)
 	}
+	return ret
 }
 
 func (s *ProxyServer) getFrontend(agentID string, connID int64) (*ProxyClientConnection, error) {
@@ -936,10 +936,10 @@ func (s *ProxyServer) serveRecvBackend(backend Backend, agentID string, recvCh <
 		case client.PacketType_CLOSE_RSP:
 			resp := pkt.GetCloseResponse()
 			klog.V(5).InfoS("Received CLOSE_RSP", "agentID", agentID, "connectionID", resp.ConnectID)
-			frontend, err := s.getFrontend(agentID, resp.ConnectID)
-			if err != nil {
+			frontend := s.removeFrontend(agentID, resp.ConnectID)
+			if frontend == nil {
 				// assuming it is already closed, just log it
-				klog.V(3).InfoS("could not get frontend client for closing", "agentID", agentID, "connectionID", resp.ConnectID, "err", err)
+				klog.V(2).InfoS("could not get frontend client for closing", "agentID", agentID, "connectionID", resp.ConnectID)
 				break
 			}
 			if err := frontend.send(pkt); err != nil {
@@ -948,8 +948,6 @@ func (s *ProxyServer) serveRecvBackend(backend Backend, agentID string, recvCh <
 			} else {
 				klog.V(5).InfoS("CLOSE_RSP sent to frontend", "connectionID", resp.ConnectID)
 			}
-			s.removeFrontend(agentID, resp.ConnectID)
-			klog.V(5).InfoS("Close streaming", "agentID", agentID, "connectionID", resp.ConnectID)
 
 		default:
 			klog.V(5).InfoS("Ignoring unrecognized packet from backend", "packet", pkt, "agentID", agentID)
