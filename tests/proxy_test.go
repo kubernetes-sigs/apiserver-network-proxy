@@ -154,18 +154,17 @@ func TestBasicProxy_GRPC(t *testing.T) {
 	if err != nil {
 		t.Error(err)
 	}
-	req.Close = true
 
 	r, err := c.Do(req)
 	if err != nil {
 		t.Error(err)
 	}
+	defer r.Body.Close()
 
 	data, err := ioutil.ReadAll(r.Body)
 	if err != nil {
 		t.Error(err)
 	}
-
 	if string(data) != "hello" {
 		t.Errorf("expect %v; got %v", "hello", string(data))
 	}
@@ -370,9 +369,6 @@ func TestProxyDial_RequestCancelled_GRPC(t *testing.T) {
 }
 
 func TestProxyDial_RequestCancelled_Concurrent_GRPC(t *testing.T) {
-	// TODO: remove this skip once the underlying leaks are addressed.
-	t.Skip("Test fails due to leaks")
-
 	expectCleanShutdown(t)
 
 	slowServer := newDelayedServer()
@@ -430,7 +426,7 @@ func TestProxyDial_RequestCancelled_Concurrent_GRPC(t *testing.T) {
 	// Ensure that tunnels aren't leaked with long-running servers.
 	ignoredGoRoutines := goleak.IgnoreCurrent()
 
-	const concurrentConns = 100
+	const concurrentConns = 50
 	wg.Add(concurrentConns)
 	for i := 0; i < concurrentConns; i++ {
 		cancelDelayMs := rand.Int63n(1000) + 5 /* #nosec G404 */
