@@ -434,6 +434,40 @@ func (s *ProxyServer) readFrontendToChannel(frontend *grpcFrontend, userAgent []
 	}
 }
 
+// NewPendingDial establishes a new tunnel connection between a frontend and a backend. The
+// provided dial request is forwarded to the backend.
+func (s *ProxyServer) NewPendingDial(frontend Frontend, dialRequest *client.Packet) (*ProxyClientConnection, error) {
+	if dialRequest.Type != client.PacketType_DIAL_REQ {
+		return nil, fmt.Errorf("wrong type for dialRequest: %q", dialRequest.Type)
+	}
+	random := dialRequest.GetDialRequest().Random
+	address := dialRequest.GetDialRequest().Address
+	// TODO: if we track what agent has historically served
+	// the address, then we can send the Dial_REQ to the
+	// same agent. That way we save the agent from creating
+	// a new connection to the address.
+	backend, err := s.getBackend(address)
+	if err != nil {
+		metrics.Metrics.ObserveDialFailure(metrics.DialFailureNoAgent)
+		return nil, fmt.Errorf("failed to get a backend: %w", err)
+	}
+	connection := &ProxyClientConnection{
+		frontend:    frontend,
+		connected:   make(chan struct{}),
+		start:       time.Now(),
+		backend:     backend,
+		dialAddress: address,
+	}
+	s.PendingDial.Add(random, connection)
+	if err := backend.Send(dialRequest); err != nil {
+		return nil, fmt.Errorf("DIAL_REQ to Backend failed: %w", err)
+	} else {
+		klog.V(5).InfoS("DIAL_REQ sent to backend", "dialID", random)
+	}
+
+	return connection, nil
+}
+
 func (s *ProxyServer) serveRecvFrontend(frontend *grpcFrontend, recvCh <-chan *client.Packet) {
 	klog.V(5).Infoln("start serving frontend stream")
 
@@ -441,7 +475,6 @@ func (s *ProxyServer) serveRecvFrontend(frontend *grpcFrontend, recvCh <-chan *c
 	// The first packet should be a DIAL_REQ, we will randomly get a
 	// backend from the BackendManger then.
 	var backend Backend
-	var err error
 
 	defer func() {
 		// As the read side of the recvCh channel, we cannot close it.
@@ -464,14 +497,9 @@ func (s *ProxyServer) serveRecvFrontend(frontend *grpcFrontend, recvCh <-chan *c
 			random := pkt.GetDialRequest().Random
 			address := pkt.GetDialRequest().Address
 			klog.V(3).InfoS("Received DIAL_REQ", "dialID", random, "dialAddress", address)
-			// TODO: if we track what agent has historically served
-			// the address, then we can send the Dial_REQ to the
-			// same agent. That way we save the agent from creating
-			// a new connection to the address.
-			backend, err = s.getBackend(address)
+			connection, err := s.NewPendingDial(frontend, pkt)
 			if err != nil {
-				klog.ErrorS(err, "Failed to get a backend", "dialID", random)
-				metrics.Metrics.ObserveDialFailure(metrics.DialFailureNoAgent)
+				klog.ErrorS(err, "Dial failed", "dialID", random)
 
 				resp := &client.Packet{
 					Type: client.PacketType_DIAL_RSP,
@@ -483,25 +511,13 @@ func (s *ProxyServer) serveRecvFrontend(frontend *grpcFrontend, recvCh <-chan *c
 					},
 				}
 				if err := frontend.Send(resp); err != nil {
-					klog.V(5).InfoS("Failed to send DIAL_RSP for no backend", "error", err, "dialID", random)
+					klog.V(5).InfoS("Failed to send DIAL_RSP for dial failure", "error", err, "dialID", random)
 				}
-				// The Dial is failing; no reason to keep this goroutine.
+
+				// The Dial failed; no reason to keep this goroutine.
 				return
 			}
-			s.PendingDial.Add(
-				random,
-				&ProxyClientConnection{
-					frontend:    frontend,
-					connected:   make(chan struct{}),
-					start:       time.Now(),
-					backend:     backend,
-					dialAddress: address,
-				})
-			if err := backend.Send(pkt); err != nil {
-				klog.ErrorS(err, "DIAL_REQ to Backend failed", "dialID", random)
-			} else {
-				klog.V(5).InfoS("DIAL_REQ sent to backend", "dialID", random)
-			}
+			backend = connection.backend
 
 		case client.PacketType_CLOSE_REQ:
 			connID := pkt.GetCloseRequest().ConnectID

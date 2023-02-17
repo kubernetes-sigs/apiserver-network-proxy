@@ -23,7 +23,6 @@ import (
 	"net"
 	"net/http"
 	"sync"
-	"time"
 
 	"k8s.io/klog/v2"
 	commonmetrics "sigs.k8s.io/apiserver-network-proxy/konnectivity-client/pkg/common/metrics"
@@ -107,6 +106,7 @@ func (t *Tunnel) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	defer frontend.close()
 
 	random := rand.Int63() /* #nosec G404 */
+	klog.V(4).Infof("Set pending(rand=%d) to %v", random, w)
 	dialRequest := &client.Packet{
 		Type: client.PacketType_DIAL_REQ,
 		Payload: &client.Packet_DialRequest{
@@ -117,25 +117,14 @@ func (t *Tunnel) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			},
 		},
 	}
-
-	klog.V(4).Infof("Set pending(rand=%d) to %v", random, w)
-	backend, err := t.Server.getBackend(r.Host)
+	connection, err := t.Server.NewPendingDial(frontend, dialRequest)
 	if err != nil {
-		http.Error(w, fmt.Sprintf("currently no tunnels available: %v", err), http.StatusInternalServerError)
+		klog.ErrorS(err, "Failed to establish tunnel")
+		http.Error(w, fmt.Sprintf("failed to establish tunnel: %v", err), http.StatusInternalServerError)
 		return
 	}
-	connected := make(chan struct{})
-	connection := &ProxyClientConnection{
-		connected: connected,
-		start:     time.Now(),
-		backend:   backend,
-		frontend:  frontend,
-	}
-	t.Server.PendingDial.Add(random, connection)
-	if err := backend.Send(dialRequest); err != nil {
-		klog.ErrorS(err, "failed to tunnel dial request")
-		return
-	}
+	backend := connection.backend
+
 	ctxt := backend.Context()
 	if ctxt.Err() != nil {
 		klog.ErrorS(err, "context reports failure")

@@ -308,7 +308,7 @@ func TestServerProxyNoBackend(t *testing.T) {
 			Payload: &client.Packet_DialResponse{
 				DialResponse: &client.DialResponse{
 					Random: 111,
-					Error:  (&ErrNotFound{}).Error(),
+					Error:  "failed to get a backend: No agent available",
 				}},
 		}
 
