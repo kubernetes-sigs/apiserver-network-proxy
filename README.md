@@ -17,6 +17,14 @@ You can reach the maintainers of this project at:
 
 Participation in the Kubernetes community is governed by the [Kubernetes Code of Conduct](code-of-conduct.md).
 
+## Releases
+
+To reduce version-skew risk, it is recommended to match apiserver-network-proxy server & client
+minor release versions. With Kubernetes, this means:
+
+- Kubernetes versions up to v1.27: `0.0.X` apiserver-network-proxy branch
+- Kubernetes v1.27+: `0.1.X` apiserver-network-proxy branch
+
 ## Build
 
 Please make sure you have the REGISTRY and PROJECT_ID environment variables set.

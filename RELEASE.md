@@ -66,3 +66,16 @@ Creating a new release of network proxy involves releasing a new version of the 
     ./hack/update-codegen.sh
     ./hack/update-vendor.sh
     ```
+
+## Updating Go Dependencies
+
+`go.mod` versions should be kept consistent between the apiserver-network-proxy [main module](go.mod),
+and the [konnectivity-client module](/konnectivity-client/go.mod).
+
+Konnectivity-client dependency versions must be compatible
+[Kubernetes go.mod versions](https://github.com/kubernetes/kubernetes/blob/master/go.mod),
+meaning for a given release branch the konnectivity-client versions must not be newer than the
+Kubernetes versions.
+
+In practice, this means that to update go.mod dependencies used by the client, a new Konnectivity
+branch must be cut, and the dependencies should be pinned to the latest versions used by Kubernetes.
