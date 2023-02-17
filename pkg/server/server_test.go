@@ -188,6 +188,34 @@ func TestAgentTokenAuthenticationErrorsToken(t *testing.T) {
 	}
 }
 
+func TestRemovePendingDialForStream(t *testing.T) {
+	streamUID := "target-uuid"
+	pending1 := &ProxyClientConnection{frontend: &GrpcFrontend{streamUID: streamUID}}
+	pending2 := &ProxyClientConnection{}
+	pending3 := &ProxyClientConnection{frontend: &GrpcFrontend{streamUID: streamUID}}
+	pending4 := &ProxyClientConnection{frontend: &GrpcFrontend{streamUID: "different-uid"}}
+	pending5 := &ProxyClientConnection{frontend: &GrpcFrontend{streamUID: ""}}
+	p := NewProxyServer("", []ProxyStrategy{ProxyStrategyDefault}, 1, nil)
+	p.PendingDial.Add(1, pending1)
+	p.PendingDial.Add(2, pending2)
+	p.PendingDial.Add(3, pending3)
+	p.PendingDial.Add(4, pending4)
+	p.PendingDial.Add(5, pending5)
+	p.PendingDial.removeForStream(streamUID)
+	expectedPending := map[int64]*ProxyClientConnection{
+		int64(2): pending2,
+		int64(4): pending4,
+		int64(5): pending5,
+	}
+	if e, a := expectedPending, p.PendingDial.pendingDial; !reflect.DeepEqual(e, a) {
+		t.Errorf("expected %v, got %v", e, a)
+	}
+	p.PendingDial.removeForStream("")
+	if e, a := expectedPending, p.PendingDial.pendingDial; !reflect.DeepEqual(e, a) {
+		t.Errorf("expected %v, got %v", e, a)
+	}
+}
+
 func TestAddRemoveFrontends(t *testing.T) {
 	agent1ConnID1 := new(ProxyClientConnection)
 	agent1ConnID2 := new(ProxyClientConnection)
@@ -257,8 +285,69 @@ func TestEstablishedConnsMetric(t *testing.T) {
 	assertEstablishedConnsMetric(t, 0)
 }
 
+func TestRemoveFrontendsForBackendConn(t *testing.T) {
+	backend1 := &backend{}
+	backend2 := &backend{}
+	backend3 := &backend{}
+	agent1ConnID1 := &ProxyClientConnection{backend: backend1}
+	agent1ConnID2 := &ProxyClientConnection{backend: backend1}
+	agent2ConnID1 := &ProxyClientConnection{backend: backend2}
+	agent2ConnID2 := &ProxyClientConnection{backend: backend2}
+	agent3ConnID1 := &ProxyClientConnection{backend: backend3}
+	p := NewProxyServer("", []ProxyStrategy{ProxyStrategyDefault}, 1, nil)
+	p.addFrontend("agent1", int64(1), agent1ConnID1)
+	p.addFrontend("agent1", int64(2), agent1ConnID2)
+	p.addFrontend("agent2", int64(1), agent2ConnID1)
+	p.addFrontend("agent2", int64(2), agent2ConnID2)
+	p.addFrontend("agent3", int64(1), agent3ConnID1)
+	p.removeFrontendsForBackendConn("agent2", backend2)
+	expectedFrontends := map[string]map[int64]*ProxyClientConnection{
+		"agent1": {
+			int64(1): agent1ConnID1,
+			int64(2): agent1ConnID2,
+		},
+		"agent3": {
+			int64(1): agent3ConnID1,
+		},
+	}
+	if e, a := expectedFrontends, p.frontends; !reflect.DeepEqual(e, a) {
+		t.Errorf("expected %v, got %v", e, a)
+	}
+}
+
+func TestRemoveFrontendsForStream(t *testing.T) {
+	streamUID := "target-uuid"
+	backend1 := &backend{}
+	backend2 := &backend{}
+	backend3 := &backend{}
+	agent1ConnID1 := &ProxyClientConnection{backend: backend1, frontend: &GrpcFrontend{streamUID: streamUID}}
+	agent1ConnID2 := &ProxyClientConnection{backend: backend1}
+	agent2ConnID1 := &ProxyClientConnection{backend: backend2, frontend: &GrpcFrontend{streamUID: streamUID}}
+	agent2ConnID2 := &ProxyClientConnection{backend: backend2}
+	agent3ConnID1 := &ProxyClientConnection{backend: backend3, frontend: &GrpcFrontend{streamUID: streamUID}}
+	p := NewProxyServer("", []ProxyStrategy{ProxyStrategyDefault}, 1, nil)
+	p.addFrontend("agent1", int64(1), agent1ConnID1)
+	p.addFrontend("agent1", int64(2), agent1ConnID2)
+	p.addFrontend("agent2", int64(1), agent2ConnID1)
+	p.addFrontend("agent2", int64(2), agent2ConnID2)
+	p.addFrontend("agent3", int64(1), agent3ConnID1)
+	p.removeFrontendsForStream(streamUID)
+	expectedFrontends := map[string]map[int64]*ProxyClientConnection{
+		"agent1": {
+			int64(2): agent1ConnID2,
+		},
+		"agent2": {
+			int64(2): agent2ConnID2,
+		},
+	}
+	if e, a := expectedFrontends, p.frontends; !reflect.DeepEqual(e, a) {
+		t.Errorf("expected %v, got %v", e, a)
+	}
+}
+
 func prepareFrontendConn(ctrl *gomock.Controller) *agentmock.MockAgentService_ConnectServer {
 	// prepare the connection to fontend  of proxy-server
+	// TODO: replace with a mock ProxyService_ProxyServer
 	frontendConn := agentmock.NewMockAgentService_ConnectServer(ctrl)
 	frontendConnMD := metadata.MD{
 		":authority":   []string{"127.0.0.1:8090"},
@@ -283,7 +372,6 @@ func prepareAgentConnMD(ctrl *gomock.Controller, proxyServer *ProxyServer) *agen
 	}
 	agentConnCtx := metadata.NewIncomingContext(context.Background(), agentConnMD)
 	agentConn.EXPECT().Context().Return(agentConnCtx).AnyTimes()
-
 	_ = proxyServer.addBackend(agentID, agentConn)
 	return agentConn
 }
@@ -357,37 +445,24 @@ func TestServerProxyNoBackend(t *testing.T) {
 
 func TestServerProxyNormalClose(t *testing.T) {
 	validate := func(frontendConn, agentConn *agentmock.MockAgentService_ConnectServer) {
+		const dialID = 111
 		const connectID = 123456
 		// receive DIAL_REQ from frontend and proxy to backend
-		dialReq := &client.Packet{
-			Type: client.PacketType_DIAL_REQ,
-			Payload: &client.Packet_DialRequest{
-				DialRequest: &client.DialRequest{
-					Protocol: "tcp",
-					Address:  "127.0.0.1:8080",
-					Random:   111,
-				},
-			},
-		}
-		data := &client.Packet{
-			Type: client.PacketType_DATA,
-			Payload: &client.Packet_Data{
-				Data: &client.Data{
-					ConnectID: connectID,
-				},
-			},
-		}
+		dialReq := dialReqPkt(dialID)
+		data := dataPkt(connectID, []byte("hello world"))
+		closeReq := closeReqPkt(connectID)
 
 		gomock.InOrder(
 			frontendConn.EXPECT().Recv().Return(dialReq, nil).Times(1),
 			frontendConn.EXPECT().Recv().Return(data, nil).Times(1),
-			frontendConn.EXPECT().Recv().Return(closeReqPkt(connectID), nil).Times(1),
+			frontendConn.EXPECT().Recv().Return(closeReq, nil).Times(1),
 			frontendConn.EXPECT().Recv().Return(nil, io.EOF).Times(1),
 		)
 		gomock.InOrder(
 			agentConn.EXPECT().Send(dialReq).Return(nil).Times(1),
 			agentConn.EXPECT().Send(data).Return(nil).Times(1),
-			agentConn.EXPECT().Send(closeReqPkt(connectID)).Return(nil).Times(1),
+			agentConn.EXPECT().Send(closeReq).Return(nil).Times(1),
+			agentConn.EXPECT().Send(dialClosePkt(dialID)).Return(nil).Times(1),
 		)
 	}
 	baseServerProxyTestWithBackend(t, validate)
@@ -395,27 +470,11 @@ func TestServerProxyNormalClose(t *testing.T) {
 
 func TestServerProxyRecvChanFull(t *testing.T) {
 	validate := func(frontendConn, agentConn *agentmock.MockAgentService_ConnectServer) {
+		const dialID = 111
+		const connectID = 1
 		// receive DIAL_REQ from frontend and proxy to backend
-		dialReq := &client.Packet{
-			Type: client.PacketType_DIAL_REQ,
-			Payload: &client.Packet_DialRequest{
-				DialRequest: &client.DialRequest{
-					Protocol: "tcp",
-					Address:  "127.0.0.1:8080",
-					Random:   111,
-				},
-			},
-		}
-
-		data := &client.Packet{
-			Type: client.PacketType_DATA,
-			Payload: &client.Packet_Data{
-				Data: &client.Data{
-					ConnectID: 1,
-					Data:      []byte("hello world"),
-				},
-			},
-		}
+		dialReq := dialReqPkt(dialID)
+		data := dataPkt(connectID, []byte("hello world"))
 
 		const defaultTimeout = 5 * time.Minute
 		deadline := time.Now().Add(defaultTimeout)
@@ -483,6 +542,7 @@ func TestServerProxyRecvChanFull(t *testing.T) {
 			}),
 			agentConn.EXPECT().Send(data).Return(nil).Times(xfrChannelSize+1), // Expect the remaining packets to be sent.
 			agentConn.EXPECT().Send(closeReqPkt(1)).Return(nil),
+			agentConn.EXPECT().Send(dialClosePkt(dialID)).Return(nil).Times(1),
 		)
 	}
 	baseServerProxyTestWithBackend(t, validate)
@@ -510,36 +570,12 @@ func TestServerProxyNoDial(t *testing.T) {
 
 func TestServerProxyConnectionMismatch(t *testing.T) {
 	baseServerProxyTestWithBackend(t, func(frontendConn, agentConn *agentmock.MockAgentService_ConnectServer) {
+		const dialID = 111
 		const firstConnectID = 123456
 		const secondConnectID = 654321
-		dialReq := &client.Packet{
-			Type: client.PacketType_DIAL_REQ,
-			Payload: &client.Packet_DialRequest{
-				DialRequest: &client.DialRequest{
-					Protocol: "tcp",
-					Address:  "127.0.0.1:8080",
-					Random:   111,
-				},
-			},
-		}
-		data := &client.Packet{
-			Type: client.PacketType_DATA,
-			Payload: &client.Packet_Data{
-				Data: &client.Data{
-					ConnectID: firstConnectID,
-					Data:      []byte("hello"),
-				},
-			},
-		}
-		mismatchedData := &client.Packet{
-			Type: client.PacketType_DATA,
-			Payload: &client.Packet_Data{
-				Data: &client.Data{
-					ConnectID: secondConnectID,
-					Data:      []byte("world"),
-				},
-			},
-		}
+		dialReq := dialReqPkt(dialID)
+		data := dataPkt(firstConnectID, []byte("hello"))
+		mismatchedData := dataPkt(secondConnectID, []byte("world"))
 
 		gomock.InOrder(
 			frontendConn.EXPECT().Recv().Return(dialReq, nil),
@@ -555,6 +591,7 @@ func TestServerProxyConnectionMismatch(t *testing.T) {
 		agentConn.EXPECT().Send(closeReqPkt(firstConnectID)).Return(nil)
 		frontendConn.EXPECT().Send(closeRspPkt(secondConnectID, "mismatched connection IDs")).Return(nil)
 		frontendConn.EXPECT().Send(closeRspPkt(firstConnectID, "mismatched connection IDs")).Return(nil)
+		agentConn.EXPECT().Send(dialClosePkt(dialID)).Return(nil).Times(1)
 	})
 }
 
@@ -576,6 +613,31 @@ func TestReadyBackendsMetric(t *testing.T) {
 	}
 	p.removeBackend(agentID, agentConn)
 	assertReadyBackendsMetric(t, 0)
+}
+
+func dialReqPkt(dialID int64) *client.Packet {
+	return &client.Packet{
+		Type: client.PacketType_DIAL_REQ,
+		Payload: &client.Packet_DialRequest{
+			DialRequest: &client.DialRequest{
+				Protocol: "tcp",
+				Address:  "127.0.0.1:8080",
+				Random:   dialID,
+			},
+		},
+	}
+}
+
+func dataPkt(connectID int64, data []byte) *client.Packet {
+	return &client.Packet{
+		Type: client.PacketType_DATA,
+		Payload: &client.Packet_Data{
+			Data: &client.Data{
+				ConnectID: connectID,
+				Data:      data,
+			},
+		},
+	}
 }
 
 func closeReqPkt(connectID int64) *client.Packet {
@@ -611,5 +673,16 @@ func assertReadyBackendsMetric(t testing.TB, expect int) {
 	t.Helper()
 	if err := metricstest.ExpectServerReadyBackends(expect); err != nil {
 		t.Errorf("Expected %d %s metric: %v", expect, "ready_backend_connections", err)
+	}
+}
+
+func dialClosePkt(dialID int64) *client.Packet {
+	return &client.Packet{
+		Type: client.PacketType_DIAL_CLS,
+		Payload: &client.Packet_CloseDial{
+			CloseDial: &client.CloseDial{
+				Random: dialID,
+			},
+		},
 	}
 }
