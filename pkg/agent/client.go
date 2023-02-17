@@ -295,11 +295,11 @@ func (a *Client) Recv() (*client.Packet, error) {
 
 	const segment = commonmetrics.SegmentToAgent
 	pkt, err := a.stream.Recv()
-	if err != nil && err != io.EOF {
-		metrics.Metrics.ObserveServerFailureDeprecated(metrics.DirectionFromServer)
-		metrics.Metrics.ObserveStreamErrorNoPacket(segment, err)
-	}
 	if err != nil {
+		if err != io.EOF {
+			metrics.Metrics.ObserveServerFailureDeprecated(metrics.DirectionFromServer)
+			metrics.Metrics.ObserveStreamErrorNoPacket(segment, err)
+		}
 		return nil, err
 	}
 	metrics.Metrics.ObservePacket(segment, pkt.Type)
