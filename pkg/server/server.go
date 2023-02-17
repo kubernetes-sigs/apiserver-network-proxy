@@ -17,12 +17,10 @@ limitations under the License.
 package server
 
 import (
-	"bytes"
 	"context"
 	"errors"
 	"fmt"
 	"io"
-	"net/http"
 	runpprof "runtime/pprof"
 	"strconv"
 	"strings"
@@ -51,14 +49,19 @@ const xfrChannelSize = 10
 
 type key int
 
-type GrpcFrontend struct {
+type Frontend interface {
+	Send(*client.Packet) error
+	Recv() (*client.Packet, error)
+}
+
+type grpcFrontend struct {
 	stream    client.ProxyService_ProxyServer
 	streamUID string
 	sendLock  sync.Mutex
 	recvLock  sync.Mutex
 }
 
-func (g *GrpcFrontend) Send(pkt *client.Packet) error {
+func (g *grpcFrontend) Send(pkt *client.Packet) error {
 	g.sendLock.Lock()
 	defer g.sendLock.Unlock()
 
@@ -71,7 +74,7 @@ func (g *GrpcFrontend) Send(pkt *client.Packet) error {
 	return err
 }
 
-func (g *GrpcFrontend) Recv() (*client.Packet, error) {
+func (g *grpcFrontend) Recv() (*client.Packet, error) {
 	g.recvLock.Lock()
 	defer g.recvLock.Unlock()
 
@@ -88,16 +91,13 @@ func (g *GrpcFrontend) Recv() (*client.Packet, error) {
 }
 
 type ProxyClientConnection struct {
-	Mode        string
-	HTTP        io.ReadWriter
-	frontend    *GrpcFrontend
-	CloseHTTP   func() error
 	connected   chan struct{}
 	dialID      int64
 	connectID   int64
 	agentID     string
 	start       time.Time
 	backend     Backend
+	frontend    Frontend
 	dialAddress string // cached for logging
 }
 
@@ -108,34 +108,7 @@ const (
 func (c *ProxyClientConnection) send(pkt *client.Packet) error {
 	start := time.Now()
 	defer metrics.Metrics.ObserveFrontendWriteLatency(time.Since(start))
-	if c.Mode == "grpc" {
-		return c.frontend.Send(pkt)
-	}
-	if c.Mode == "http-connect" {
-		if pkt.Type == client.PacketType_CLOSE_RSP {
-			return c.CloseHTTP()
-		} else if pkt.Type == client.PacketType_DIAL_CLS {
-			return c.CloseHTTP()
-		} else if pkt.Type == client.PacketType_DATA {
-			_, err := c.HTTP.Write(pkt.GetData().Data)
-			return err
-		} else if pkt.Type == client.PacketType_DIAL_RSP {
-			if pkt.GetDialResponse().Error != "" {
-				body := bytes.NewBufferString(pkt.GetDialResponse().Error)
-				t := http.Response{
-					StatusCode: 503,
-					Body:       io.NopCloser(body),
-				}
-
-				t.Write(c.HTTP)
-				return c.CloseHTTP()
-			}
-			return nil
-		} else {
-			return fmt.Errorf("attempt to send via unrecognized connection type %v", pkt.Type)
-		}
-	}
-	return fmt.Errorf("attempt to send via unrecognized connection mode %q", c.Mode)
+	return c.frontend.Send(pkt)
 }
 
 func NewPendingDialManager() *PendingDialManager {
@@ -179,7 +152,12 @@ func (pm *PendingDialManager) removeForStream(streamUID string) []*ProxyClientCo
 		if frontend.frontend == nil {
 			continue
 		}
-		if frontend.frontend.streamUID == streamUID {
+		grpcFe, ok := frontend.frontend.(*grpcFrontend)
+		if !ok {
+			klog.V(5).ErrorS(nil, "Frontend is not a grpc Frontend", "dialID", frontend.dialID)
+			continue
+		}
+		if grpcFe.streamUID == streamUID {
 			delete(pm.pendingDial, dialID)
 			ret = append(ret, frontend)
 		}
@@ -422,7 +400,11 @@ func (s *ProxyServer) removeFrontendsForStream(streamUID string) []*ProxyClientC
 			if frontend.frontend == nil {
 				continue
 			}
-			if frontend.frontend.streamUID == streamUID {
+			grpcFe, ok := frontend.frontend.(*grpcFrontend)
+			if !ok {
+				continue
+			}
+			if grpcFe.streamUID == streamUID {
 				delete(frontends, connID)
 				ret = append(ret, frontend)
 			}
@@ -479,7 +461,7 @@ func (s *ProxyServer) Proxy(stream client.ProxyService_ProxyServer) error {
 	recvCh := make(chan *client.Packet, xfrChannelSize)
 	stopCh := make(chan error, 1)
 
-	frontend := GrpcFrontend{
+	frontend := grpcFrontend{
 		stream:    stream,
 		streamUID: streamUID,
 	}
@@ -511,7 +493,7 @@ func (s *ProxyServer) Proxy(stream client.ProxyService_ProxyServer) error {
 	return <-stopCh
 }
 
-func (s *ProxyServer) readFrontendToChannel(frontend *GrpcFrontend, userAgent []string, recvCh chan *client.Packet, stopCh chan error) {
+func (s *ProxyServer) readFrontendToChannel(frontend *grpcFrontend, userAgent []string, recvCh chan *client.Packet, stopCh chan error) {
 	defer close(stopCh)
 	defer close(recvCh)
 
@@ -543,7 +525,7 @@ func (s *ProxyServer) readFrontendToChannel(frontend *GrpcFrontend, userAgent []
 	}
 }
 
-func (s *ProxyServer) serveRecvFrontend(frontend *GrpcFrontend, recvCh <-chan *client.Packet) {
+func (s *ProxyServer) serveRecvFrontend(frontend *grpcFrontend, recvCh <-chan *client.Packet) {
 	klog.V(5).Infoln("start serving frontend stream")
 
 	var firstConnID int64
@@ -607,7 +589,6 @@ func (s *ProxyServer) serveRecvFrontend(frontend *GrpcFrontend, recvCh <-chan *c
 			s.PendingDial.Add(
 				random,
 				&ProxyClientConnection{
-					Mode:        "grpc",
 					frontend:    frontend,
 					dialID:      random,
 					connected:   make(chan struct{}),
@@ -1062,7 +1043,7 @@ func (s *ProxyServer) sendBackendDialClose(backend Backend, random int64, reason
 	}
 }
 
-func (s *ProxyServer) sendFrontendClose(frontend *GrpcFrontend, connectID int64, reason string) {
+func (s *ProxyServer) sendFrontendClose(frontend *grpcFrontend, connectID int64, reason string) {
 	pkt := &client.Packet{
 		Type: client.PacketType_CLOSE_RSP,
 		Payload: &client.Packet_CloseResponse{

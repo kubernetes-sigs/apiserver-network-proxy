@@ -190,11 +190,11 @@ func TestAgentTokenAuthenticationErrorsToken(t *testing.T) {
 
 func TestRemovePendingDialForStream(t *testing.T) {
 	streamUID := "target-uuid"
-	pending1 := &ProxyClientConnection{frontend: &GrpcFrontend{streamUID: streamUID}}
+	pending1 := &ProxyClientConnection{frontend: &grpcFrontend{streamUID: streamUID}}
 	pending2 := &ProxyClientConnection{}
-	pending3 := &ProxyClientConnection{frontend: &GrpcFrontend{streamUID: streamUID}}
-	pending4 := &ProxyClientConnection{frontend: &GrpcFrontend{streamUID: "different-uid"}}
-	pending5 := &ProxyClientConnection{frontend: &GrpcFrontend{streamUID: ""}}
+	pending3 := &ProxyClientConnection{frontend: &grpcFrontend{streamUID: streamUID}}
+	pending4 := &ProxyClientConnection{frontend: &grpcFrontend{streamUID: "different-uid"}}
+	pending5 := &ProxyClientConnection{frontend: &grpcFrontend{streamUID: ""}}
 	p := NewProxyServer("", []ProxyStrategy{ProxyStrategyDefault}, 1, nil)
 	p.PendingDial.Add(1, pending1)
 	p.PendingDial.Add(2, pending2)
@@ -320,11 +320,11 @@ func TestRemoveFrontendsForStream(t *testing.T) {
 	backend1 := &backend{}
 	backend2 := &backend{}
 	backend3 := &backend{}
-	agent1ConnID1 := &ProxyClientConnection{backend: backend1, frontend: &GrpcFrontend{streamUID: streamUID}}
+	agent1ConnID1 := &ProxyClientConnection{backend: backend1, frontend: &grpcFrontend{streamUID: streamUID}}
 	agent1ConnID2 := &ProxyClientConnection{backend: backend1}
-	agent2ConnID1 := &ProxyClientConnection{backend: backend2, frontend: &GrpcFrontend{streamUID: streamUID}}
+	agent2ConnID1 := &ProxyClientConnection{backend: backend2, frontend: &grpcFrontend{streamUID: streamUID}}
 	agent2ConnID2 := &ProxyClientConnection{backend: backend2}
-	agent3ConnID1 := &ProxyClientConnection{backend: backend3, frontend: &GrpcFrontend{streamUID: streamUID}}
+	agent3ConnID1 := &ProxyClientConnection{backend: backend3, frontend: &grpcFrontend{streamUID: streamUID}}
 	p := NewProxyServer("", []ProxyStrategy{ProxyStrategyDefault}, 1, nil)
 	p.addFrontend("agent1", int64(1), agent1ConnID1)
 	p.addFrontend("agent1", int64(2), agent1ConnID2)

@@ -17,17 +17,65 @@ limitations under the License.
 package server
 
 import (
+	"bytes"
 	"fmt"
 	"io"
 	"math/rand"
+	"net"
 	"net/http"
 	"sync"
 	"time"
 
 	"k8s.io/klog/v2"
+	commonmetrics "sigs.k8s.io/apiserver-network-proxy/konnectivity-client/pkg/common/metrics"
 	"sigs.k8s.io/apiserver-network-proxy/konnectivity-client/proto/client"
 	"sigs.k8s.io/apiserver-network-proxy/pkg/server/metrics"
 )
+
+type httpFrontend struct {
+	conn      net.Conn
+	closeOnce sync.Once
+	closed    chan struct{}
+}
+
+func (h *httpFrontend) Send(pkt *client.Packet) error {
+	const segment = commonmetrics.SegmentToClient
+	metrics.Metrics.ObservePacket(segment, pkt.Type)
+
+	if pkt.Type == client.PacketType_CLOSE_RSP {
+		h.close()
+	} else if pkt.Type == client.PacketType_DIAL_CLS {
+		h.close()
+	} else if pkt.Type == client.PacketType_DATA {
+		_, err := h.conn.Write(pkt.GetData().Data)
+		return err
+	} else if pkt.Type == client.PacketType_DIAL_RSP {
+		if pkt.GetDialResponse().Error != "" {
+			body := bytes.NewBufferString(pkt.GetDialResponse().Error)
+			t := http.Response{
+				StatusCode: 503,
+				Body:       io.NopCloser(body),
+			}
+
+			t.Write(h.conn)
+			h.close()
+		}
+	} else {
+		return fmt.Errorf("attempt to send via unrecognized connection type %v", pkt.Type)
+	}
+	return nil
+}
+
+func (h *httpFrontend) Recv() (*client.Packet, error) {
+	return nil, fmt.Errorf("Recv method not implemented on httpFrontend")
+}
+
+func (h *httpFrontend) close() {
+	h.closeOnce.Do(func() {
+		h.conn.Close()
+		close(h.closed)
+	})
+}
 
 // Tunnel implements Proxy based on HTTP Connect, which tunnels the traffic to
 // the agent registered in ProxyServer.
@@ -60,8 +108,11 @@ func (t *Tunnel) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
-	var closeOnce sync.Once
-	defer closeOnce.Do(func() { conn.Close() })
+	frontend := &httpFrontend{
+		conn:   conn,
+		closed: make(chan struct{}),
+	}
+	defer frontend.close()
 
 	random := rand.Int63() /* #nosec G404 */
 	dialRequest := &client.Packet{
@@ -81,19 +132,12 @@ func (t *Tunnel) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, fmt.Sprintf("currently no tunnels available: %v", err), http.StatusInternalServerError)
 		return
 	}
-	closed := make(chan struct{})
 	connected := make(chan struct{})
 	connection := &ProxyClientConnection{
-		Mode: "http-connect",
-		HTTP: io.ReadWriter(conn), // pass as ReadWriter so the caller must close with CloseHTTP
-		CloseHTTP: func() error {
-			closeOnce.Do(func() { conn.Close() })
-			close(closed)
-			return nil
-		},
 		connected: connected,
 		start:     time.Now(),
 		backend:   backend,
+		frontend:  frontend,
 	}
 	t.Server.PendingDial.Add(random, connection)
 	if err := backend.Send(dialRequest); err != nil {
@@ -113,7 +157,7 @@ func (t *Tunnel) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	select {
 	case <-connection.connected: // Waiting for response before we begin full communication.
-	case <-closed: // Connection was closed before being established
+	case <-frontend.closed: // Connection was closed before being established
 	}
 
 	defer func() {
@@ -129,7 +173,6 @@ func (t *Tunnel) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		if err = backend.Send(packet); err != nil {
 			klog.V(2).InfoS("failed to send close request packet", "host", r.Host, "agentID", connection.agentID, "connectionID", connection.connectID)
 		}
-		conn.Close()
 	}()
 
 	klog.V(3).InfoS("Starting proxy to host", "host", r.Host)
