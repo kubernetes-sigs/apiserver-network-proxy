@@ -29,6 +29,7 @@ import (
 
 	"sigs.k8s.io/apiserver-network-proxy/pkg/agent"
 	"sigs.k8s.io/apiserver-network-proxy/pkg/util"
+	"sigs.k8s.io/apiserver-network-proxy/proto/header"
 )
 
 type GrpcProxyAgentOptions struct {
@@ -197,12 +198,12 @@ func validateAgentIdentifiers(agentIdentifiers string) error {
 		return err
 	}
 	for idType := range decoded {
-		switch agent.IdentifierType(idType) {
-		case agent.IPv4:
-		case agent.IPv6:
-		case agent.CIDR:
-		case agent.Host:
-		case agent.DefaultRoute:
+		switch header.IdentifierType(idType) {
+		case header.IPv4:
+		case header.IPv6:
+		case header.CIDR:
+		case header.Host:
+		case header.DefaultRoute:
 		default:
 			return fmt.Errorf("unknown address type: %s", idType)
 		}

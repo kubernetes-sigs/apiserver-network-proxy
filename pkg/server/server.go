@@ -40,7 +40,7 @@ import (
 
 	commonmetrics "sigs.k8s.io/apiserver-network-proxy/konnectivity-client/pkg/common/metrics"
 	"sigs.k8s.io/apiserver-network-proxy/konnectivity-client/proto/client"
-	pkgagent "sigs.k8s.io/apiserver-network-proxy/pkg/agent"
+
 	"sigs.k8s.io/apiserver-network-proxy/pkg/server/metrics"
 	"sigs.k8s.io/apiserver-network-proxy/pkg/util"
 	"sigs.k8s.io/apiserver-network-proxy/proto/agent"
@@ -267,15 +267,15 @@ func (s *ProxyServer) addBackend(agentID string, conn agent.AgentService_Connect
 			}
 			for _, ipv4 := range agentIdentifiers.IPv4 {
 				klog.V(5).InfoS("Add the agent to DestHostBackendManager", "agent address", ipv4)
-				s.BackendManagers[i].AddBackend(ipv4, pkgagent.IPv4, conn)
+				s.BackendManagers[i].AddBackend(ipv4, header.IPv4, conn)
 			}
 			for _, ipv6 := range agentIdentifiers.IPv6 {
 				klog.V(5).InfoS("Add the agent to DestHostBackendManager", "agent address", ipv6)
-				s.BackendManagers[i].AddBackend(ipv6, pkgagent.IPv6, conn)
+				s.BackendManagers[i].AddBackend(ipv6, header.IPv6, conn)
 			}
 			for _, host := range agentIdentifiers.Host {
 				klog.V(5).InfoS("Add the agent to DestHostBackendManager", "agent address", host)
-				s.BackendManagers[i].AddBackend(host, pkgagent.Host, conn)
+				s.BackendManagers[i].AddBackend(host, header.Host, conn)
 			}
 		case *DefaultRouteBackendManager:
 			agentIdentifiers, err := getAgentIdentifiers(conn)
@@ -285,11 +285,11 @@ func (s *ProxyServer) addBackend(agentID string, conn agent.AgentService_Connect
 			}
 			if agentIdentifiers.DefaultRoute {
 				klog.V(5).InfoS("Add the agent to DefaultRouteBackendManager", "agentID", agentID)
-				backend = s.BackendManagers[i].AddBackend(agentID, pkgagent.DefaultRoute, conn)
+				backend = s.BackendManagers[i].AddBackend(agentID, header.DefaultRoute, conn)
 			}
 		default:
 			klog.V(5).InfoS("Add the agent to DefaultBackendManager", "agentID", agentID)
-			backend = s.BackendManagers[i].AddBackend(agentID, pkgagent.UID, conn)
+			backend = s.BackendManagers[i].AddBackend(agentID, header.UID, conn)
 		}
 	}
 	return
@@ -306,15 +306,15 @@ func (s *ProxyServer) removeBackend(agentID string, conn agent.AgentService_Conn
 			}
 			for _, ipv4 := range agentIdentifiers.IPv4 {
 				klog.V(5).InfoS("Remove the agent from the DestHostBackendManager", "agentHost", ipv4)
-				bm.RemoveBackend(ipv4, pkgagent.IPv4, conn)
+				bm.RemoveBackend(ipv4, header.IPv4, conn)
 			}
 			for _, ipv6 := range agentIdentifiers.IPv6 {
 				klog.V(5).InfoS("Remove the agent from the DestHostBackendManager", "agentHost", ipv6)
-				bm.RemoveBackend(ipv6, pkgagent.IPv6, conn)
+				bm.RemoveBackend(ipv6, header.IPv6, conn)
 			}
 			for _, host := range agentIdentifiers.Host {
 				klog.V(5).InfoS("Remove the agent from the DestHostBackendManager", "agentHost", host)
-				bm.RemoveBackend(host, pkgagent.Host, conn)
+				bm.RemoveBackend(host, header.Host, conn)
 			}
 		case *DefaultRouteBackendManager:
 			agentIdentifiers, err := getAgentIdentifiers(conn)
@@ -324,11 +324,11 @@ func (s *ProxyServer) removeBackend(agentID string, conn agent.AgentService_Conn
 			}
 			if agentIdentifiers.DefaultRoute {
 				klog.V(5).InfoS("Remove the agent from the DefaultRouteBackendManager", "agentID", agentID)
-				bm.RemoveBackend(agentID, pkgagent.DefaultRoute, conn)
+				bm.RemoveBackend(agentID, header.DefaultRoute, conn)
 			}
 		default:
 			klog.V(5).InfoS("Remove the agent from the DefaultBackendManager", "agentID", agentID)
-			bm.RemoveBackend(agentID, pkgagent.UID, conn)
+			bm.RemoveBackend(agentID, header.UID, conn)
 		}
 	}
 }
@@ -707,8 +707,8 @@ func agentID(stream agent.AgentService_ConnectServer) (string, error) {
 	return agentIDs[0], nil
 }
 
-func getAgentIdentifiers(stream agent.AgentService_ConnectServer) (pkgagent.Identifiers, error) {
-	var agentIdentifiers pkgagent.Identifiers
+func getAgentIdentifiers(stream agent.AgentService_ConnectServer) (header.Identifiers, error) {
+	var agentIdentifiers header.Identifiers
 	md, ok := metadata.FromIncomingContext(stream.Context())
 	if !ok {
 		return agentIdentifiers, fmt.Errorf("failed to get context")
@@ -721,7 +721,7 @@ func getAgentIdentifiers(stream agent.AgentService_ConnectServer) (pkgagent.Iden
 		return agentIdentifiers, nil
 	}
 
-	agentIdentifiers, err := pkgagent.GenAgentIdentifiers(agentIDs[0])
+	agentIdentifiers, err := header.GenAgentIdentifiers(agentIDs[0])
 	if err != nil {
 		return agentIdentifiers, err
 	}
