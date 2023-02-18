@@ -306,6 +306,8 @@ func (s *ProxyServer) addFrontend(agentID string, connID int64, p *ProxyClientCo
 		s.frontends[agentID] = make(map[int64]*ProxyClientConnection)
 	}
 	s.frontends[agentID][connID] = p
+
+	metrics.Metrics.SetEstablishedConnCount(s.getCount(s.frontends))
 }
 
 func (s *ProxyServer) removeFrontend(agentID string, connID int64) *ProxyClientConnection {
@@ -323,6 +325,7 @@ func (s *ProxyServer) removeFrontend(agentID string, connID int64) *ProxyClientC
 	if len(s.frontends[agentID]) == 0 {
 		delete(s.frontends, agentID)
 	}
+	metrics.Metrics.SetEstablishedConnCount(s.getCount(s.frontends))
 	return ret
 }
 
@@ -354,7 +357,17 @@ func (s *ProxyServer) removeFrontendsForBackendConn(agentID string, backend Back
 			ret = append(ret, frontend)
 		}
 	}
+
+	metrics.Metrics.SetEstablishedConnCount(s.getCount(s.frontends))
 	return ret, nil
+}
+
+func (s *ProxyServer) getCount(frontends map[string](map[int64]*ProxyClientConnection)) int {
+	count := 0
+	for _, frontend := range frontends {
+		count = count + len(frontend)
+	}
+	return count
 }
 
 // NewProxyServer creates a new ProxyServer instance

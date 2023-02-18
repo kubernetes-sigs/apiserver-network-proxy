@@ -225,6 +225,38 @@ func TestAddRemoveFrontends(t *testing.T) {
 	}
 }
 
+func TestEstablishedConnsMetric(t *testing.T) {
+	metrics.Metrics.Reset()
+
+	agent1ConnID1 := new(ProxyClientConnection)
+	agent1ConnID2 := new(ProxyClientConnection)
+	agent2ConnID1 := new(ProxyClientConnection)
+	agent2ConnID2 := new(ProxyClientConnection)
+	agent3ConnID1 := new(ProxyClientConnection)
+
+	p := NewProxyServer("", []ProxyStrategy{ProxyStrategyDefault}, 1, nil)
+	p.addFrontend("agent1", int64(1), agent1ConnID1)
+	assertEstablishedConnsMetric(t, 1)
+	p.addFrontend("agent1", int64(2), agent1ConnID2)
+	assertEstablishedConnsMetric(t, 2)
+	p.addFrontend("agent2", int64(1), agent2ConnID1)
+	assertEstablishedConnsMetric(t, 3)
+	p.addFrontend("agent2", int64(2), agent2ConnID2)
+	assertEstablishedConnsMetric(t, 4)
+	p.addFrontend("agent3", int64(1), agent3ConnID1)
+	assertEstablishedConnsMetric(t, 5)
+	p.removeFrontend("agent2", int64(1))
+	assertEstablishedConnsMetric(t, 4)
+	p.removeFrontend("agent2", int64(2))
+	assertEstablishedConnsMetric(t, 3)
+	p.removeFrontend("agent1", int64(1))
+	assertEstablishedConnsMetric(t, 2)
+	p.removeFrontend("agent1", int64(2))
+	assertEstablishedConnsMetric(t, 1)
+	p.removeFrontend("agent3", int64(1))
+	assertEstablishedConnsMetric(t, 0)
+}
+
 func prepareFrontendConn(ctrl *gomock.Controller) *agentmock.MockAgentService_ConnectServer {
 	// prepare the connection to fontend  of proxy-server
 	frontendConn := agentmock.NewMockAgentService_ConnectServer(ctrl)
@@ -544,5 +576,12 @@ func closeRspPkt(connectID int64, errMsg string) *client.Packet {
 				Error:     errMsg,
 			},
 		},
+	}
+}
+
+func assertEstablishedConnsMetric(t testing.TB, expect int) {
+	t.Helper()
+	if err := metricstest.ExpectServerEstablishedConns(expect); err != nil {
+		t.Errorf("Expected %d %s metric: %v", expect, "established_connections", err)
 	}
 }
