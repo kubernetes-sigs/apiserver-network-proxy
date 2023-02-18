@@ -27,9 +27,9 @@ import (
 
 	"k8s.io/klog/v2"
 
+	commonagent "sigs.k8s.io/apiserver-network-proxy/konnectivity-client/pkg/common/agent"
 	commonmetrics "sigs.k8s.io/apiserver-network-proxy/konnectivity-client/pkg/common/metrics"
 	client "sigs.k8s.io/apiserver-network-proxy/konnectivity-client/proto/client"
-	pkgagent "sigs.k8s.io/apiserver-network-proxy/pkg/agent"
 	"sigs.k8s.io/apiserver-network-proxy/pkg/server/metrics"
 	"sigs.k8s.io/apiserver-network-proxy/proto/agent"
 )
@@ -129,9 +129,9 @@ func newBackend(conn agent.AgentService_ConnectServer) *backend {
 // connections, i.e., get, add and remove
 type BackendStorage interface {
 	// AddBackend adds a backend.
-	AddBackend(identifier string, idType pkgagent.IdentifierType, conn agent.AgentService_ConnectServer) Backend
+	AddBackend(identifier string, idType commonagent.IdentifierType, conn agent.AgentService_ConnectServer) Backend
 	// RemoveBackend removes a backend.
-	RemoveBackend(identifier string, idType pkgagent.IdentifierType, conn agent.AgentService_ConnectServer)
+	RemoveBackend(identifier string, idType commonagent.IdentifierType, conn agent.AgentService_ConnectServer)
 	// NumBackends returns the number of backends.
 	NumBackends() int
 }
@@ -182,18 +182,18 @@ type DefaultBackendStorage struct {
 	// types of identifiers when associating to a specific BackendManager,
 	// e.g., when associating to the DestHostBackendManager, it can only use the
 	// identifiers of types, IPv4, IPv6 and Host.
-	idTypes []pkgagent.IdentifierType
+	idTypes []commonagent.IdentifierType
 }
 
 // NewDefaultBackendManager returns a DefaultBackendManager.
 func NewDefaultBackendManager() *DefaultBackendManager {
 	return &DefaultBackendManager{
 		DefaultBackendStorage: NewDefaultBackendStorage(
-			[]pkgagent.IdentifierType{pkgagent.UID})}
+			[]commonagent.IdentifierType{commonagent.UID})}
 }
 
 // NewDefaultBackendStorage returns a DefaultBackendStorage
-func NewDefaultBackendStorage(idTypes []pkgagent.IdentifierType) *DefaultBackendStorage {
+func NewDefaultBackendStorage(idTypes []commonagent.IdentifierType) *DefaultBackendStorage {
 	// Set an explicit value, so that the metric is emitted even when
 	// no agent ever successfully connects.
 	metrics.Metrics.SetBackendCount(0)
@@ -204,7 +204,7 @@ func NewDefaultBackendStorage(idTypes []pkgagent.IdentifierType) *DefaultBackend
 	} /* #nosec G404 */
 }
 
-func containIDType(idTypes []pkgagent.IdentifierType, idType pkgagent.IdentifierType) bool {
+func containIDType(idTypes []commonagent.IdentifierType, idType commonagent.IdentifierType) bool {
 	for _, it := range idTypes {
 		if it == idType {
 			return true
@@ -214,7 +214,7 @@ func containIDType(idTypes []pkgagent.IdentifierType, idType pkgagent.Identifier
 }
 
 // AddBackend adds a backend.
-func (s *DefaultBackendStorage) AddBackend(identifier string, idType pkgagent.IdentifierType, conn agent.AgentService_ConnectServer) Backend {
+func (s *DefaultBackendStorage) AddBackend(identifier string, idType commonagent.IdentifierType, conn agent.AgentService_ConnectServer) Backend {
 	if !containIDType(s.idTypes, idType) {
 		klog.V(4).InfoS("fail to add backend", "backend", identifier, "error", &ErrWrongIDType{idType, s.idTypes})
 		return nil
@@ -237,14 +237,14 @@ func (s *DefaultBackendStorage) AddBackend(identifier string, idType pkgagent.Id
 	s.backends[identifier] = []*backend{addedBackend}
 	metrics.Metrics.SetBackendCount(len(s.backends))
 	s.agentIDs = append(s.agentIDs, identifier)
-	if idType == pkgagent.DefaultRoute {
+	if idType == commonagent.DefaultRoute {
 		s.defaultRouteAgentIDs = append(s.defaultRouteAgentIDs, identifier)
 	}
 	return addedBackend
 }
 
 // RemoveBackend removes a backend.
-func (s *DefaultBackendStorage) RemoveBackend(identifier string, idType pkgagent.IdentifierType, conn agent.AgentService_ConnectServer) {
+func (s *DefaultBackendStorage) RemoveBackend(identifier string, idType commonagent.IdentifierType, conn agent.AgentService_ConnectServer) {
 	if !containIDType(s.idTypes, idType) {
 		klog.ErrorS(&ErrWrongIDType{idType, s.idTypes}, "fail to remove backend")
 		return
@@ -276,7 +276,7 @@ func (s *DefaultBackendStorage) RemoveBackend(identifier string, idType pkgagent
 				break
 			}
 		}
-		if idType == pkgagent.DefaultRoute {
+		if idType == commonagent.DefaultRoute {
 			for i := range s.defaultRouteAgentIDs {
 				if s.defaultRouteAgentIDs[i] == identifier {
 					s.defaultRouteAgentIDs = append(s.defaultRouteAgentIDs[:i], s.defaultRouteAgentIDs[i+1:]...)
@@ -307,8 +307,8 @@ func (e *ErrNotFound) Error() string {
 }
 
 type ErrWrongIDType struct {
-	got    pkgagent.IdentifierType
-	expect []pkgagent.IdentifierType
+	got    commonagent.IdentifierType
+	expect []commonagent.IdentifierType
 }
 
 func (e *ErrWrongIDType) Error() string {

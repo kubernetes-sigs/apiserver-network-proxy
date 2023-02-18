@@ -27,6 +27,7 @@ import (
 	"google.golang.org/grpc"
 	"k8s.io/klog/v2"
 
+	commonagent "sigs.k8s.io/apiserver-network-proxy/konnectivity-client/pkg/common/agent"
 	"sigs.k8s.io/apiserver-network-proxy/pkg/agent"
 	"sigs.k8s.io/apiserver-network-proxy/pkg/util"
 )
@@ -197,12 +198,12 @@ func validateAgentIdentifiers(agentIdentifiers string) error {
 		return err
 	}
 	for idType := range decoded {
-		switch agent.IdentifierType(idType) {
-		case agent.IPv4:
-		case agent.IPv6:
-		case agent.CIDR:
-		case agent.Host:
-		case agent.DefaultRoute:
+		switch commonagent.IdentifierType(idType) {
+		case commonagent.IPv4:
+		case commonagent.IPv6:
+		case commonagent.CIDR:
+		case commonagent.Host:
+		case commonagent.DefaultRoute:
 		default:
 			return fmt.Errorf("unknown address type: %s", idType)
 		}

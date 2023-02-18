@@ -20,7 +20,7 @@ import (
 	"context"
 
 	"k8s.io/klog/v2"
-	"sigs.k8s.io/apiserver-network-proxy/pkg/agent"
+	"sigs.k8s.io/apiserver-network-proxy/konnectivity-client/pkg/common/agent"
 )
 
 type DestHostBackendManager struct {

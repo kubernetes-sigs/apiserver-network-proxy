@@ -22,7 +22,6 @@ import (
 	"io"
 	"io/ioutil"
 	"net"
-	"net/url"
 	runpprof "runtime/pprof"
 	"strconv"
 	"sync"
@@ -116,58 +115,6 @@ func newConnectionManager() *connectionManager {
 	return &connectionManager{
 		connections: make(map[int64]*endpointConn),
 	}
-}
-
-// Identifiers stores agent identifiers that will be used by the server when
-// choosing agents
-type Identifiers struct {
-	IPv4         []string
-	IPv6         []string
-	Host         []string
-	CIDR         []string
-	DefaultRoute bool
-}
-
-type IdentifierType string
-
-const (
-	IPv4         IdentifierType = "ipv4"
-	IPv6         IdentifierType = "ipv6"
-	Host         IdentifierType = "host"
-	CIDR         IdentifierType = "cidr"
-	UID          IdentifierType = "uid"
-	DefaultRoute IdentifierType = "default-route"
-)
-
-// GenAgentIdentifiers generates an Identifiers based on the input string, the
-// input string should be a comma-seprated list with each item in the format
-// of <IdentifierType>=<address>
-func GenAgentIdentifiers(addrs string) (Identifiers, error) {
-	var agentIDs Identifiers
-	decoded, err := url.ParseQuery(addrs)
-	if err != nil {
-		return agentIDs, fmt.Errorf("fail to parse url encoded string: %v", err)
-	}
-	for idType, ids := range decoded {
-		switch IdentifierType(idType) {
-		case IPv4:
-			agentIDs.IPv4 = append(agentIDs.IPv4, ids...)
-		case IPv6:
-			agentIDs.IPv6 = append(agentIDs.IPv6, ids...)
-		case Host:
-			agentIDs.Host = append(agentIDs.Host, ids...)
-		case CIDR:
-			agentIDs.CIDR = append(agentIDs.CIDR, ids...)
-		case DefaultRoute:
-			defaultRouteIdentifier, err := strconv.ParseBool(ids[0])
-			if err == nil && defaultRouteIdentifier {
-				agentIDs.DefaultRoute = true
-			}
-		default:
-			return agentIDs, fmt.Errorf("Unknown address type: %s", idType)
-		}
-	}
-	return agentIDs, nil
 }
 
 // Client runs on the node network side. It connects to proxy server and establishes
