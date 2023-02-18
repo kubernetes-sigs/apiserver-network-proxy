@@ -72,8 +72,8 @@ build: bin/proxy-agent bin/proxy-server bin/proxy-test-client bin/http-test-serv
 bin/proxy-agent: proto/agent/agent_grpc.pb.go konnectivity-client/proto/client/client_grpc.pb.go bin cmd/agent/main.go
 	GO111MODULE=on go build -o bin/proxy-agent cmd/agent/main.go
 
-bin/proxy-test-client: konnectivity-client/proto/client/client_grpc.pb.go bin cmd/client/main.go
-	GO111MODULE=on go build -o bin/proxy-test-client cmd/client/main.go
+bin/proxy-test-client: konnectivity-client/proto/client/client_grpc.pb.go bin cmd/test-client/main.go
+	GO111MODULE=on go build -o bin/proxy-test-client cmd/test-client/main.go
 
 bin/http-test-server: bin cmd/test-server/main.go
 	GO111MODULE=on go build -o bin/http-test-server cmd/test-server/main.go
