@@ -32,6 +32,16 @@ const (
 # TYPE konnectivity_network_proxy_server_dial_failure_count counter`
 	serverDialFailureSample = `konnectivity_network_proxy_server_dial_failure_count{reason="%s"} %d`
 
+	serverPendingDialsHeader = `
+# HELP konnectivity_network_proxy_server_pending_backend_dials Current number of pending backend dial requests
+# TYPE konnectivity_network_proxy_server_pending_backend_dials gauge`
+	serverPendingDialsSample = `konnectivity_network_proxy_server_pending_backend_dials{} %d`
+
+	serverEstablishedConnsHeader = `
+# HELP konnectivity_network_proxy_server_established_connections Current number of established end-to-end connections (post-dial).
+# TYPE konnectivity_network_proxy_server_established_connections gauge`
+	serverEstablishedConnsSample = `konnectivity_network_proxy_server_established_connections{} %d`
+
 	agentDialFailureHeader = `
 # HELP konnectivity_network_proxy_agent_endpoint_dial_failure_total Number of failures dialing the remote endpoint, by reason (example: timeout).
 # TYPE konnectivity_network_proxy_agent_endpoint_dial_failure_total counter`
@@ -43,11 +53,23 @@ func ExpectServerDialFailures(expected map[server.DialFailureReason]int) error {
 	for r, v := range expected {
 		expect += fmt.Sprintf(serverDialFailureSample+"\n", r, v)
 	}
-	return ExpectMetric(server.Namespace, server.Subsystem, server.DialFailuresMetric, expect)
+	return ExpectMetric(server.Namespace, server.Subsystem, "dial_failure_count", expect)
 }
 
 func ExpectServerDialFailure(reason server.DialFailureReason, count int) error {
 	return ExpectServerDialFailures(map[server.DialFailureReason]int{reason: count})
+}
+
+func ExpectServerPendingDials(v int) error {
+	expect := serverPendingDialsHeader + "\n"
+	expect += fmt.Sprintf(serverPendingDialsSample+"\n", v)
+	return ExpectMetric(server.Namespace, server.Subsystem, "pending_backend_dials", expect)
+}
+
+func ExpectServerEstablishedConns(v int) error {
+	expect := serverEstablishedConnsHeader + "\n"
+	expect += fmt.Sprintf(serverEstablishedConnsSample+"\n", v)
+	return ExpectMetric(server.Namespace, server.Subsystem, "established_connections", expect)
 }
 
 func ExpectAgentDialFailures(expected map[agent.DialFailureReason]int) error {
