@@ -29,15 +29,6 @@ const (
 	Namespace = "konnectivity_network_proxy"
 	Subsystem = "server"
 
-	DialLatencyMetric        = "dial_duration_seconds"
-	FrontendLatencyMetric    = "frontend_write_duration_seconds"
-	GRPCConnectionsMetric    = "grpc_connections"
-	HTTPConnectionsMetric    = "http_connections"
-	BackendConnectionsMetric = "ready_backend_connections"
-	PendingDialsMetric       = "pending_backend_dials"
-	FullRecvChannelMetric    = "full_receive_channels"
-	DialFailuresMetric       = "dial_failure_count"
-
 	// Proxy is the ProxyService method used to handle incoming streams.
 	Proxy = "Proxy"
 	// Connect is the AgentService method used to establish next hop.
@@ -60,6 +51,7 @@ type ServerMetrics struct {
 	httpConnections   prometheus.Gauge
 	backend           *prometheus.GaugeVec
 	pendingDials      *prometheus.GaugeVec
+	establishedConns  *prometheus.GaugeVec
 	fullRecvChannels  *prometheus.GaugeVec
 	dialFailures      *prometheus.CounterVec
 	streamPackets     *prometheus.CounterVec
@@ -72,7 +64,7 @@ func newServerMetrics() *ServerMetrics {
 		prometheus.HistogramOpts{
 			Namespace: Namespace,
 			Subsystem: Subsystem,
-			Name:      DialLatencyMetric,
+			Name:      "dial_duration_seconds",
 			Help:      "Latency of dial to the remote endpoint in seconds",
 			Buckets:   latencyBuckets,
 		},
@@ -82,7 +74,7 @@ func newServerMetrics() *ServerMetrics {
 		prometheus.HistogramOpts{
 			Namespace: Namespace,
 			Subsystem: Subsystem,
-			Name:      FrontendLatencyMetric,
+			Name:      "frontend_write_duration_seconds",
 			Help:      "Latency of write to the frontend in seconds",
 			Buckets:   latencyBuckets,
 		},
@@ -92,7 +84,7 @@ func newServerMetrics() *ServerMetrics {
 		prometheus.GaugeOpts{
 			Namespace: Namespace,
 			Subsystem: Subsystem,
-			Name:      GRPCConnectionsMetric,
+			Name:      "grpc_connections",
 			Help:      "Number of current grpc connections, partitioned by service method.",
 		},
 		[]string{
@@ -103,7 +95,7 @@ func newServerMetrics() *ServerMetrics {
 		prometheus.GaugeOpts{
 			Namespace: Namespace,
 			Subsystem: Subsystem,
-			Name:      HTTPConnectionsMetric,
+			Name:      "http_connections",
 			Help:      "Number of current HTTP CONNECT connections",
 		},
 	)
@@ -111,7 +103,7 @@ func newServerMetrics() *ServerMetrics {
 		prometheus.GaugeOpts{
 			Namespace: Namespace,
 			Subsystem: Subsystem,
-			Name:      BackendConnectionsMetric,
+			Name:      "ready_backend_connections",
 			Help:      "Number of konnectivity agent connected to the proxy server",
 		},
 		[]string{},
@@ -120,8 +112,17 @@ func newServerMetrics() *ServerMetrics {
 		prometheus.GaugeOpts{
 			Namespace: Namespace,
 			Subsystem: Subsystem,
-			Name:      PendingDialsMetric,
+			Name:      "pending_backend_dials",
 			Help:      "Current number of pending backend dial requests",
+		},
+		[]string{},
+	)
+	establishedConns := prometheus.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Namespace: Namespace,
+			Subsystem: Subsystem,
+			Name:      "established_connections",
+			Help:      "Current number of established end-to-end connections (post-dial).",
 		},
 		[]string{},
 	)
@@ -129,7 +130,7 @@ func newServerMetrics() *ServerMetrics {
 		prometheus.GaugeOpts{
 			Namespace: Namespace,
 			Subsystem: Subsystem,
-			Name:      FullRecvChannelMetric,
+			Name:      "full_receive_channels",
 			Help:      "Number of current connections blocked by a full receive channel, partitioned by service method.",
 		},
 		[]string{
@@ -140,7 +141,7 @@ func newServerMetrics() *ServerMetrics {
 		prometheus.CounterOpts{
 			Namespace: Namespace,
 			Subsystem: Subsystem,
-			Name:      DialFailuresMetric,
+			Name:      "dial_failure_count",
 			Help:      "Number of dial failures observed. Multiple failures can occur for a single dial request.",
 		},
 		[]string{
@@ -155,6 +156,7 @@ func newServerMetrics() *ServerMetrics {
 	prometheus.MustRegister(httpConnections)
 	prometheus.MustRegister(backend)
 	prometheus.MustRegister(pendingDials)
+	prometheus.MustRegister(establishedConns)
 	prometheus.MustRegister(fullRecvChannels)
 	prometheus.MustRegister(dialFailures)
 	prometheus.MustRegister(streamPackets)
@@ -166,6 +168,7 @@ func newServerMetrics() *ServerMetrics {
 		httpConnections:   httpConnections,
 		backend:           backend,
 		pendingDials:      pendingDials,
+		establishedConns:  establishedConns,
 		fullRecvChannels:  fullRecvChannels,
 		dialFailures:      dialFailures,
 		streamPackets:     streamPackets,
@@ -180,6 +183,7 @@ func (s *ServerMetrics) Reset() {
 	s.grpcConnections.Reset()
 	s.backend.Reset()
 	s.pendingDials.Reset()
+	s.establishedConns.Reset()
 	s.fullRecvChannels.Reset()
 	s.dialFailures.Reset()
 	s.streamPackets.Reset()
@@ -220,6 +224,11 @@ func (s *ServerMetrics) SetBackendCount(count int) {
 // SetPendingDialCount sets the number of pending dials.
 func (s *ServerMetrics) SetPendingDialCount(count int) {
 	s.pendingDials.WithLabelValues().Set(float64(count))
+}
+
+// SetEstablishedConnCount sets the number of established connections.
+func (s *ServerMetrics) SetEstablishedConnCount(count int) {
+	s.establishedConns.WithLabelValues().Set(float64(count))
 }
 
 // FullRecvChannel retrieves the metric for counting full receive channels.

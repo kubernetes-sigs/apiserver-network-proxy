@@ -849,7 +849,7 @@ func assertNoClientDialFailures(t testing.TB) {
 func assertNoServerDialFailures(t testing.TB) {
 	t.Helper()
 	if err := metricstest.ExpectServerDialFailures(nil); err != nil {
-		t.Errorf("Unexpected %s metric: %v", metricsserver.DialFailuresMetric, err)
+		t.Errorf("Unexpected %s metric: %v", "dial_failure_count", err)
 	}
 }
 
