@@ -194,6 +194,9 @@ func NewDefaultBackendManager() *DefaultBackendManager {
 
 // NewDefaultBackendStorage returns a DefaultBackendStorage
 func NewDefaultBackendStorage(idTypes []pkgagent.IdentifierType) *DefaultBackendStorage {
+	// Set an explicit value, so that the metric is emitted even when
+	// no agent ever successfully connects.
+	metrics.Metrics.SetBackendCount(0)
 	return &DefaultBackendStorage{
 		backends: make(map[string][]*backend),
 		random:   rand.New(rand.NewSource(time.Now().UnixNano())),

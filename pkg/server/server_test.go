@@ -273,9 +273,10 @@ func prepareFrontendConn(ctrl *gomock.Controller) *agentmock.MockAgentService_Co
 func prepareAgentConnMD(ctrl *gomock.Controller, proxyServer *ProxyServer) *agentmock.MockAgentService_ConnectServer {
 	// prepare the the connection to agent of proxy-server
 	agentConn := agentmock.NewMockAgentService_ConnectServer(ctrl)
+	agentID := uuid.New().String()
 	agentConnMD := metadata.MD{
 		":authority":       []string{"127.0.0.1:8091"},
-		"agentid":          []string{uuid.New().String()},
+		"agentid":          []string{agentID},
 		"agentidentifiers": []string{},
 		"content-type":     []string{"application/grpc"},
 		"user-agent":       []string{"grpc-go/1.42.0"},
@@ -283,7 +284,7 @@ func prepareAgentConnMD(ctrl *gomock.Controller, proxyServer *ProxyServer) *agen
 	agentConnCtx := metadata.NewIncomingContext(context.Background(), agentConnMD)
 	agentConn.EXPECT().Context().Return(agentConnCtx).AnyTimes()
 
-	_ = proxyServer.addBackend(uuid.New().String(), agentConn)
+	_ = proxyServer.addBackend(agentID, agentConn)
 	return agentConn
 }
 
@@ -557,6 +558,26 @@ func TestServerProxyConnectionMismatch(t *testing.T) {
 	})
 }
 
+func TestReadyBackendsMetric(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+
+	metrics.Metrics.Reset()
+
+	p := NewProxyServer(uuid.New().String(), []ProxyStrategy{ProxyStrategyDefault}, 1, &AgentTokenAuthenticationOptions{})
+	assertReadyBackendsMetric(t, 0)
+
+	agentConn := prepareAgentConnMD(ctrl, p)
+	assertReadyBackendsMetric(t, 1)
+
+	agentID, err := agentID(agentConn)
+	if err != nil {
+		t.Fatalf("Could not get agentID: %v", err)
+	}
+	p.removeBackend(agentID, agentConn)
+	assertReadyBackendsMetric(t, 0)
+}
+
 func closeReqPkt(connectID int64) *client.Packet {
 	return &client.Packet{
 		Type: client.PacketType_CLOSE_REQ,
@@ -583,5 +604,12 @@ func assertEstablishedConnsMetric(t testing.TB, expect int) {
 	t.Helper()
 	if err := metricstest.ExpectServerEstablishedConns(expect); err != nil {
 		t.Errorf("Expected %d %s metric: %v", expect, "established_connections", err)
+	}
+}
+
+func assertReadyBackendsMetric(t testing.TB, expect int) {
+	t.Helper()
+	if err := metricstest.ExpectServerReadyBackends(expect); err != nil {
+		t.Errorf("Expected %d %s metric: %v", expect, "ready_backend_connections", err)
 	}
 }
