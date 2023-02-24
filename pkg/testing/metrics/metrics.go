@@ -37,6 +37,11 @@ const (
 # TYPE konnectivity_network_proxy_server_pending_backend_dials gauge`
 	serverPendingDialsSample = `konnectivity_network_proxy_server_pending_backend_dials{} %d`
 
+	serverReadyBackendsHeader = `
+# HELP konnectivity_network_proxy_server_ready_backend_connections Number of konnectivity agent connected to the proxy server
+# TYPE konnectivity_network_proxy_server_ready_backend_connections gauge`
+	serverReadyBackendsSample = `konnectivity_network_proxy_server_ready_backend_connections{} %d`
+
 	serverEstablishedConnsHeader = `
 # HELP konnectivity_network_proxy_server_established_connections Current number of established end-to-end connections (post-dial).
 # TYPE konnectivity_network_proxy_server_established_connections gauge`
@@ -69,6 +74,12 @@ func ExpectServerPendingDials(v int) error {
 	expect := serverPendingDialsHeader + "\n"
 	expect += fmt.Sprintf(serverPendingDialsSample+"\n", v)
 	return ExpectMetric(server.Namespace, server.Subsystem, "pending_backend_dials", expect)
+}
+
+func ExpectServerReadyBackends(v int) error {
+	expect := serverReadyBackendsHeader + "\n"
+	expect += fmt.Sprintf(serverReadyBackendsSample+"\n", v)
+	return ExpectMetric(server.Namespace, server.Subsystem, "ready_backend_connections", expect)
 }
 
 func ExpectServerEstablishedConns(v int) error {
