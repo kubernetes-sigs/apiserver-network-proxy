@@ -131,7 +131,7 @@ func TestServeData_HTTP(t *testing.T) {
 
 	// Verify internal state is consistent
 	if _, ok := testClient.connManager.Get(connID); ok {
-		t.Error("client.connContext not released")
+		t.Error("client.endpointConn not released")
 	}
 }
 
@@ -419,7 +419,7 @@ func waitForConnectionDeletion(t *testing.T, testClient *Client, connID int64) {
 		return !ok, nil
 	})
 	if err != nil {
-		t.Error("client.connContext not released")
+		t.Error("client.endpointConn not released")
 	}
 }
 

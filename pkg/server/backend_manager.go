@@ -72,6 +72,7 @@ func GenProxyStrategiesFromStr(proxyStrategies string) ([]ProxyStrategy, error) 
 
 type Backend interface {
 	Send(p *client.Packet) error
+	Recv() (*client.Packet, error)
 	Context() context.Context
 }
 
@@ -81,13 +82,15 @@ var _ Backend = agent.AgentService_ConnectServer(nil)
 type backend struct {
 	// TODO: this is a multi-writer single-reader pattern, it's tricky to
 	// write it using channel. Let's worry about performance later.
-	mu   sync.Mutex // mu protects conn
-	conn agent.AgentService_ConnectServer
+	sendLock sync.Mutex
+	recvLock sync.Mutex
+	conn     agent.AgentService_ConnectServer
 }
 
 func (b *backend) Send(p *client.Packet) error {
-	b.mu.Lock()
-	defer b.mu.Unlock()
+	b.sendLock.Lock()
+	defer b.sendLock.Unlock()
+
 	const segment = commonmetrics.SegmentToAgent
 	metrics.Metrics.ObservePacket(segment, p.Type)
 	err := b.conn.Send(p)
@@ -95,6 +98,22 @@ func (b *backend) Send(p *client.Packet) error {
 		metrics.Metrics.ObserveStreamError(segment, err, p.Type)
 	}
 	return err
+}
+
+func (b *backend) Recv() (*client.Packet, error) {
+	b.recvLock.Lock()
+	defer b.recvLock.Unlock()
+
+	const segment = commonmetrics.SegmentFromAgent
+	pkt, err := b.conn.Recv()
+	if err != nil {
+		if err != io.EOF {
+			metrics.Metrics.ObserveStreamErrorNoPacket(segment, err)
+		}
+		return nil, err
+	}
+	metrics.Metrics.ObservePacket(segment, pkt.Type)
+	return pkt, nil
 }
 
 func (b *backend) Context() context.Context {
@@ -175,6 +194,9 @@ func NewDefaultBackendManager() *DefaultBackendManager {
 
 // NewDefaultBackendStorage returns a DefaultBackendStorage
 func NewDefaultBackendStorage(idTypes []pkgagent.IdentifierType) *DefaultBackendStorage {
+	// Set an explicit value, so that the metric is emitted even when
+	// no agent ever successfully connects.
+	metrics.Metrics.SetBackendCount(0)
 	return &DefaultBackendStorage{
 		backends: make(map[string][]*backend),
 		random:   rand.New(rand.NewSource(time.Now().UnixNano())),

@@ -21,11 +21,13 @@ import (
 	"context"
 	"fmt"
 	"io/ioutil"
+	"math/rand"
 	"net"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -97,6 +99,26 @@ func (s *waitingServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	w.Write([]byte("hello"))
 }
 
+type delayedServer struct {
+	minWait time.Duration
+	maxWait time.Duration
+}
+
+func newDelayedServer() *delayedServer {
+	return &delayedServer{
+		minWait: 500 * time.Millisecond,
+		maxWait: 2 * time.Second,
+	}
+}
+
+var _ = newDelayedServer() // Suppress unused lint error.
+
+func (s *delayedServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	delay := time.Duration(rand.Int63n(int64(s.maxWait-s.minWait))) + s.minWait /* #nosec G404 */
+	time.Sleep(delay)
+	w.Write([]byte("hello"))
+}
+
 func TestBasicProxy_GRPC(t *testing.T) {
 	expectCleanShutdown(t)
 
@@ -132,18 +154,17 @@ func TestBasicProxy_GRPC(t *testing.T) {
 	if err != nil {
 		t.Error(err)
 	}
-	req.Close = true
 
 	r, err := c.Do(req)
 	if err != nil {
 		t.Error(err)
 	}
+	defer r.Body.Close()
 
 	data, err := ioutil.ReadAll(r.Body)
 	if err != nil {
 		t.Error(err)
 	}
-
 	if string(data) != "hello" {
 		t.Errorf("expect %v; got %v", "hello", string(data))
 	}
@@ -344,6 +365,90 @@ func TestProxyDial_RequestCancelled_GRPC(t *testing.T) {
 	if err := metricstest.ExpectServerDialFailure(metricsserver.DialFailureFrontendClose, 1); err != nil {
 		t.Error(err)
 	}
+	resetAllMetrics() // For clean shutdown.
+}
+
+func TestProxyDial_RequestCancelled_Concurrent_GRPC(t *testing.T) {
+	expectCleanShutdown(t)
+
+	slowServer := newDelayedServer()
+	server := httptest.NewServer(slowServer)
+	defer server.Close()
+
+	proxy, cleanup, err := runGRPCProxyServer()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer cleanup()
+
+	stopCh := make(chan struct{})
+	defer close(stopCh)
+	clientset := runAgent(proxy.agent, stopCh)
+	waitForConnectedServerCount(t, 1, clientset)
+
+	wg := sync.WaitGroup{}
+	dialFn := func(id int, cancelDelay time.Duration) {
+		defer wg.Done()
+
+		// run test client
+		tunnel, err := client.CreateSingleUseGrpcTunnel(context.Background(), proxy.front, grpc.WithInsecure())
+		if err != nil {
+			t.Error(err)
+		}
+
+		ctx, cancel := context.WithCancel(context.Background())
+
+		go func() {
+			time.Sleep(cancelDelay)
+			cancel() // Cancel the request (client-side)
+		}()
+
+		c := &http.Client{
+			Transport: &http.Transport{
+				DialContext: tunnel.DialContext,
+			},
+		}
+
+		req, err := http.NewRequestWithContext(ctx, "GET", server.URL, nil)
+		if err != nil {
+			t.Error(err)
+		}
+
+		c.Do(req) // Errors are expected.
+
+		select {
+		case <-tunnel.Done():
+		case <-time.After(wait.ForeverTestTimeout):
+			t.Errorf("Timed out waiting for tunnel to close")
+		}
+	}
+
+	// Ensure that tunnels aren't leaked with long-running servers.
+	ignoredGoRoutines := goleak.IgnoreCurrent()
+
+	const concurrentConns = 50
+	wg.Add(concurrentConns)
+	for i := 0; i < concurrentConns; i++ {
+		cancelDelayMs := rand.Int63n(1000) + 5 /* #nosec G404 */
+		go dialFn(i, time.Duration(cancelDelayMs)*time.Millisecond)
+	}
+	wg.Wait()
+
+	// Wait for the closed connections to propogate
+	var endpointConnsErr, goLeaksErr error
+	wait.PollImmediate(time.Second, wait.ForeverTestTimeout, func() (done bool, err error) {
+		endpointConnsErr = metricstest.ExpectAgentEndpointConnections(0)
+		goLeaksErr = goleak.Find(ignoredGoRoutines)
+		return endpointConnsErr == nil && goLeaksErr == nil, nil
+	})
+
+	if endpointConnsErr != nil {
+		t.Errorf("Agent connections leaked: %v", endpointConnsErr)
+	}
+	if goLeaksErr != nil {
+		t.Error(goLeaksErr)
+	}
+
 	resetAllMetrics() // For clean shutdown.
 }
 
@@ -849,7 +954,7 @@ func assertNoClientDialFailures(t testing.TB) {
 func assertNoServerDialFailures(t testing.TB) {
 	t.Helper()
 	if err := metricstest.ExpectServerDialFailures(nil); err != nil {
-		t.Errorf("Unexpected %s metric: %v", metricsserver.DialFailuresMetric, err)
+		t.Errorf("Unexpected %s metric: %v", "dial_failure_count", err)
 	}
 }
 
