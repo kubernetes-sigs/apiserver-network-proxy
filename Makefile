@@ -48,6 +48,7 @@ PROXY_SERVER_IP ?= 127.0.0.1
 ## --------------------------------------
 ## Testing
 ## --------------------------------------
+.PHONY: mock_gen
 mock_gen:
 	mkdir -p proto/agent/mocks
 	mockgen sigs.k8s.io/apiserver-network-proxy/proto/agent AgentService_ConnectServer > proto/agent/mocks/agent_mock.go
@@ -103,14 +104,13 @@ mod-download:
 ## --------------------------------------
 
 .PHONY: gen
-gen: mod-download proto/agent/agent_grpc.pb.go proto/agent/agent.pb.go konnectivity-client/proto/client/client_grpc.pb.go konnectivity-client/proto/client/client.pb.go mock_gen
+gen: mod-download gen-proto mock_gen
 
-konnectivity-client/proto/client/client_grpc.pb.go konnectivity-client/proto/client/client.pb.go: konnectivity-client/proto/client/client.proto
+.PHONY: gen-proto
+gen-proto:
 	protoc -I . konnectivity-client/proto/client/client.proto --go_out=. --go_opt=paths=source_relative --go-grpc_out=require_unimplemented_servers=false:. --go-grpc_opt=paths=source_relative
 	cat hack/go-license-header.txt konnectivity-client/proto/client/client_grpc.pb.go > konnectivity-client/proto/client/client_grpc.licensed.go
 	mv konnectivity-client/proto/client/client_grpc.licensed.go konnectivity-client/proto/client/client_grpc.pb.go
-
-proto/agent/agent_grpc.pb.go proto/agent/agent.pb.go: proto/agent/agent.proto
 	protoc -I . proto/agent/agent.proto --go_out=. --go_opt=paths=source_relative --go-grpc_out=require_unimplemented_servers=false:. --go-grpc_opt=paths=source_relative
 	cat hack/go-license-header.txt proto/agent/agent_grpc.pb.go > proto/agent/agent_grpc.licensed.go
 	mv proto/agent/agent_grpc.licensed.go proto/agent/agent_grpc.pb.go
