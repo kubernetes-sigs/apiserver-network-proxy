@@ -20,6 +20,7 @@ import (
 	"bufio"
 	"context"
 	"fmt"
+	"io"
 	"io/ioutil"
 	"math/rand"
 	"net"
@@ -679,6 +680,93 @@ func TestBasicProxy_HTTPCONN(t *testing.T) {
 
 }
 
+func TestFailedDNSLookupProxy_HTTPCONN(t *testing.T) {
+	expectCleanShutdown(t)
+
+	stopCh := make(chan struct{})
+	defer close(stopCh)
+
+	proxy, cleanup, err := runHTTPConnProxyServer()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer cleanup()
+
+	clientset := runAgent(proxy.agent, stopCh)
+	waitForConnectedServerCount(t, 1, clientset)
+
+	conn, err := net.Dial("tcp", proxy.front)
+	if err != nil {
+		t.Error(err)
+	}
+
+	urlString := "http://thissssssxxxxx.com:80"
+	serverURL, _ := url.Parse(urlString)
+
+	// Send HTTP-Connect request
+	_, err = fmt.Fprintf(conn, "CONNECT %s HTTP/1.1\r\nHost: %s\r\n\r\n", serverURL.Host, "127.0.0.1")
+	if err != nil {
+		t.Error(err)
+	}
+
+	// Parse the HTTP response for Connect
+	br := bufio.NewReader(conn)
+	res, err := http.ReadResponse(br, nil)
+	if err != nil {
+		t.Errorf("reading HTTP response from CONNECT: %v", err)
+	}
+
+	if res.StatusCode != 200 {
+		t.Errorf("expect 200; got %d", res.StatusCode)
+	}
+	if br.Buffered() > 0 {
+		t.Error("unexpected extra buffer")
+	}
+	dialer := func(network, addr string) (net.Conn, error) {
+		return conn, nil
+	}
+
+	c := &http.Client{
+		Transport: &http.Transport{
+			Dial: dialer,
+		},
+	}
+
+	resp, err := c.Get(urlString)
+	if err != nil {
+		t.Error(err)
+	}
+
+	if resp.StatusCode != 503 {
+		t.Errorf("expect 503; got %d", res.StatusCode)
+	}
+
+	body, err := io.ReadAll(resp.Body)
+	if !strings.Contains(err.Error(), "connection reset by peer") {
+		t.Error(err)
+	}
+
+	if !strings.Contains(string(body), "no such host") {
+		t.Errorf("Unexpected error: %v", err)
+	}
+
+	err = wait.PollImmediate(100*time.Millisecond, wait.ForeverTestTimeout, func() (bool, error) {
+		return proxy.getActiveHTTPConnectConns() == 0, nil
+	})
+
+	if err != nil {
+		t.Errorf("while waiting for connection to be closed: %v", err)
+	}
+
+	if err := metricstest.ExpectServerDialFailure(metricsserver.DialFailureErrorResponse, 1); err != nil {
+		t.Error(err)
+	}
+	if err := metricstest.ExpectAgentDialFailure(metricsagent.DialFailureUnknown, 1); err != nil {
+		t.Error(err)
+	}
+	resetAllMetrics() // For clean shutdown.
+}
+
 func TestFailedDial_HTTPCONN(t *testing.T) {
 	expectCleanShutdown(t)
 
@@ -730,10 +818,17 @@ func TestFailedDial_HTTPCONN(t *testing.T) {
 		},
 	}
 
-	_, err = c.Get(server.URL)
-	if err == nil {
+	resp, err := c.Get(server.URL)
+	if err != nil {
 		t.Error(err)
-	} else if !strings.Contains(err.Error(), "connection reset by peer") {
+	}
+
+	body, err := io.ReadAll(resp.Body)
+	if !strings.Contains(err.Error(), "connection reset by peer") {
+		t.Error(err)
+	}
+
+	if !strings.Contains(string(body), "connection refused") {
 		t.Errorf("Unexpected error: %v", err)
 	}
 
