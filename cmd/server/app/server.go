@@ -188,6 +188,7 @@ func getUDSListener(ctx context.Context, udsName string) (net.Listener, error) {
 	defer udsListenerLock.Unlock()
 	oldUmask := syscall.Umask(0007)
 	defer syscall.Umask(oldUmask)
+	os.Remove(udsName) // delete stale socket file, if it exists
 	var lc net.ListenConfig
 	lis, err := lc.Listen(ctx, "unix", udsName)
 	if err != nil {
