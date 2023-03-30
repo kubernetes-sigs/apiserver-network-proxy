@@ -18,6 +18,7 @@ package agent
 
 import (
 	"context"
+	"fmt"
 	"math"
 	runpprof "runtime/pprof"
 	"sync"
@@ -25,9 +26,19 @@ import (
 
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/connectivity"
+	corev1 "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/util/wait"
+	"k8s.io/client-go/kubernetes"
 	"k8s.io/klog/v2"
 	"sigs.k8s.io/apiserver-network-proxy/pkg/agent/metrics"
+)
+
+const (
+	connectedPodConditionType            = "k8s.io/apiserver-network-proxy-connected"
+	connectedPodConditionReason          = "Connected"
+	partiallyConnectedPodConditionReason = "PartiallyConnected"
+	disconnectedPodConditionReason       = "Disconnected"
 )
 
 // ClientSet consists of clients connected to each instance of an HA proxy server.
@@ -60,7 +71,11 @@ type ClientSet struct {
 
 	warnOnChannelLimit bool
 
-	syncForever bool // Continue syncing (support dynamic server count).
+	syncForever        bool // Continue syncing (support dynamic server count).
+	k8sClient          kubernetes.Interface
+	enablePodCondition bool
+	podNamespace       string
+	podName            string
 }
 
 func (cs *ClientSet) ClientsCount() int {
@@ -139,9 +154,13 @@ type ClientSetConfig struct {
 	ServiceAccountTokenPath string
 	WarnOnChannelLimit      bool
 	SyncForever             bool
+	K8sClient               kubernetes.Interface
+	EnablePodCondition      bool
+	PodNamespace            string
+	PodName                 string
 }
 
-func (cc *ClientSetConfig) NewAgentClientSet(stopCh <-chan struct{}) *ClientSet {
+func (cc *ClientSetConfig) NewAgentClientSet(stopCh <-chan struct{}, k8sClient kubernetes.Interface) *ClientSet {
 	return &ClientSet{
 		clients:                 make(map[string]*Client),
 		agentID:                 cc.AgentID,
@@ -155,6 +174,10 @@ func (cc *ClientSetConfig) NewAgentClientSet(stopCh <-chan struct{}) *ClientSet 
 		warnOnChannelLimit:      cc.WarnOnChannelLimit,
 		syncForever:             cc.SyncForever,
 		stopCh:                  stopCh,
+		enablePodCondition:      cc.EnablePodCondition,
+		podNamespace:            cc.PodNamespace,
+		podName:                 cc.PodName,
+		k8sClient:               k8sClient,
 	}
 }
 
@@ -202,6 +225,7 @@ func (cs *ClientSet) sync() {
 }
 
 func (cs *ClientSet) connectOnce() error {
+	defer cs.syncPodStatus()
 	if !cs.syncForever && cs.serverCount != 0 && cs.ClientsCount() >= cs.serverCount {
 		return nil
 	}
@@ -226,7 +250,10 @@ func (cs *ClientSet) connectOnce() error {
 		"serverAddress", cs.address,
 		"serverID", c.serverID,
 	)
-	go runpprof.Do(context.Background(), labels, func(context.Context) { c.Serve() })
+	go runpprof.Do(context.Background(), labels, func(context.Context) {
+		defer cs.syncPodStatus()
+		c.Serve()
+	})
 	return nil
 }
 
@@ -245,4 +272,73 @@ func (cs *ClientSet) shutdown() {
 		client.Close()
 		delete(cs.clients, serverID)
 	}
+}
+
+func (cs *ClientSet) syncPodStatus() {
+	if !cs.enablePodCondition || cs.k8sClient == nil || cs.podNamespace == "" || cs.podName == "" {
+		return
+	}
+
+	pod, err := cs.k8sClient.CoreV1().Pods(cs.podNamespace).Get(context.TODO(), cs.podName, metav1.GetOptions{})
+	if err != nil {
+		klog.Warningf("error while getting pod: %s", err)
+		return
+	}
+
+	updatedPod := cs.appendPodCondition(pod, getPodCondition(cs.ClientsCount(), cs.serverCount))
+	if updatedPod == nil {
+		return
+	}
+
+	_, err = cs.k8sClient.CoreV1().Pods(updatedPod.Namespace).UpdateStatus(context.TODO(), updatedPod, metav1.UpdateOptions{})
+	if err != nil {
+		klog.Warningf("error while updating pod status: %s", err)
+		return
+	}
+}
+
+func (cs *ClientSet) appendPodCondition(orig *corev1.Pod, condition *corev1.PodCondition) *corev1.Pod {
+	for i, cur := range orig.Status.Conditions {
+		if cur.Type != condition.Type {
+			continue
+		}
+
+		if cur.Status == condition.Status &&
+			cur.Reason == condition.Reason &&
+			cur.Message == condition.Message {
+			return nil
+		}
+
+		pod := orig.DeepCopy()
+		pod.Status.Conditions[i] = *condition
+		return pod
+	}
+
+	pod := orig.DeepCopy()
+	pod.Status.Conditions = append(pod.Status.Conditions, *condition)
+	return pod
+}
+
+func getPodCondition(current, desired int) *corev1.PodCondition {
+	condition := &corev1.PodCondition{
+		Type:               connectedPodConditionType,
+		LastTransitionTime: metav1.NewTime(time.Now()),
+	}
+
+	if current == 0 || desired == 0 {
+		condition.Status = corev1.ConditionFalse
+		condition.Reason = disconnectedPodConditionReason
+		return condition
+	}
+
+	if current < desired {
+		condition.Status = corev1.ConditionFalse
+		condition.Reason = partiallyConnectedPodConditionReason
+		condition.Message = fmt.Sprintf("connected to %d of %d servers", current, desired)
+		return condition
+	}
+
+	condition.Status = corev1.ConditionTrue
+	condition.Reason = connectedPodConditionReason
+	return condition
 }

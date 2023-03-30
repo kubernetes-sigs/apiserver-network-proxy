@@ -18,6 +18,7 @@ package tests
 
 import (
 	"context"
+	"fmt"
 	"io"
 	"io/ioutil"
 	"log"
@@ -77,6 +78,10 @@ func (lb *tcpLB) serve(stopCh chan struct{}) string {
 				log.Printf("failed to accept: %s", err)
 				continue
 			}
+			if lb.backendCount() == 0 {
+				conn.Close()
+				break
+			}
 			// go lb.handleConnection(conn, lb.randomBackend())
 			back := lb.randomBackend()
 			go lb.handleConnection(conn, back)
@@ -84,6 +89,12 @@ func (lb *tcpLB) serve(stopCh chan struct{}) string {
 	}()
 
 	return ln.Addr().String()
+}
+
+func (lb *tcpLB) backendCount() int {
+	lb.mu.RLock()
+	defer lb.mu.RUnlock()
+	return len(lb.backends)
 }
 
 func (lb *tcpLB) addBackend(backend string) {
@@ -106,6 +117,7 @@ func (lb *tcpLB) removeBackend(backend string) {
 func (lb *tcpLB) randomBackend() string {
 	lb.mu.RLock()
 	defer lb.mu.RUnlock()
+	fmt.Println("What are the number of backends: ?", lb.backends)
 	i := rand.Intn(len(lb.backends)) /* #nosec G404 */
 	return lb.backends[i]
 }

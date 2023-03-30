@@ -33,6 +33,8 @@ import (
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials"
 	"google.golang.org/grpc/keepalive"
+	"k8s.io/client-go/kubernetes"
+	"k8s.io/client-go/tools/clientcmd"
 	"k8s.io/klog/v2"
 
 	"sigs.k8s.io/apiserver-network-proxy/cmd/agent/app/options"
@@ -62,8 +64,29 @@ func (a *Agent) run(o *options.GrpcProxyAgentOptions) error {
 		return fmt.Errorf("failed to validate agent options with %v", err)
 	}
 
+	var k8sClient *kubernetes.Clientset
+	if o.KubeconfigPath != "" || o.EnablePodCondition {
+		config, err := clientcmd.BuildConfigFromFlags("", o.KubeconfigPath)
+		if err != nil {
+			return fmt.Errorf("failed to load kubernetes client config: %v", err)
+		}
+
+		if o.KubeconfigQPS != 0 {
+			klog.V(1).Infof("Setting k8s client QPS: %v", o.KubeconfigQPS)
+			config.QPS = o.KubeconfigQPS
+		}
+		if o.KubeconfigBurst != 0 {
+			klog.V(1).Infof("Setting k8s client Burst: %v", o.KubeconfigBurst)
+			config.Burst = o.KubeconfigBurst
+		}
+		k8sClient, err = kubernetes.NewForConfig(config)
+		if err != nil {
+			return fmt.Errorf("failed to create kubernetes clientset: %v", err)
+		}
+	}
+
 	stopCh := make(chan struct{})
-	if err := a.runProxyConnection(o, stopCh); err != nil {
+	if err := a.runProxyConnection(o, stopCh, k8sClient); err != nil {
 		return fmt.Errorf("failed to run proxy connection with %v", err)
 	}
 
@@ -80,7 +103,7 @@ func (a *Agent) run(o *options.GrpcProxyAgentOptions) error {
 	return nil
 }
 
-func (a *Agent) runProxyConnection(o *options.GrpcProxyAgentOptions, stopCh <-chan struct{}) error {
+func (a *Agent) runProxyConnection(o *options.GrpcProxyAgentOptions, stopCh <-chan struct{}, k8sClient kubernetes.Interface) error {
 	var tlsConfig *tls.Config
 	var err error
 	if tlsConfig, err = util.GetClientTLSConfig(o.CaCert, o.AgentCert, o.AgentKey, o.ProxyServerHost, o.AlpnProtos); err != nil {
@@ -94,7 +117,7 @@ func (a *Agent) runProxyConnection(o *options.GrpcProxyAgentOptions, stopCh <-ch
 		}),
 	}
 	cc := o.ClientSetConfig(dialOptions...)
-	cs := cc.NewAgentClientSet(stopCh)
+	cs := cc.NewAgentClientSet(stopCh, k8sClient)
 	cs.Serve()
 
 	return nil

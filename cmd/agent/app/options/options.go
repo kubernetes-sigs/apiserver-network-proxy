@@ -76,6 +76,17 @@ type GrpcProxyAgentOptions struct {
 	WarnOnChannelLimit bool
 
 	SyncForever bool
+
+	// Path to kubeconfig (used by kubernetes client)
+	KubeconfigPath string
+	// Client maximum QPS.
+	KubeconfigQPS float32
+	// Client maximum burst for throttle.
+	KubeconfigBurst int
+
+	EnablePodCondition bool
+	PodNamespace       string
+	PodName            string
 }
 
 func (o *GrpcProxyAgentOptions) ClientSetConfig(dialOptions ...grpc.DialOption) *agent.ClientSetConfig {
@@ -90,6 +101,9 @@ func (o *GrpcProxyAgentOptions) ClientSetConfig(dialOptions ...grpc.DialOption) 
 		ServiceAccountTokenPath: o.ServiceAccountTokenPath,
 		WarnOnChannelLimit:      o.WarnOnChannelLimit,
 		SyncForever:             o.SyncForever,
+		EnablePodCondition:      o.EnablePodCondition,
+		PodNamespace:            o.PodNamespace,
+		PodName:                 o.PodName,
 	}
 }
 
@@ -116,6 +130,12 @@ func (o *GrpcProxyAgentOptions) Flags() *pflag.FlagSet {
 	flags.StringVar(&o.AgentIdentifiers, "agent-identifiers", o.AgentIdentifiers, "Identifiers of the agent that will be used by the server when choosing agent. N.B. the list of identifiers must be in URL encoded format. e.g.,host=localhost&host=node1.mydomain.com&cidr=127.0.0.1/16&ipv4=1.2.3.4&ipv4=5.6.7.8&ipv6=:::::&default-route=true")
 	flags.BoolVar(&o.WarnOnChannelLimit, "warn-on-channel-limit", o.WarnOnChannelLimit, "Turns on a warning if the system is going to push to a full channel. The check involves an unsafe read.")
 	flags.BoolVar(&o.SyncForever, "sync-forever", o.SyncForever, "If true, the agent continues syncing, in order to support server count changes.")
+	flags.StringVar(&o.KubeconfigPath, "kubeconfig", o.KubeconfigPath, "Absolute path to the kubeconfig file. Only required when --update-pod-status is set.")
+	flags.Float32Var(&o.KubeconfigQPS, "kubeconfig-qps", o.KubeconfigQPS, "Maximum client QPS")
+	flags.IntVar(&o.KubeconfigBurst, "kubeconfig-burst", o.KubeconfigBurst, "Maximum client burst")
+	flags.BoolVar(&o.EnablePodCondition, "enable-pod-condition", o.EnablePodCondition, "When set, manage a condition to represent connection status in the pod specified by --pod-name and --pod-namespace ")
+	flags.StringVar(&o.PodName, "pod-name", o.PodName, "Name of the pod containing this process. Only required when --enable-pod-condition is set. Defaults to POD_NAME")
+	flags.StringVar(&o.PodNamespace, "pod-namespace", o.PodNamespace, "Namespace of the pod containing this process. Only required when --enable-pod-condition is set. Defaults to POD_NAMESPACE")
 	return flags
 }
 
@@ -141,6 +161,12 @@ func (o *GrpcProxyAgentOptions) Print() {
 	klog.V(1).Infof("AgentIdentifiers set to %s.\n", util.PrettyPrintURL(o.AgentIdentifiers))
 	klog.V(1).Infof("WarnOnChannelLimit set to %t.\n", o.WarnOnChannelLimit)
 	klog.V(1).Infof("SyncForever set to %v.\n", o.SyncForever)
+	klog.V(1).Infof("KubeconfigPath set to %v.\n", o.KubeconfigPath)
+	klog.V(1).Infof("KubeconfigQPS set to %v.\n", o.KubeconfigQPS)
+	klog.V(1).Infof("KubeconfigBurst set to %v.\n", o.KubeconfigBurst)
+	klog.V(1).Infof("EnablePodCondition set to %v.\n", o.EnablePodCondition)
+	klog.V(1).Infof("PodNamespace set to %v.\n", o.PodNamespace)
+	klog.V(1).Infof("PodName set to %v.\n", o.PodName)
 }
 
 func (o *GrpcProxyAgentOptions) Validate() error {
@@ -188,6 +214,13 @@ func (o *GrpcProxyAgentOptions) Validate() error {
 	if err := validateAgentIdentifiers(o.AgentIdentifiers); err != nil {
 		return fmt.Errorf("agent address is invalid: %v", err)
 	}
+	if o.EnablePodCondition && o.PodName == "" {
+		return fmt.Errorf("pod name must be provided when pod condition is enabled")
+	}
+	if o.EnablePodCondition && o.PodNamespace == "" {
+		return fmt.Errorf("pod namespace must be provided when pod condition is enabled")
+	}
+
 	return nil
 }
 
@@ -232,6 +265,9 @@ func NewGrpcProxyAgentOptions() *GrpcProxyAgentOptions {
 		ServiceAccountTokenPath:   "",
 		WarnOnChannelLimit:        false,
 		SyncForever:               false,
+		EnablePodCondition:        false,
+		PodNamespace:              os.Getenv("POD_NAMESPACE"),
+		PodName:                   os.Getenv("POD_NAME"),
 	}
 	return &o
 }

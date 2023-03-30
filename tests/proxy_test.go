@@ -971,7 +971,7 @@ func runAgentWithID(agentID, addr string, stopCh <-chan struct{}) *agent.ClientS
 		ProbeInterval: 100 * time.Millisecond,
 		DialOptions:   []grpc.DialOption{grpc.WithInsecure()},
 	}
-	client := cc.NewAgentClientSet(stopCh)
+	client := cc.NewAgentClientSet(stopCh, nil)
 	client.Serve()
 	return client
 }
