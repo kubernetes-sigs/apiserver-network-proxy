@@ -17,10 +17,12 @@ limitations under the License.
 package server
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
 	"io"
+	"net/http"
 	runpprof "runtime/pprof"
 	"strconv"
 	"strings"
@@ -119,6 +121,13 @@ func (c *ProxyClientConnection) send(pkt *client.Packet) error {
 			return err
 		} else if pkt.Type == client.PacketType_DIAL_RSP {
 			if pkt.GetDialResponse().Error != "" {
+				body := bytes.NewBufferString(pkt.GetDialResponse().Error)
+				t := http.Response{
+					StatusCode: 503,
+					Body:       io.NopCloser(body),
+				}
+
+				t.Write(c.HTTP)
 				return c.CloseHTTP()
 			}
 			return nil
