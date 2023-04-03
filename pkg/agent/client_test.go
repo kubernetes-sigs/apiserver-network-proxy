@@ -130,9 +130,7 @@ func TestServeData_HTTP(t *testing.T) {
 	}
 
 	// Verify internal state is consistent
-	if _, ok := testClient.connManager.Get(connID); ok {
-		t.Error("client.endpointConn not released")
-	}
+	waitForConnectionDeletion(t, testClient, connID)
 }
 
 func TestClose_Client(t *testing.T) {
