@@ -77,5 +77,5 @@ Konnectivity-client dependency versions must be compatible
 meaning for a given release branch the konnectivity-client versions must not be newer than the
 Kubernetes versions.
 
-In practice, this means that to update go.mod dependencies used by the client, a new Konnectivity
+In practice, this means that to update `konnectivity-client/go.mod` dependencies, a new Konnectivity
 branch must be cut, and the dependencies should be pinned to the latest versions used by Kubernetes.
