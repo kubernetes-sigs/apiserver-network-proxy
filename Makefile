@@ -75,7 +75,7 @@ bin/proxy-agent: bin $(SOURCE)
 	GO111MODULE=on go build -o bin/proxy-agent cmd/agent/main.go
 
 bin/proxy-test-client: bin $(SOURCE)
-	GO111MODULE=on go build -o bin/proxy-test-client cmd/client/main.go
+	GO111MODULE=on go build -o bin/proxy-test-client cmd/test-client/main.go
 
 bin/http-test-server: bin $(SOURCE)
 	GO111MODULE=on go build -o bin/http-test-server cmd/test-server/main.go
@@ -179,8 +179,12 @@ certs: easy-rsa cfssl cfssljson
 buildx-setup:
 	${DOCKER_CMD} buildx inspect img-builder > /dev/null || docker buildx create --name img-builder --use
 
+# Does not include test images
 .PHONY: docker-build
 docker-build: docker-build/proxy-agent docker-build/proxy-server
+
+.PHONY: docker-build-test
+docker-build-test: docker-build/proxy-test-client docker-build/http-test-server
 
 .PHONY: docker-push
 docker-push: docker-push/proxy-agent docker-push/proxy-server
@@ -206,6 +210,28 @@ docker-build/proxy-server: cmd/server/main.go proto/agent/agent.pb.go buildx-set
 docker-push/proxy-server: docker-build/proxy-server
 	@[ "${DOCKER_CMD}" ] || ( echo "DOCKER_CMD is not set"; exit 1 )
 	${DOCKER_CMD} push ${SERVER_FULL_IMAGE}-$(ARCH):${TAG}
+
+.PHONY: docker-build/proxy-test-client
+docker-build/proxy-test-client: cmd/test-client/main.go proto/agent/agent.pb.go buildx-setup
+	@[ "${TAG}" ] || ( echo "TAG is not set"; exit 1 )
+	echo "Building proxy-test-client for ${ARCH}"
+	${DOCKER_CMD} buildx build . --pull --output=type=$(OUTPUT_TYPE) --platform linux/$(ARCH) --build-arg ARCH=$(ARCH) -f artifacts/images/test-client-build.Dockerfile -t ${TEST_CLIENT_FULL_IMAGE}-$(ARCH):${TAG}
+
+.PHONY: docker-push/proxy-test-client
+docker-push/proxy-test-client: docker-build/proxy-test-client
+	@[ "${DOCKER_CMD}" ] || ( echo "DOCKER_CMD is not set"; exit 1 )
+	${DOCKER_CMD} push ${TEST_CLIENT_FULL_IMAGE}-$(ARCH):${TAG}
+
+.PHONY: docker-build/http-test-server
+docker-build/http-test-server: cmd/test-server/main.go buildx-setup
+	@[ "${TAG}" ] || ( echo "TAG is not set"; exit 1 )
+	echo "Building http-test-server for ${ARCH}"
+	${DOCKER_CMD} buildx build . --pull --output=type=$(OUTPUT_TYPE) --platform linux/$(ARCH) --build-arg ARCH=$(ARCH) -f artifacts/images/test-server-build.Dockerfile -t ${TEST_SERVER_FULL_IMAGE}-$(ARCH):${TAG}
+
+.PHONY: docker-push/http-test-server
+docker-push/http-test-server: docker-build/http-test-server
+	@[ "${DOCKER_CMD}" ] || ( echo "DOCKER_CMD is not set"; exit 1 )
+	${DOCKER_CMD} push ${TEST_SERVER_FULL_IMAGE}-$(ARCH):${TAG}
 
 ## --------------------------------------
 ## Docker — All ARCH

@@ -1,5 +1,5 @@
 # Build the client binary
-FROM golang:1.17.12 as builder
+FROM golang:1.19.6 as builder
 
 # Copy in the go src
 WORKDIR /go/src/sigs.k8s.io/apiserver-network-proxy
@@ -23,7 +23,7 @@ COPY proto/  proto/
 
 # Build
 ARG ARCH
-RUN CGO_ENABLED=0 GOOS=linux GOARCH=${ARCH} go build -v -a -ldflags '-extldflags "-static"' -o proxy-test-client sigs.k8s.io/apiserver-network-proxy/cmd/client
+RUN CGO_ENABLED=0 GOOS=linux GOARCH=${ARCH} go build -v -a -ldflags '-extldflags "-static"' -o proxy-test-client sigs.k8s.io/apiserver-network-proxy/cmd/test-client
 
 # Copy the loader into a thin image
 FROM scratch
