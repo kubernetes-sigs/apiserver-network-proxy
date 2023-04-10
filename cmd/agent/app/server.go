@@ -36,6 +36,7 @@ import (
 	"k8s.io/klog/v2"
 
 	"sigs.k8s.io/apiserver-network-proxy/cmd/agent/app/options"
+	"sigs.k8s.io/apiserver-network-proxy/pkg/agent"
 	"sigs.k8s.io/apiserver-network-proxy/pkg/util"
 )
 
@@ -63,11 +64,13 @@ func (a *Agent) run(o *options.GrpcProxyAgentOptions) error {
 	}
 
 	stopCh := make(chan struct{})
-	if err := a.runProxyConnection(o, stopCh); err != nil {
+
+	cs, err := a.runProxyConnection(o, stopCh)
+	if err != nil {
 		return fmt.Errorf("failed to run proxy connection with %v", err)
 	}
 
-	if err := a.runHealthServer(o); err != nil {
+	if err := a.runHealthServer(o, cs); err != nil {
 		return fmt.Errorf("failed to run health server with %v", err)
 	}
 
@@ -80,11 +83,11 @@ func (a *Agent) run(o *options.GrpcProxyAgentOptions) error {
 	return nil
 }
 
-func (a *Agent) runProxyConnection(o *options.GrpcProxyAgentOptions, stopCh <-chan struct{}) error {
+func (a *Agent) runProxyConnection(o *options.GrpcProxyAgentOptions, stopCh <-chan struct{}) (agent.ReadinessManager, error) {
 	var tlsConfig *tls.Config
 	var err error
 	if tlsConfig, err = util.GetClientTLSConfig(o.CaCert, o.AgentCert, o.AgentKey, o.ProxyServerHost, o.AlpnProtos); err != nil {
-		return err
+		return nil, err
 	}
 	dialOptions := []grpc.DialOption{
 		grpc.WithTransportCredentials(credentials.NewTLS(tlsConfig)),
@@ -97,15 +100,21 @@ func (a *Agent) runProxyConnection(o *options.GrpcProxyAgentOptions, stopCh <-ch
 	cs := cc.NewAgentClientSet(stopCh)
 	cs.Serve()
 
-	return nil
+	return cs, nil
 }
 
-func (a *Agent) runHealthServer(o *options.GrpcProxyAgentOptions) error {
+func (a *Agent) runHealthServer(o *options.GrpcProxyAgentOptions, cs agent.ReadinessManager) error {
 	livenessHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		fmt.Fprintf(w, "ok")
 	})
 	readinessHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		fmt.Fprintf(w, "ok")
+		if cs.Ready() {
+			w.WriteHeader(http.StatusOK)
+			fmt.Fprintf(w, "ok")
+		} else {
+			w.WriteHeader(http.StatusServiceUnavailable)
+			fmt.Fprintf(w, "not ready")
+		}
 	})
 
 	muxHandler := http.NewServeMux()
