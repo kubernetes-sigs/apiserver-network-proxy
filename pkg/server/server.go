@@ -199,10 +199,10 @@ type ProxyServer struct {
 	// ready but there is no healthy connection.
 	Readiness ReadinessManager
 
-	// fmu protects frontends.
+	// fmu protects established.
 	fmu sync.RWMutex
 	// conn = Frontend[agentID][connID]
-	frontends map[string]map[int64]*ProxyClientConnection
+	established map[string]map[int64]*ProxyClientConnection
 
 	PendingDial *PendingDialManager
 
@@ -333,102 +333,102 @@ func (s *ProxyServer) removeBackend(agentID string, conn agent.AgentService_Conn
 	}
 }
 
-func (s *ProxyServer) addFrontend(agentID string, connID int64, p *ProxyClientConnection) {
+func (s *ProxyServer) addEstablished(agentID string, connID int64, p *ProxyClientConnection) {
 	s.fmu.Lock()
 	defer s.fmu.Unlock()
-	if _, ok := s.frontends[agentID]; !ok {
-		s.frontends[agentID] = make(map[int64]*ProxyClientConnection)
+	if _, ok := s.established[agentID]; !ok {
+		s.established[agentID] = make(map[int64]*ProxyClientConnection)
 	}
-	s.frontends[agentID][connID] = p
+	s.established[agentID][connID] = p
 
-	metrics.Metrics.SetEstablishedConnCount(s.getCount(s.frontends))
+	metrics.Metrics.SetEstablishedConnCount(s.getCount(s.established))
 }
 
-func (s *ProxyServer) removeFrontend(agentID string, connID int64) *ProxyClientConnection {
+func (s *ProxyServer) removeEstablished(agentID string, connID int64) *ProxyClientConnection {
 	var ret *ProxyClientConnection
 	s.fmu.Lock()
 	defer s.fmu.Unlock()
-	conns, ok := s.frontends[agentID]
+	conns, ok := s.established[agentID]
 	if !ok {
 		return nil
 	}
 	if ret, ok = conns[connID]; !ok {
 		return nil
 	}
-	delete(s.frontends[agentID], connID)
-	if len(s.frontends[agentID]) == 0 {
-		delete(s.frontends, agentID)
+	delete(s.established[agentID], connID)
+	if len(s.established[agentID]) == 0 {
+		delete(s.established, agentID)
 	}
-	metrics.Metrics.SetEstablishedConnCount(s.getCount(s.frontends))
+	metrics.Metrics.SetEstablishedConnCount(s.getCount(s.established))
 	return ret
 }
 
 func (s *ProxyServer) getFrontend(agentID string, connID int64) (*ProxyClientConnection, error) {
 	s.fmu.RLock()
 	defer s.fmu.RUnlock()
-	conns, ok := s.frontends[agentID]
+	conns, ok := s.established[agentID]
 	if !ok {
-		return nil, fmt.Errorf("can't find agentID %s in the frontends", agentID)
+		return nil, fmt.Errorf("can't find agentID %s in the established", agentID)
 	}
 	conn, ok := conns[connID]
 	if !ok {
-		return nil, fmt.Errorf("can't find connID %d in the frontends[%s]", connID, agentID)
+		return nil, fmt.Errorf("can't find connID %d in the established[%s]", connID, agentID)
 	}
 	return conn, nil
 }
 
-func (s *ProxyServer) removeFrontendsForBackendConn(agentID string, backend Backend) ([]*ProxyClientConnection, error) {
+func (s *ProxyServer) removeEstablishedForBackendConn(agentID string, backend Backend) ([]*ProxyClientConnection, error) {
 	var ret []*ProxyClientConnection
 	if backend == nil {
 		return ret, nil
 	}
 	s.fmu.Lock()
 	defer s.fmu.Unlock()
-	frontends, ok := s.frontends[agentID]
+	established, ok := s.established[agentID]
 	if !ok {
-		return nil, fmt.Errorf("can't find agentID %s in the frontends", agentID)
+		return nil, fmt.Errorf("can't find agentID %s in the established", agentID)
 	}
-	for _, frontend := range frontends {
+	for _, frontend := range established {
 		if frontend.backend == backend {
-			delete(s.frontends, agentID)
+			delete(s.established, agentID)
 			ret = append(ret, frontend)
 		}
 	}
 
-	metrics.Metrics.SetEstablishedConnCount(s.getCount(s.frontends))
+	metrics.Metrics.SetEstablishedConnCount(s.getCount(s.established))
 	return ret, nil
 }
 
-func (s *ProxyServer) getCount(frontends map[string](map[int64]*ProxyClientConnection)) int {
+func (s *ProxyServer) getCount(established map[string](map[int64]*ProxyClientConnection)) int {
 	count := 0
-	for _, frontend := range frontends {
+	for _, frontend := range established {
 		count = count + len(frontend)
 	}
 	return count
 }
 
-// removeForStream removes and returns all established ProxyClientConnection associated with a given
+// removeEstablishedForStream removes and returns all established ProxyClientConnection associated with a given
 // Proxy gRPC connection (expected to be at most 1 while konnectivity-client API gives single-use
 // tunnels).
-func (s *ProxyServer) removeFrontendsForStream(streamUID string) []*ProxyClientConnection {
+func (s *ProxyServer) removeEstablishedForStream(streamUID string) []*ProxyClientConnection {
 	var ret []*ProxyClientConnection
 	if streamUID == "" {
 		return ret
 	}
 	s.fmu.Lock()
 	defer s.fmu.Unlock()
-	for agentID, frontends := range s.frontends {
-		for connID, frontend := range frontends {
+	for agentID, established := range s.established {
+		for connID, frontend := range established {
 			if frontend.frontend == nil {
 				continue
 			}
 			if frontend.frontend.streamUID == streamUID {
-				delete(frontends, connID)
+				delete(established, connID)
 				ret = append(ret, frontend)
 			}
 		}
-		if len(frontends) == 0 {
-			delete(s.frontends, agentID)
+		if len(established) == 0 {
+			delete(s.established, agentID)
 		}
 	}
 	return ret
@@ -451,7 +451,7 @@ func NewProxyServer(serverID string, proxyStrategies []ProxyStrategy, serverCoun
 	}
 
 	return &ProxyServer{
-		frontends:                  make(map[string](map[int64]*ProxyClientConnection)),
+		established:                  make(map[string](map[int64]*ProxyClientConnection)),
 		PendingDial:                NewPendingDialManager(),
 		serverID:                   serverID,
 		serverCount:                serverCount,
@@ -493,7 +493,7 @@ func (s *ProxyServer) Proxy(stream client.ProxyService_ProxyServer) error {
 			// TODO: add agent support to handle this
 			s.sendBackendDialClose(p.backend, p.dialID, "frontend stream shutdown")
 		}
-		for _, f := range s.removeFrontendsForStream(streamUID) {
+		for _, f := range s.removeEstablishedForStream(streamUID) {
 			klog.V(2).InfoS("frontend stream shutdown, cleaning frontend", "connectionID", f.connectID, "dialID", f.dialID)
 			s.sendBackendClose(f.backend, f.connectID, f.dialID, "frontend stream shutdown")
 		}
@@ -891,19 +891,18 @@ func (s *ProxyServer) serveRecvBackend(backend Backend, agentID string, recvCh <
 	}()
 
 	defer func() {
-		// Close all connected frontends when the agent connection is closed
-		// TODO(#126): Frontends in PendingDial state that have not been added to the
-		//             list of frontends should also be closed.
-		frontends, err := s.removeFrontendsForBackendConn(agentID, backend)
+		// Close all established connections when the agent connection is closed
+		// TODO(#126): connections in PendingDial state should also be closed.
+		established, err := s.removeEstablishedForBackendConn(agentID, backend)
 		if err != nil {
 			return
 		}
-		if len(frontends) > 0 {
-			klog.V(2).InfoS("Close frontends connected to agent",
-				"count", len(frontends), "agentID", agentID)
+		if len(established) > 0 {
+			klog.V(2).InfoS("Close established connections to agent",
+				"count", len(established), "agentID", agentID)
 		}
 
-		for _, frontend := range frontends {
+		for _, frontend := range established {
 			pkt := &client.Packet{
 				Type: client.PacketType_CLOSE_RSP,
 				Payload: &client.Packet_CloseResponse{
@@ -958,7 +957,7 @@ func (s *ProxyServer) serveRecvBackend(backend Backend, agentID string, recvCh <
 				frontend.connectID = resp.ConnectID
 				frontend.agentID = agentID
 				// TODO: this connection may be cleaned on serveRecvFrontend exit, make it independent.
-				s.addFrontend(agentID, resp.ConnectID, frontend)
+				s.addEstablished(agentID, resp.ConnectID, frontend)
 				close(frontend.connected)
 				metrics.Metrics.ObserveDialLatency(time.Since(frontend.start))
 				klog.V(3).InfoS("Proxy connection established",
@@ -1014,7 +1013,7 @@ func (s *ProxyServer) serveRecvBackend(backend Backend, agentID string, recvCh <
 		case client.PacketType_CLOSE_RSP:
 			resp := pkt.GetCloseResponse()
 			klog.V(5).InfoS("Received CLOSE_RSP", "agentID", agentID, "connectionID", resp.ConnectID)
-			frontend := s.removeFrontend(agentID, resp.ConnectID)
+			frontend := s.removeEstablished(agentID, resp.ConnectID)
 			if frontend == nil {
 				// assuming it is already closed, just log it
 				klog.V(2).InfoS("could not get frontend client for closing", "agentID", agentID, "connectionID", resp.ConnectID)
