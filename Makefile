@@ -63,22 +63,24 @@ test:
 ## Binaries
 ## --------------------------------------
 
+SOURCE = $(shell find . -name \*.go)
+
 bin:
 	mkdir -p bin
 
 .PHONY: build
 build: bin/proxy-agent bin/proxy-server bin/proxy-test-client bin/http-test-server
 
-bin/proxy-agent: proto/agent/agent_grpc.pb.go konnectivity-client/proto/client/client_grpc.pb.go bin cmd/agent/main.go
+bin/proxy-agent: bin $(SOURCE)
 	GO111MODULE=on go build -o bin/proxy-agent cmd/agent/main.go
 
-bin/proxy-test-client: konnectivity-client/proto/client/client_grpc.pb.go bin cmd/client/main.go
+bin/proxy-test-client: bin $(SOURCE)
 	GO111MODULE=on go build -o bin/proxy-test-client cmd/client/main.go
 
-bin/http-test-server: bin cmd/test-server/main.go
+bin/http-test-server: bin $(SOURCE)
 	GO111MODULE=on go build -o bin/http-test-server cmd/test-server/main.go
 
-bin/proxy-server: proto/agent/agent_grpc.pb.go konnectivity-client/proto/client/client_grpc.pb.go bin cmd/server/main.go pkg/server/server.go pkg/server/metrics/metrics.go
+bin/proxy-server: bin $(SOURCE)
 	GO111MODULE=on go build -o bin/proxy-server cmd/server/main.go
 
 ## --------------------------------------
