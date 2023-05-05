@@ -29,9 +29,9 @@ import (
 	"google.golang.org/grpc"
 	"k8s.io/apimachinery/pkg/util/wait"
 	"sigs.k8s.io/apiserver-network-proxy/konnectivity-client/pkg/client"
-	pkgagent "sigs.k8s.io/apiserver-network-proxy/pkg/agent"
 	"sigs.k8s.io/apiserver-network-proxy/pkg/server"
 	"sigs.k8s.io/apiserver-network-proxy/proto/agent"
+	"sigs.k8s.io/apiserver-network-proxy/proto/header"
 )
 
 type simpleServer struct {
@@ -78,14 +78,14 @@ type singleTimeManager struct {
 	used     map[string]struct{}
 }
 
-func (s *singleTimeManager) AddBackend(agentID string, _ pkgagent.IdentifierType, conn agent.AgentService_ConnectServer) server.Backend {
+func (s *singleTimeManager) AddBackend(agentID string, _ header.IdentifierType, conn agent.AgentService_ConnectServer) server.Backend {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.backends[agentID] = conn
 	return conn
 }
 
-func (s *singleTimeManager) RemoveBackend(agentID string, _ pkgagent.IdentifierType, conn agent.AgentService_ConnectServer) {
+func (s *singleTimeManager) RemoveBackend(agentID string, _ header.IdentifierType, conn agent.AgentService_ConnectServer) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	v, ok := s.backends[agentID]
