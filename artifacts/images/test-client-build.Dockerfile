@@ -26,7 +26,7 @@ ARG ARCH
 RUN CGO_ENABLED=0 GOOS=linux GOARCH=${ARCH} go build -v -a -ldflags '-extldflags "-static"' -o proxy-test-client sigs.k8s.io/apiserver-network-proxy/cmd/test-client
 
 # Copy the loader into a thin image
-FROM scratch
+FROM gcr.io/distroless/static-debian11
 WORKDIR /
 COPY --from=builder /go/src/sigs.k8s.io/apiserver-network-proxy/proxy-test-client .
 ENTRYPOINT ["/proxy-test-client"]
