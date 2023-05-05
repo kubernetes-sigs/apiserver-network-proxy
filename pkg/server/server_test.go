@@ -224,22 +224,22 @@ func TestAddRemoveFrontends(t *testing.T) {
 	agent3ConnID1 := new(ProxyClientConnection)
 
 	p := NewProxyServer("", []ProxyStrategy{ProxyStrategyDefault}, 1, nil)
-	p.addFrontend("agent1", int64(1), agent1ConnID1)
-	p.removeFrontend("agent1", int64(1))
+	p.addEstablished("agent1", int64(1), agent1ConnID1)
+	p.removeEstablished("agent1", int64(1))
 	expectedFrontends := make(map[string]map[int64]*ProxyClientConnection)
-	if e, a := expectedFrontends, p.frontends; !reflect.DeepEqual(e, a) {
+	if e, a := expectedFrontends, p.established; !reflect.DeepEqual(e, a) {
 		t.Errorf("expected %v, got %v", e, a)
 	}
 
 	p = NewProxyServer("", []ProxyStrategy{ProxyStrategyDefault}, 1, nil)
-	p.addFrontend("agent1", int64(1), agent1ConnID1)
-	p.addFrontend("agent1", int64(2), agent1ConnID2)
-	p.addFrontend("agent2", int64(1), agent2ConnID1)
-	p.addFrontend("agent2", int64(2), agent2ConnID2)
-	p.addFrontend("agent3", int64(1), agent3ConnID1)
-	p.removeFrontend("agent2", int64(1))
-	p.removeFrontend("agent2", int64(2))
-	p.removeFrontend("agent1", int64(1))
+	p.addEstablished("agent1", int64(1), agent1ConnID1)
+	p.addEstablished("agent1", int64(2), agent1ConnID2)
+	p.addEstablished("agent2", int64(1), agent2ConnID1)
+	p.addEstablished("agent2", int64(2), agent2ConnID2)
+	p.addEstablished("agent3", int64(1), agent3ConnID1)
+	p.removeEstablished("agent2", int64(1))
+	p.removeEstablished("agent2", int64(2))
+	p.removeEstablished("agent1", int64(1))
 	expectedFrontends = map[string]map[int64]*ProxyClientConnection{
 		"agent1": {
 			int64(2): agent1ConnID2,
@@ -248,7 +248,7 @@ func TestAddRemoveFrontends(t *testing.T) {
 			int64(1): agent3ConnID1,
 		},
 	}
-	if e, a := expectedFrontends, p.frontends; !reflect.DeepEqual(e, a) {
+	if e, a := expectedFrontends, p.established; !reflect.DeepEqual(e, a) {
 		t.Errorf("expected %v, got %v", e, a)
 	}
 }
@@ -263,29 +263,29 @@ func TestEstablishedConnsMetric(t *testing.T) {
 	agent3ConnID1 := new(ProxyClientConnection)
 
 	p := NewProxyServer("", []ProxyStrategy{ProxyStrategyDefault}, 1, nil)
-	p.addFrontend("agent1", int64(1), agent1ConnID1)
+	p.addEstablished("agent1", int64(1), agent1ConnID1)
 	assertEstablishedConnsMetric(t, 1)
-	p.addFrontend("agent1", int64(2), agent1ConnID2)
+	p.addEstablished("agent1", int64(2), agent1ConnID2)
 	assertEstablishedConnsMetric(t, 2)
-	p.addFrontend("agent2", int64(1), agent2ConnID1)
+	p.addEstablished("agent2", int64(1), agent2ConnID1)
 	assertEstablishedConnsMetric(t, 3)
-	p.addFrontend("agent2", int64(2), agent2ConnID2)
+	p.addEstablished("agent2", int64(2), agent2ConnID2)
 	assertEstablishedConnsMetric(t, 4)
-	p.addFrontend("agent3", int64(1), agent3ConnID1)
+	p.addEstablished("agent3", int64(1), agent3ConnID1)
 	assertEstablishedConnsMetric(t, 5)
-	p.removeFrontend("agent2", int64(1))
+	p.removeEstablished("agent2", int64(1))
 	assertEstablishedConnsMetric(t, 4)
-	p.removeFrontend("agent2", int64(2))
+	p.removeEstablished("agent2", int64(2))
 	assertEstablishedConnsMetric(t, 3)
-	p.removeFrontend("agent1", int64(1))
+	p.removeEstablished("agent1", int64(1))
 	assertEstablishedConnsMetric(t, 2)
-	p.removeFrontend("agent1", int64(2))
+	p.removeEstablished("agent1", int64(2))
 	assertEstablishedConnsMetric(t, 1)
-	p.removeFrontend("agent3", int64(1))
+	p.removeEstablished("agent3", int64(1))
 	assertEstablishedConnsMetric(t, 0)
 }
 
-func TestRemoveFrontendsForBackendConn(t *testing.T) {
+func TestRemoveEstablishedForBackendConn(t *testing.T) {
 	backend1 := &backend{}
 	backend2 := &backend{}
 	backend3 := &backend{}
@@ -295,12 +295,12 @@ func TestRemoveFrontendsForBackendConn(t *testing.T) {
 	agent2ConnID2 := &ProxyClientConnection{backend: backend2}
 	agent3ConnID1 := &ProxyClientConnection{backend: backend3}
 	p := NewProxyServer("", []ProxyStrategy{ProxyStrategyDefault}, 1, nil)
-	p.addFrontend("agent1", int64(1), agent1ConnID1)
-	p.addFrontend("agent1", int64(2), agent1ConnID2)
-	p.addFrontend("agent2", int64(1), agent2ConnID1)
-	p.addFrontend("agent2", int64(2), agent2ConnID2)
-	p.addFrontend("agent3", int64(1), agent3ConnID1)
-	p.removeFrontendsForBackendConn("agent2", backend2)
+	p.addEstablished("agent1", int64(1), agent1ConnID1)
+	p.addEstablished("agent1", int64(2), agent1ConnID2)
+	p.addEstablished("agent2", int64(1), agent2ConnID1)
+	p.addEstablished("agent2", int64(2), agent2ConnID2)
+	p.addEstablished("agent3", int64(1), agent3ConnID1)
+	p.removeEstablishedForBackendConn("agent2", backend2)
 	expectedFrontends := map[string]map[int64]*ProxyClientConnection{
 		"agent1": {
 			int64(1): agent1ConnID1,
@@ -310,12 +310,12 @@ func TestRemoveFrontendsForBackendConn(t *testing.T) {
 			int64(1): agent3ConnID1,
 		},
 	}
-	if e, a := expectedFrontends, p.frontends; !reflect.DeepEqual(e, a) {
+	if e, a := expectedFrontends, p.established; !reflect.DeepEqual(e, a) {
 		t.Errorf("expected %v, got %v", e, a)
 	}
 }
 
-func TestRemoveFrontendsForStream(t *testing.T) {
+func TestRemoveEstablishedForStream(t *testing.T) {
 	streamUID := "target-uuid"
 	backend1 := &backend{}
 	backend2 := &backend{}
@@ -326,12 +326,12 @@ func TestRemoveFrontendsForStream(t *testing.T) {
 	agent2ConnID2 := &ProxyClientConnection{backend: backend2}
 	agent3ConnID1 := &ProxyClientConnection{backend: backend3, frontend: &GrpcFrontend{streamUID: streamUID}}
 	p := NewProxyServer("", []ProxyStrategy{ProxyStrategyDefault}, 1, nil)
-	p.addFrontend("agent1", int64(1), agent1ConnID1)
-	p.addFrontend("agent1", int64(2), agent1ConnID2)
-	p.addFrontend("agent2", int64(1), agent2ConnID1)
-	p.addFrontend("agent2", int64(2), agent2ConnID2)
-	p.addFrontend("agent3", int64(1), agent3ConnID1)
-	p.removeFrontendsForStream(streamUID)
+	p.addEstablished("agent1", int64(1), agent1ConnID1)
+	p.addEstablished("agent1", int64(2), agent1ConnID2)
+	p.addEstablished("agent2", int64(1), agent2ConnID1)
+	p.addEstablished("agent2", int64(2), agent2ConnID2)
+	p.addEstablished("agent3", int64(1), agent3ConnID1)
+	p.removeEstablishedForStream(streamUID)
 	expectedFrontends := map[string]map[int64]*ProxyClientConnection{
 		"agent1": {
 			int64(2): agent1ConnID2,
@@ -340,7 +340,7 @@ func TestRemoveFrontendsForStream(t *testing.T) {
 			int64(2): agent2ConnID2,
 		},
 	}
-	if e, a := expectedFrontends, p.frontends; !reflect.DeepEqual(e, a) {
+	if e, a := expectedFrontends, p.established; !reflect.DeepEqual(e, a) {
 		t.Errorf("expected %v, got %v", e, a)
 	}
 }
