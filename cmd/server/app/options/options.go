@@ -120,7 +120,7 @@ func (o *ProxyRunOptions) Flags() *pflag.FlagSet {
 	flags.IntVar(&o.AgentPort, "agent-port", o.AgentPort, "Port we listen for agent connections on.")
 	flags.StringVar(&o.AgentBindAddress, "agent-bind-address", o.AgentBindAddress, "Bind address for agent connections. If empty, we will bind to all interfaces.")
 	flags.IntVar(&o.AdminPort, "admin-port", o.AdminPort, "Port we listen for admin connections on.")
-	flags.StringVar(&o.AdminBindAddress, "admin-bind-address", o.AdminBindAddress, "Bind address for admin connections. If empty, we will bind to all interfaces.")
+	flags.StringVar(&o.AdminBindAddress, "admin-bind-address", o.AdminBindAddress, "Bind address for admin connections. If empty, we will bind to localhost.")
 	flags.IntVar(&o.HealthPort, "health-port", o.HealthPort, "Port we listen for health connections on.")
 	flags.StringVar(&o.HealthBindAddress, "health-bind-address", o.HealthBindAddress, "Bind address for health connections. If empty, we will bind to all interfaces.")
 	flags.DurationVar(&o.KeepaliveTime, "keepalive-time", o.KeepaliveTime, "Time for gRPC agent server keepalive.")
