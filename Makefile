@@ -122,7 +122,7 @@ gen-proto:
 ## --------------------------------------
 
 easy-rsa.tar.gz:
-	curl -L -o easy-rsa.tar.gz --connect-timeout 20 --retry 6 --retry-delay 2 https://storage.googleapis.com/kubernetes-release/easy-rsa/easy-rsa.tar.gz
+	curl -L -o easy-rsa.tar.gz --connect-timeout 20 --retry 6 --retry-delay 2 https://dl.k8s.io/easy-rsa/easy-rsa.tar.gz
 
 easy-rsa: easy-rsa.tar.gz
 	tar xvf easy-rsa.tar.gz
