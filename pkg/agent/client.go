@@ -30,7 +30,9 @@ import (
 
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/connectivity"
+	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/metadata"
+	"google.golang.org/grpc/status"
 	"k8s.io/klog/v2"
 
 	commonmetrics "sigs.k8s.io/apiserver-network-proxy/konnectivity-client/pkg/common/metrics"
@@ -332,7 +334,11 @@ func (a *Client) Serve() {
 				klog.V(2).InfoS("received EOF, exit", "serverID", a.serverID, "agentID", a.agentID)
 				return
 			}
-			klog.ErrorS(err, "could not read stream", "serverID", a.serverID, "agentID", a.agentID)
+			if status.Code(err) == codes.Canceled {
+				klog.V(2).InfoS("stream canceled",  "serverID", a.serverID, "agentID", a.agentID)
+			} else {
+				klog.ErrorS(err, "could not read stream", "serverID", a.serverID, "agentID", a.agentID)
+			}
 			return
 		}
 
