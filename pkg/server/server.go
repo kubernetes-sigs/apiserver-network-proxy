@@ -858,7 +858,11 @@ func (s *ProxyServer) readBackendToChannel(backend Backend, recvCh chan *client.
 			return
 		}
 		if err != nil {
-			klog.ErrorS(err, "Receive stream from agent read failure")
+			if status.Code(err) == codes.Canceled {
+				klog.V(2).InfoS("Stream read from agent cancelled", "agentID", agentID)
+			} else {
+				klog.ErrorS(err, "Receive stream from agent read failure", "agentID", agentID)
+			}
 			stopCh <- err
 			close(stopCh)
 			return
