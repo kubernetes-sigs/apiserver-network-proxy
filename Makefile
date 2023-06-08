@@ -57,8 +57,8 @@ mock_gen:
 
 .PHONY: test
 test:
-	go test -race ./...
-	cd konnectivity-client && go test -race ./...
+	go test -race -covermode=atomic -coverprofile=server.out ./... && go tool cover -html=server.out -o=server.html
+	cd konnectivity-client && go test -race -covermode=atomic -coverprofile=client.out ./... && go tool cover -html=client.out -o=client.html
 
 ## --------------------------------------
 ## Binaries
