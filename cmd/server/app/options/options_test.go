@@ -38,7 +38,7 @@ func TestDefaultServerOptions(t *testing.T) {
 	assertDefaultValue(t, "ClusterCaCert", defaultServerOptions.ClusterCaCert, "")
 	assertDefaultValue(t, "Mode", defaultServerOptions.Mode, "grpc")
 	assertDefaultValue(t, "UdsName", defaultServerOptions.UdsName, "")
-	assertDefaultValue(t, "DeleteUDSFile", defaultServerOptions.DeleteUDSFile, false)
+	assertDefaultValue(t, "DeleteUDSFile", defaultServerOptions.DeleteUDSFile, true)
 	assertDefaultValue(t, "ServerPort", defaultServerOptions.ServerPort, 8090)
 	assertDefaultValue(t, "ServerBindAddress", defaultServerOptions.ServerBindAddress, "")
 	assertDefaultValue(t, "AgentPort", defaultServerOptions.AgentPort, 8091)
