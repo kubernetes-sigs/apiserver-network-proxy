@@ -17,6 +17,7 @@ limitations under the License.
 package app
 
 import (
+	"bytes"
 	"context"
 	"crypto/tls"
 	"fmt"
@@ -26,6 +27,7 @@ import (
 	"runtime"
 	runpprof "runtime/pprof"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/prometheus/client_golang/prometheus/promhttp"
@@ -107,14 +109,38 @@ func (a *Agent) runHealthServer(o *options.GrpcProxyAgentOptions, cs agent.Readi
 	livenessHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		fmt.Fprintf(w, "ok")
 	})
+
+	checks := []agent.HealthChecker{agent.Ping, agent.NewServerConnected(cs)}
 	readinessHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if cs.Ready() {
-			w.WriteHeader(http.StatusOK)
-			fmt.Fprintf(w, "ok")
-		} else {
-			w.WriteHeader(http.StatusServiceUnavailable)
-			fmt.Fprintf(w, "not ready")
+		var failedChecks []string
+		var individualCheckOutput bytes.Buffer
+		for _, check := range checks {
+			if err := check.Check(r); err != nil {
+				fmt.Fprintf(&individualCheckOutput, "[-]%s failed: %v\n", check.Name(), err)
+				failedChecks = append(failedChecks, check.Name())
+			} else {
+				fmt.Fprintf(&individualCheckOutput, "[+]%s ok\n", check.Name())
+			}
 		}
+
+		// Always be verbose if the check has failed
+		if len(failedChecks) > 0 {
+			klog.V(0).Infoln("%s check failed: \n%v", strings.Join(failedChecks, ","), individualCheckOutput.String())
+			w.WriteHeader(http.StatusServiceUnavailable)
+			fmt.Fprintf(w, individualCheckOutput.String())
+			return
+		}
+
+		if _, found := r.URL.Query()["verbose"]; !found {
+			w.WriteHeader(http.StatusOK)
+			fmt.Fprint(w, "ok")
+			return
+		}
+
+		fmt.Fprintf(&individualCheckOutput, "check passed\n")
+
+		w.WriteHeader(http.StatusOK)
+		fmt.Fprint(w, individualCheckOutput.String())
 	})
 
 	muxHandler := http.NewServeMux()

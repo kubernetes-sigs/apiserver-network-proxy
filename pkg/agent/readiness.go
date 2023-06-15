@@ -16,6 +16,11 @@ limitations under the license.
 
 package agent
 
+import (
+	"fmt"
+	"net/http"
+)
+
 // ReadinessManager supports checking if the agent is ready.
 type ReadinessManager interface {
 	// Ready returns true the proxy server is ready.
@@ -27,4 +32,47 @@ var _ ReadinessManager = &ClientSet{}
 func (cs *ClientSet) Ready() bool {
 	// Returns true if the agent is connected to at least one server.
 	return cs.HealthyClientsCount() > 0
+}
+
+// HealthChecker represents an entity capable of performing health checks.
+type HealthChecker interface {
+	Name() string
+	Check(req *http.Request) error
+}
+
+// ping implements the simplest possible healthz checker.
+type ping struct{}
+
+var Ping HealthChecker = &ping{}
+
+func (p *ping) Name() string {
+	return "ping"
+}
+
+func (p *ping) Check(_ *http.Request) error {
+	return nil
+}
+
+type serverConnected struct {
+	rm ReadinessManager
+}
+
+var ServerConnected HealthChecker = &serverConnected{}
+
+func NewServerConnected(cs ReadinessManager) HealthChecker {
+	return &serverConnected{
+		rm: cs,
+	}
+}
+
+func (s *serverConnected) Name() string {
+	return "server-connected"
+}
+
+func (s *serverConnected) Check(_ *http.Request) error {
+	if s.rm.Ready() {
+		return nil
+	}
+
+	return fmt.Errorf("no servers connected")
 }
