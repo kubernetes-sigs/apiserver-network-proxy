@@ -20,7 +20,7 @@ import (
 	"bytes"
 	"context"
 	"fmt"
-	"io/ioutil"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"sync"
@@ -41,7 +41,7 @@ type simpleServer struct {
 // ServeHTTP blocks the response to the request whose body is "1" until a
 // request whose body is "2" is handled.
 func (s *simpleServer) ServeHTTP(w http.ResponseWriter, req *http.Request) {
-	bytes, err := ioutil.ReadAll(req.Body)
+	bytes, err := io.ReadAll(req.Body)
 	if err != nil {
 		w.Write([]byte(err.Error()))
 	}
@@ -161,7 +161,7 @@ func TestConcurrentClientRequest(t *testing.T) {
 			t.Error(err)
 			return
 		}
-		data, err := ioutil.ReadAll(r.Body)
+		data, err := io.ReadAll(r.Body)
 		if err != nil {
 			t.Error(err)
 		}
@@ -178,7 +178,7 @@ func TestConcurrentClientRequest(t *testing.T) {
 			t.Error(err)
 			return
 		}
-		data, err := ioutil.ReadAll(r.Body)
+		data, err := io.ReadAll(r.Body)
 		if err != nil {
 			t.Error(err)
 		}

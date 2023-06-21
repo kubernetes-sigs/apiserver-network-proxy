@@ -21,7 +21,6 @@ import (
 	"context"
 	"fmt"
 	"io"
-	"io/ioutil"
 	"math/rand"
 	"net"
 	"net/http"
@@ -162,7 +161,7 @@ func TestBasicProxy_GRPC(t *testing.T) {
 	}
 	defer r.Body.Close()
 
-	data, err := ioutil.ReadAll(r.Body)
+	data, err := io.ReadAll(r.Body)
 	if err != nil {
 		t.Error(err)
 	}
@@ -600,7 +599,7 @@ func TestProxy_LargeResponse(t *testing.T) {
 		t.Error(err)
 	}
 
-	data, err := ioutil.ReadAll(r.Body)
+	data, err := io.ReadAll(r.Body)
 	if err != nil {
 		t.Error(err)
 	}
@@ -669,7 +668,7 @@ func TestBasicProxy_HTTPCONN(t *testing.T) {
 		t.Error(err)
 	}
 
-	data, err := ioutil.ReadAll(r.Body)
+	data, err := io.ReadAll(r.Body)
 	if err != nil {
 		t.Error(err)
 	}

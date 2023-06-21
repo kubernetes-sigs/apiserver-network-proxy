@@ -19,7 +19,6 @@ package tests
 import (
 	"context"
 	"io"
-	"io/ioutil"
 	"log"
 	"math/rand"
 	"net"
@@ -211,7 +210,7 @@ func testProxyServer(t *testing.T, front string, target string) {
 		t.Fatal(err)
 	}
 
-	data, err := ioutil.ReadAll(r.Body)
+	data, err := io.ReadAll(r.Body)
 	if err != nil {
 		t.Error(err)
 	}

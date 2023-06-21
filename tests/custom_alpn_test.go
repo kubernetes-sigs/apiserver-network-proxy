@@ -20,7 +20,6 @@ import (
 	"context"
 	"crypto/tls"
 	"encoding/pem"
-	"io/ioutil"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -47,7 +46,7 @@ func TestCustomALPN(t *testing.T) {
 	}
 	svr.StartTLS()
 
-	ca, err := ioutil.TempFile("", "")
+	ca, err := os.CreateTemp("", "")
 	if err != nil {
 		t.Fatal(err)
 	}

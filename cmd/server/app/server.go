@@ -21,7 +21,6 @@ import (
 	"crypto/tls"
 	"crypto/x509"
 	"fmt"
-	"io/ioutil"
 	"net"
 	"net/http"
 	netpprof "net/http/pprof"
@@ -274,7 +273,7 @@ func (p *Proxy) getTLSConfig(caFile, certFile, keyFile, cipherSuites string) (*t
 	}
 
 	certPool := x509.NewCertPool()
-	caCert, err := ioutil.ReadFile(filepath.Clean(caFile))
+	caCert, err := os.ReadFile(filepath.Clean(caFile))
 	if err != nil {
 		return nil, fmt.Errorf("failed to read cluster CA cert %s: %v", caFile, err)
 	}
