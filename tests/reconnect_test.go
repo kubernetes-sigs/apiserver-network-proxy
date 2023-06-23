@@ -25,7 +25,6 @@ import (
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/metadata"
 	"k8s.io/apimachinery/pkg/util/wait"
-	"sigs.k8s.io/apiserver-network-proxy/proto/agent"
 	agentproto "sigs.k8s.io/apiserver-network-proxy/proto/agent"
 	"sigs.k8s.io/apiserver-network-proxy/proto/header"
 )
@@ -33,7 +32,7 @@ import (
 func TestClientReconnects(t *testing.T) {
 	connections := make(chan struct{})
 	s := &testAgentServerImpl{
-		onConnect: func(stream agent.AgentService_ConnectServer) error {
+		onConnect: func(stream agentproto.AgentService_ConnectServer) error {
 			stream.SetHeader(metadata.New(map[string]string{
 				header.ServerID:    uuid.Must(uuid.NewRandom()).String(),
 				header.ServerCount: "1",
@@ -89,9 +88,9 @@ func TestClientReconnects(t *testing.T) {
 }
 
 type testAgentServerImpl struct {
-	onConnect func(agent.AgentService_ConnectServer) error
+	onConnect func(agentproto.AgentService_ConnectServer) error
 }
 
-func (t *testAgentServerImpl) Connect(svr agent.AgentService_ConnectServer) error {
+func (t *testAgentServerImpl) Connect(svr agentproto.AgentService_ConnectServer) error {
 	return t.onConnect(svr)
 }

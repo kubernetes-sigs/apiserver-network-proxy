@@ -38,7 +38,6 @@ import (
 	"google.golang.org/grpc/metadata"
 	"k8s.io/apimachinery/pkg/util/wait"
 	"sigs.k8s.io/apiserver-network-proxy/konnectivity-client/pkg/client"
-	"sigs.k8s.io/apiserver-network-proxy/konnectivity-client/pkg/client/metrics"
 	metricsclient "sigs.k8s.io/apiserver-network-proxy/konnectivity-client/pkg/client/metrics"
 	clientmetricstest "sigs.k8s.io/apiserver-network-proxy/konnectivity-client/pkg/common/metrics/testing"
 	clientproto "sigs.k8s.io/apiserver-network-proxy/konnectivity-client/proto/client"
@@ -359,7 +358,7 @@ func TestProxyDial_RequestCancelled_GRPC(t *testing.T) {
 		}
 	}()
 
-	if err := clientmetricstest.ExpectClientDialFailure(metrics.DialFailureContext, 1); err != nil {
+	if err := clientmetricstest.ExpectClientDialFailure(metricsclient.DialFailureContext, 1); err != nil {
 		t.Error(err)
 	}
 	if err := metricstest.ExpectServerDialFailure(metricsserver.DialFailureFrontendClose, 1); err != nil {
@@ -484,7 +483,7 @@ func TestProxyDial_AgentTimeout_GRPC(t *testing.T) {
 			t.Errorf("Unexpected error: %v", err)
 		}
 
-		if err := clientmetricstest.ExpectClientDialFailure(metrics.DialFailureEndpoint, 1); err != nil {
+		if err := clientmetricstest.ExpectClientDialFailure(metricsclient.DialFailureEndpoint, 1); err != nil {
 			t.Error(err)
 		}
 		if err := metricstest.ExpectServerDialFailure(metricsserver.DialFailureErrorResponse, 1); err != nil {
