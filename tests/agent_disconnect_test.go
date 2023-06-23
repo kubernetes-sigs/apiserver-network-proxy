@@ -20,7 +20,7 @@ import (
 	"bufio"
 	"context"
 	"fmt"
-	"io/ioutil"
+	"io"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -175,7 +175,7 @@ func clientRequest(c *http.Client, addr string) ([]byte, error) {
 		return nil, fmt.Errorf("http GET %q: %w", addr, err)
 	}
 
-	data, err := ioutil.ReadAll(r.Body)
+	data, err := io.ReadAll(r.Body)
 	if err != nil {
 		return nil, fmt.Errorf("error reading response body: %w", err)
 	}

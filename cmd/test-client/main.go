@@ -23,7 +23,7 @@ import (
 	"flag"
 	"fmt"
 	"golang.org/x/net/http2"
-	"io/ioutil"
+	"io"
 	"net"
 	"net/http"
 	"os"
@@ -385,7 +385,7 @@ func (c *Client) makeRequest(o *GrpcProxyClientOptions, client *http.Client) err
 		}
 	}() // TODO: proxy server should handle the case where Body isn't closed.
 
-	data, err := ioutil.ReadAll(response.Body)
+	data, err := io.ReadAll(response.Body)
 	if err != nil {
 		return fmt.Errorf("failed to read response from client, got %v", err)
 	}

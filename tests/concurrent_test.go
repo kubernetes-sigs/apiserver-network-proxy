@@ -18,7 +18,7 @@ package tests
 
 import (
 	"context"
-	"io/ioutil"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"sync"
@@ -70,7 +70,7 @@ func TestProxy_ConcurrencyGRPC(t *testing.T) {
 			return
 		}
 
-		data, err := ioutil.ReadAll(r.Body)
+		data, err := io.ReadAll(r.Body)
 		if err != nil {
 			t.Error(err)
 			return

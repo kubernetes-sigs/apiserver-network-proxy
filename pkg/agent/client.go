@@ -20,7 +20,7 @@ import (
 	"context"
 	"fmt"
 	"io"
-	"io/ioutil"
+	"os"
 	"net"
 	runpprof "runtime/pprof"
 	"strconv"
@@ -286,7 +286,7 @@ func (a *Client) initializeAuthContext(ctx context.Context) (context.Context, er
 	var b []byte
 
 	// load current service account's token value
-	if b, err = ioutil.ReadFile(a.serviceAccountTokenPath); err != nil {
+	if b, err = os.ReadFile(a.serviceAccountTokenPath); err != nil {
 		klog.ErrorS(err, "Failed to read token", "path", a.serviceAccountTokenPath)
 		return nil, err
 	}
