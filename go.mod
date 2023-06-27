@@ -3,6 +3,7 @@ module sigs.k8s.io/apiserver-network-proxy
 go 1.19
 
 require (
+	github.com/fsnotify/fsnotify v1.6.0
 	github.com/golang/mock v1.6.0
 	github.com/google/uuid v1.1.2
 	github.com/prometheus/client_golang v1.12.1
