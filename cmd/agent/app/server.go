@@ -30,6 +30,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/fsnotify/fsnotify"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"github.com/spf13/cobra"
 	"google.golang.org/grpc"
@@ -95,19 +96,82 @@ func (a *Agent) Run(o *options.GrpcProxyAgentOptions, stopCh <-chan struct{}) er
 func (a *Agent) runProxyConnection(o *options.GrpcProxyAgentOptions, stopCh <-chan struct{}) (*agent.ClientSet, error) {
 	var tlsConfig *tls.Config
 	var err error
-	if tlsConfig, err = util.GetClientTLSConfig(o.CaCert, o.AgentCert, o.AgentKey, o.ProxyServerHost, o.AlpnProtos); err != nil {
+
+	watcher, err := fsnotify.NewWatcher()
+	if err != nil {
+		klog.Fatal(err)
+	}
+	defer func(watcher *fsnotify.Watcher) {
+		if err := watcher.Close(); err != nil {
+			klog.ErrorS(err, "failed to close watcher")
+			return
+		}
+	}(watcher)
+
+	// Watch the certificate files
+	if err := watcher.Add(o.AgentCert); err != nil {
 		return nil, err
 	}
-	dialOptions := []grpc.DialOption{
-		grpc.WithTransportCredentials(credentials.NewTLS(tlsConfig)),
-		grpc.WithKeepaliveParams(keepalive.ClientParameters{
-			Time:                o.KeepaliveTime,
-			PermitWithoutStream: true,
-		}),
+	if err := watcher.Add(o.AgentKey); err != nil {
+		return nil, err
 	}
-	cc := o.ClientSetConfig(dialOptions...)
-	cs := cc.NewAgentClientSet(stopCh)
-	cs.Serve()
+	if err := watcher.Add(o.CaCert); err != nil {
+		return nil, err
+	}
+
+	reload := make(chan bool)
+
+	// Goroutine to watch for file changes
+	go func() {
+		for {
+			select {
+			case event, ok := <-watcher.Events:
+				if !ok {
+					return
+				}
+				if event.Op&fsnotify.Write == fsnotify.Write {
+					reload <- true
+				}
+			case err, ok := <-watcher.Errors:
+				if !ok {
+					return
+				}
+				klog.ErrorS(err, "failed to watch for file changes")
+			case <-stopCh:
+				// Handle graceful shutdown
+				return
+			}
+		}
+	}()
+
+	// Goroutine to handle main logic
+	go func() {
+		for {
+			select {
+			case <-reload:
+				tlsConfig, err = util.GetClientTLSConfig(o.CaCert, o.AgentCert, o.AgentKey, o.ProxyServerHost, o.AlpnProtos)
+				if err != nil {
+					klog.ErrorS(err, "Failed to reload TLS config")
+					continue
+				}
+
+				dialOptions := []grpc.DialOption{
+					grpc.WithTransportCredentials(credentials.NewTLS(tlsConfig)),
+					grpc.WithKeepaliveParams(keepalive.ClientParameters{
+						Time:                o.KeepaliveTime,
+						PermitWithoutStream: true,
+					}),
+				}
+				cc := o.ClientSetConfig(dialOptions...)
+				cs := cc.NewAgentClientSet(stopCh)
+				cs.Serve()
+
+			case <-stopCh:
+				// Handle server shutdown
+				return
+			}
+		}
+	}()
 
 	return cs, nil
 }

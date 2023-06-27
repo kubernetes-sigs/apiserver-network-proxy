@@ -34,6 +34,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/fsnotify/fsnotify"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"github.com/spf13/cobra"
 	"google.golang.org/grpc"
@@ -143,7 +144,7 @@ func (p *Proxy) Run(o *options.ProxyRunOptions, stopCh <-chan struct{}) error {
 	}
 
 	klog.V(1).Infoln("Starting agent server for tunnel connections.")
-	err = p.runAgentServer(o, p.server)
+	err = p.runAgentServer(o, p.server, ctx.Done())
 	if err != nil {
 		return fmt.Errorf("failed to run the agent server: %v", err)
 	}
@@ -361,34 +362,121 @@ func (p *Proxy) runMTLSFrontendServer(ctx context.Context, o *options.ProxyRunOp
 	return stop, nil
 }
 
-func (p *Proxy) runAgentServer(o *options.ProxyRunOptions, server *server.ProxyServer) error {
+func (p *Proxy) runAgentServer(o *options.ProxyRunOptions, server *server.ProxyServer, stopCh <-chan struct{}) error {
 	var tlsConfig *tls.Config
 	var err error
-	if tlsConfig, err = p.getTLSConfig(o.ClusterCaCert, o.ClusterCert, o.ClusterKey, o.CipherSuites); err != nil {
+
+	watcher, err := fsnotify.NewWatcher()
+	if err != nil {
+		klog.Fatal(err)
+	}
+	defer func(watcher *fsnotify.Watcher) {
+		if err := watcher.Close(); err != nil {
+			klog.ErrorS(err, "failed to close watcher")
+			return
+		}
+	}(watcher)
+
+	// Watch the certificate files
+	if err := watcher.Add(o.ClusterCaCert); err != nil {
+		return err
+	}
+	if err := watcher.Add(o.ClusterCert); err != nil {
+		return err
+	}
+	if err := watcher.Add(o.ClusterKey); err != nil {
 		return err
 	}
 
+	reload := make(chan bool)
+	restartServer := make(chan bool)
+
+	// Goroutine to watch for file changes
+	go func() {
+		for {
+			select {
+			case event, ok := <-watcher.Events:
+				if !ok {
+					return
+				}
+				if event.Op&fsnotify.Write == fsnotify.Write {
+					reload <- true
+				}
+			case err, ok := <-watcher.Errors:
+				if !ok {
+					return
+				}
+				klog.ErrorS(err, "failed to watch for file changes")
+			case <-stopCh:
+				// Handle graceful shutdown
+				return
+			}
+		}
+	}()
+
 	addr := net.JoinHostPort(o.AgentBindAddress, strconv.Itoa(o.AgentPort))
-	agentServerOptions := []grpc.ServerOption{
-		grpc.Creds(credentials.NewTLS(tlsConfig)),
-		grpc.KeepaliveParams(keepalive.ServerParameters{Time: o.KeepaliveTime}),
-		grpc.KeepaliveEnforcementPolicy(keepalive.EnforcementPolicy{
-			MinTime:             30 * time.Second,
-			PermitWithoutStream: true,
-		}),
-	}
-	grpcServer := grpc.NewServer(agentServerOptions...)
-	agent.RegisterAgentServiceServer(grpcServer, server)
-	lis, err := net.Listen("tcp", addr)
-	if err != nil {
-		return fmt.Errorf("failed to listen on %s: %v", addr, err)
-	}
+
 	labels := runpprof.Labels(
 		"core", "agentListener",
 		"port", strconv.FormatUint(uint64(o.AgentPort), 10),
 	)
-	go runpprof.Do(context.Background(), labels, func(context.Context) { grpcServer.Serve(lis) })
-	p.agentServer = grpcServer
+	go runpprof.Do(context.Background(), labels, func(context.Context) {
+		var grpcServer *grpc.Server
+		var lis net.Listener
+
+		for {
+			select {
+			case <-reload:
+				if tlsConfig, err = p.getTLSConfig(o.ClusterCaCert, o.ClusterCert, o.ClusterKey, o.CipherSuites); err != nil {
+					klog.ErrorS(err, "Failed to reload TLS config:")
+				}
+				klog.V(1).Info("TLS config reloaded")
+				restartServer <- true
+
+			case <-restartServer:
+				if grpcServer != nil {
+					grpcServer.GracefulStop()
+					klog.V(1).Info("gRPC server stopped")
+				}
+
+				agentServerOptions := []grpc.ServerOption{
+					grpc.Creds(credentials.NewTLS(tlsConfig)),
+					grpc.KeepaliveParams(keepalive.ServerParameters{Time: o.KeepaliveTime}),
+					grpc.KeepaliveEnforcementPolicy(keepalive.EnforcementPolicy{
+						MinTime:             30 * time.Second,
+						PermitWithoutStream: true,
+					}),
+				}
+				grpcServer = grpc.NewServer(agentServerOptions...)
+				agent.RegisterAgentServiceServer(grpcServer, server)
+
+				lis, err = net.Listen("tcp", addr)
+				if err != nil {
+					klog.Fatalf("failed to listen on %s: %v", addr, err)
+				}
+
+				go func() {
+					if err := grpcServer.Serve(lis); err != nil {
+						klog.Fatalf("failed to serve: %v", err)
+					}
+				}()
+
+				klog.V(1).Info("gRPC server restarted")
+			case <-stopCh:
+				// Handle graceful shutdown
+				if grpcServer != nil {
+					grpcServer.GracefulStop()
+				}
+				if lis != nil {
+					lis.Close()
+				}
+				return
+			}
+		}
+	}()
+
+	// Initial restart to start the server
+	restartServer <- true
 
 	return nil
 }
