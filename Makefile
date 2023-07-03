@@ -57,8 +57,8 @@ mock_gen:
 
 .PHONY: test
 test:
-	go test -race ./...
-	cd konnectivity-client && go test -race ./...
+	go test -race -covermode=atomic -coverprofile=konnectivity.out ./... && go tool cover -html=konnectivity.out -o=konnectivity.html
+	cd konnectivity-client && go test -race -covermode=atomic -coverprofile=client.out ./... && go tool cover -html=client.out -o=client.html
 
 ## --------------------------------------
 ## Binaries
@@ -297,4 +297,4 @@ release-alias-tag: # Adds the tag to the last build tag. BASE_REF comes from the
 .PHONY: clean
 clean:
 	go clean -testcache
-	rm -rf proto/agent/agent.pb.go proto/agent/agent_grpc.pb.go konnectivity-client/proto/client/client.pb.go konnectivity-client/proto/client/client_grpc.pb.go konnectivity-client/proto/client/client_grpc.licensed.go proto/agent/agent_grpc.licensed.go easy-rsa.tar.gz easy-rsa cfssl cfssljson certs bin proto/agent/mocks
+	rm -rf proto/agent/agent.pb.go proto/agent/agent_grpc.pb.go konnectivity-client/proto/client/client.pb.go konnectivity-client/proto/client/client_grpc.pb.go konnectivity-client/proto/client/client_grpc.licensed.go proto/agent/agent_grpc.licensed.go easy-rsa.tar.gz easy-rsa cfssl cfssljson certs bin proto/agent/mocks konnectivity.html konnectivity.out konnectivity-client/client.html konnectivity-client/client.out
