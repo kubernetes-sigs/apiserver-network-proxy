@@ -451,7 +451,7 @@ func NewProxyServer(serverID string, proxyStrategies []ProxyStrategy, serverCoun
 	}
 
 	return &ProxyServer{
-		established:                  make(map[string](map[int64]*ProxyClientConnection)),
+		established:                make(map[string](map[int64]*ProxyClientConnection)),
 		PendingDial:                NewPendingDialManager(),
 		serverID:                   serverID,
 		serverCount:                serverCount,

@@ -20,8 +20,8 @@ import (
 	"context"
 	"fmt"
 	"io"
-	"os"
 	"net"
+	"os"
 	runpprof "runtime/pprof"
 	"strconv"
 	"sync"
@@ -29,8 +29,8 @@ import (
 	"time"
 
 	"google.golang.org/grpc"
-	"google.golang.org/grpc/connectivity"
 	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/connectivity"
 	"google.golang.org/grpc/metadata"
 	"google.golang.org/grpc/status"
 	"k8s.io/klog/v2"
@@ -335,7 +335,7 @@ func (a *Client) Serve() {
 				return
 			}
 			if status.Code(err) == codes.Canceled {
-				klog.V(2).InfoS("stream canceled",  "serverID", a.serverID, "agentID", a.agentID)
+				klog.V(2).InfoS("stream canceled", "serverID", a.serverID, "agentID", a.agentID)
 			} else {
 				klog.ErrorS(err, "could not read stream", "serverID", a.serverID, "agentID", a.agentID)
 			}
