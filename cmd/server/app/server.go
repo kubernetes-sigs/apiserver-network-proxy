@@ -30,7 +30,6 @@ import (
 	"runtime"
 	runpprof "runtime/pprof"
 	"strconv"
-	"strings"
 	"sync"
 	"syscall"
 	"time"
@@ -260,13 +259,13 @@ func (p *Proxy) runUDSFrontendServer(ctx context.Context, o *options.ProxyRunOpt
 	return stop, nil
 }
 
-func (p *Proxy) getTLSConfig(caFile, certFile, keyFile, cipherSuites string) (*tls.Config, error) {
+func (p *Proxy) getTLSConfig(caFile, certFile, keyFile string, cipherSuites []string) (*tls.Config, error) {
 	cert, err := tls.LoadX509KeyPair(certFile, keyFile)
 	if err != nil {
 		return nil, fmt.Errorf("failed to load X509 key pair %s and %s: %v", certFile, keyFile, err)
 	}
 
-	cipherSuiteIDs := tlsCipherSuites(strings.Split(cipherSuites, ","))
+	cipherSuiteIDs := tlsCipherSuites(cipherSuites)
 
 	if caFile == "" {
 		return &tls.Config{Certificates: []tls.Certificate{cert}, MinVersion: tls.VersionTLS12, CipherSuites: cipherSuiteIDs}, nil

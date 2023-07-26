@@ -101,7 +101,7 @@ type ProxyRunOptions struct {
 	// also checks if given comma separated list contains cipher from tls.InsecureCipherSuites().
 	// NOTE that cipher suites are not configurable for TLS1.3,
 	// see: https://pkg.go.dev/crypto/tls#Config, so in that case, this option won't have any effect.
-	CipherSuites string
+	CipherSuites []string
 }
 
 func (o *ProxyRunOptions) Flags() *pflag.FlagSet {
@@ -136,7 +136,7 @@ func (o *ProxyRunOptions) Flags() *pflag.FlagSet {
 	flags.IntVar(&o.KubeconfigBurst, "kubeconfig-burst", o.KubeconfigBurst, "Maximum client burst (proxy server uses this client to authenticate agent tokens).")
 	flags.StringVar(&o.AuthenticationAudience, "authentication-audience", o.AuthenticationAudience, "Expected agent's token authentication audience (used with agent-namespace, agent-service-account, kubeconfig).")
 	flags.StringVar(&o.ProxyStrategies, "proxy-strategies", o.ProxyStrategies, "The list of proxy strategies used by the server to pick a backend/tunnel, available strategies are: default, destHost.")
-	flags.StringVar(&o.CipherSuites, "cipher-suites", o.CipherSuites, "The comma separated list of allowed cipher suites. Has no effect on TLS1.3. Empty means allow default list.")
+	flags.StringSliceVar(&o.CipherSuites, "cipher-suites", o.CipherSuites, "The comma separated list of allowed cipher suites. Has no effect on TLS1.3. Empty means allow default list.")
 
 	flags.Bool("warn-on-channel-limit", true, "This behavior is now thread safe and always on. This flag will be removed in a future release.")
 	flags.MarkDeprecated("warn-on-channel-limit", "This behavior is now thread safe and always on. This flag will be removed in a future release.")
@@ -306,10 +306,9 @@ func (o *ProxyRunOptions) Validate() error {
 	}
 
 	// validate the cipher suites
-	if o.CipherSuites != "" {
+	if len(o.CipherSuites) != 0 {
 		acceptedCiphers := util.GetAcceptedCiphers()
-		css := strings.Split(o.CipherSuites, ",")
-		for _, cipher := range css {
+		for _, cipher := range o.CipherSuites {
 			_, ok := acceptedCiphers[cipher]
 			if !ok {
 				return fmt.Errorf("cipher suite %s not supported, doesn't exist or considered as insecure", cipher)
@@ -352,7 +351,7 @@ func NewProxyRunOptions() *ProxyRunOptions {
 		KubeconfigBurst:           0,
 		AuthenticationAudience:    "",
 		ProxyStrategies:           "default",
-		CipherSuites:              "",
+		CipherSuites:              make([]string, 0),
 	}
 	return &o
 }

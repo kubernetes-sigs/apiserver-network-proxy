@@ -18,10 +18,11 @@ package options
 
 import (
 	"fmt"
-	"github.com/stretchr/testify/assert"
 	"reflect"
 	"testing"
 	"time"
+
+	"github.com/stretchr/testify/assert"
 )
 
 /*
@@ -59,7 +60,7 @@ func TestDefaultServerOptions(t *testing.T) {
 	assertDefaultValue(t, "KubeconfigBurst", defaultServerOptions.KubeconfigBurst, 0)
 	assertDefaultValue(t, "AuthenticationAudience", defaultServerOptions.AuthenticationAudience, "")
 	assertDefaultValue(t, "ProxyStrategies", defaultServerOptions.ProxyStrategies, "default")
-	assertDefaultValue(t, "CipherSuites", defaultServerOptions.CipherSuites, "")
+	assertDefaultValue(t, "CipherSuites", defaultServerOptions.CipherSuites, make([]string, 0))
 }
 
 func assertDefaultValue(t *testing.T, fieldName string, actual, expected interface{}) {
@@ -139,10 +140,17 @@ func TestValidate(t *testing.T) {
 			value:    49152,
 			expected: fmt.Errorf("please do not try to use ephemeral port 49152 for the health port"),
 		},
+		"CommaSparatedCipherSuites": {
+			field:    "CipherSuites",
+			value:    "TLS_AES_256_GCM_SHA384,TLS_ECDHE_RSA_WITH_AES_128_CBC_SHA",
+			expected: nil,
+		},
 	} {
 		t.Run(desc, func(t *testing.T) {
 			testServerOptions := NewProxyRunOptions()
-			if tc.field != "" {
+			if tc.field == "CipherSuites" {
+				testServerOptions.Flags().Set("cipher-suites", tc.value.(string))
+			} else if tc.field != "" {
 				rv := reflect.ValueOf(testServerOptions)
 				rv = rv.Elem()
 				fv := rv.FieldByName(tc.field)
