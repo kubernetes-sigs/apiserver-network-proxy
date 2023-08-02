@@ -1,6 +1,6 @@
 module sigs.k8s.io/apiserver-network-proxy/konnectivity-client
 
-go 1.17
+go 1.20
 
 // Prefer to keep requirements compatible with the oldest supported
 // k/k minor version, to prevent client backport issues.
