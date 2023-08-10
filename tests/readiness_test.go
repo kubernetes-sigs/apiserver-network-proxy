@@ -16,11 +16,9 @@ limitations under the License.
 
 package tests
 
-import (
-	"testing"
-)
+import "testing"
 
-func TestReadiness(t *testing.T) {
+func TestGRPCServerAndAgentReadiness(t *testing.T) {
 	stopCh := make(chan struct{})
 	defer close(stopCh)
 
@@ -38,8 +36,45 @@ func TestReadiness(t *testing.T) {
 	clientset := runAgent(proxy.agent, stopCh)
 	waitForConnectedServerCount(t, 1, clientset)
 
+	// check the agent connected status
+	isAgentReady := clientset.Ready()
+	if !isAgentReady {
+		t.Fatalf("expected connection status 'true', got: %t", isAgentReady)
+	}
 	ready, _ = server.Readiness.Ready()
 	if !ready {
 		t.Fatalf("expected ready")
+	}
+}
+
+func TestHTTPConnServerAndAgentReadiness(t *testing.T) {
+	stopCh := make(chan struct{})
+	defer close(stopCh)
+
+	proxy, cleanup, err := runHTTPConnProxyServer()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer cleanup()
+
+	clientset := runAgent(proxy.agent, stopCh)
+	waitForConnectedServerCount(t, 1, clientset)
+
+	// check the agent connected status
+	isAgentReady := clientset.Ready()
+	if !isAgentReady {
+		t.Fatalf("expected connection status 'true', got: %t", isAgentReady)
+	}
+}
+
+func TestAgentReadinessWithoutServer(t *testing.T) {
+	stopCh := make(chan struct{})
+	defer close(stopCh)
+
+	clientset := runAgent("localhost:8080", stopCh)
+	// check the agent connected status
+	isAgentReady := clientset.Ready()
+	if isAgentReady {
+		t.Fatalf("expected connection status 'false', got: %t", isAgentReady)
 	}
 }

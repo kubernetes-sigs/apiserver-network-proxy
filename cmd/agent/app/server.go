@@ -17,6 +17,7 @@ limitations under the License.
 package app
 
 import (
+	"bytes"
 	"context"
 	"crypto/tls"
 	"fmt"
@@ -26,6 +27,7 @@ import (
 	"runtime"
 	runpprof "runtime/pprof"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/prometheus/client_golang/prometheus/promhttp"
@@ -36,6 +38,7 @@ import (
 	"k8s.io/klog/v2"
 
 	"sigs.k8s.io/apiserver-network-proxy/cmd/agent/app/options"
+	"sigs.k8s.io/apiserver-network-proxy/pkg/agent"
 	"sigs.k8s.io/apiserver-network-proxy/pkg/util"
 )
 
@@ -63,11 +66,13 @@ func (a *Agent) run(o *options.GrpcProxyAgentOptions) error {
 	}
 
 	stopCh := make(chan struct{})
-	if err := a.runProxyConnection(o, stopCh); err != nil {
+
+	cs, err := a.runProxyConnection(o, stopCh)
+	if err != nil {
 		return fmt.Errorf("failed to run proxy connection with %v", err)
 	}
 
-	if err := a.runHealthServer(o); err != nil {
+	if err := a.runHealthServer(o, cs); err != nil {
 		return fmt.Errorf("failed to run health server with %v", err)
 	}
 
@@ -80,11 +85,11 @@ func (a *Agent) run(o *options.GrpcProxyAgentOptions) error {
 	return nil
 }
 
-func (a *Agent) runProxyConnection(o *options.GrpcProxyAgentOptions, stopCh <-chan struct{}) error {
+func (a *Agent) runProxyConnection(o *options.GrpcProxyAgentOptions, stopCh <-chan struct{}) (agent.ReadinessManager, error) {
 	var tlsConfig *tls.Config
 	var err error
 	if tlsConfig, err = util.GetClientTLSConfig(o.CaCert, o.AgentCert, o.AgentKey, o.ProxyServerHost, o.AlpnProtos); err != nil {
-		return err
+		return nil, err
 	}
 	dialOptions := []grpc.DialOption{
 		grpc.WithTransportCredentials(credentials.NewTLS(tlsConfig)),
@@ -97,15 +102,45 @@ func (a *Agent) runProxyConnection(o *options.GrpcProxyAgentOptions, stopCh <-ch
 	cs := cc.NewAgentClientSet(stopCh)
 	cs.Serve()
 
-	return nil
+	return cs, nil
 }
 
-func (a *Agent) runHealthServer(o *options.GrpcProxyAgentOptions) error {
+func (a *Agent) runHealthServer(o *options.GrpcProxyAgentOptions, cs agent.ReadinessManager) error {
 	livenessHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		fmt.Fprintf(w, "ok")
 	})
+
+	checks := []agent.HealthChecker{agent.Ping, agent.NewServerConnected(cs)}
 	readinessHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		fmt.Fprintf(w, "ok")
+		var failedChecks []string
+		var individualCheckOutput bytes.Buffer
+		for _, check := range checks {
+			if err := check.Check(r); err != nil {
+				fmt.Fprintf(&individualCheckOutput, "[-]%s failed: %v\n", check.Name(), err)
+				failedChecks = append(failedChecks, check.Name())
+			} else {
+				fmt.Fprintf(&individualCheckOutput, "[+]%s ok\n", check.Name())
+			}
+		}
+
+		// Always be verbose if the check has failed
+		if len(failedChecks) > 0 {
+			klog.V(0).Infoln("%s check failed: \n%v", strings.Join(failedChecks, ","), individualCheckOutput.String())
+			w.WriteHeader(http.StatusServiceUnavailable)
+			fmt.Fprintf(w, individualCheckOutput.String())
+			return
+		}
+
+		if _, found := r.URL.Query()["verbose"]; !found {
+			w.WriteHeader(http.StatusOK)
+			fmt.Fprint(w, "ok")
+			return
+		}
+
+		fmt.Fprintf(&individualCheckOutput, "check passed\n")
+
+		w.WriteHeader(http.StatusOK)
+		fmt.Fprint(w, individualCheckOutput.String())
 	})
 
 	muxHandler := http.NewServeMux()
