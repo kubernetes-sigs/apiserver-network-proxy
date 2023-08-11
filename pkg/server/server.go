@@ -106,8 +106,7 @@ const (
 )
 
 func (c *ProxyClientConnection) send(pkt *client.Packet) error {
-	start := time.Now()
-	defer metrics.Metrics.ObserveFrontendWriteLatency(time.Since(start))
+	defer func(start time.Time) { metrics.Metrics.ObserveFrontendWriteLatency(time.Since(start)) }(time.Now())
 	if c.Mode == "grpc" {
 		return c.frontend.Send(pkt)
 	}
