@@ -31,12 +31,13 @@ import (
 
 	"google.golang.org/grpc"
 	"sigs.k8s.io/apiserver-network-proxy/konnectivity-client/pkg/client"
+	"sigs.k8s.io/apiserver-network-proxy/tests/framework"
 )
 
-func TestProxy_Agent_Disconnect_HTTP_Persistent_Connection(t *testing.T) {
+func TestProxy_Agent_Disconnect_Persistent_Connection(t *testing.T) {
 	testcases := []struct {
 		name                string
-		proxyServerFunction func() (proxy, func(), error)
+		proxyServerFunction func(t testing.TB) framework.ProxyServer
 		clientFunction      func(context.Context, string, string) (*http.Client, error)
 	}{
 		{
@@ -57,20 +58,17 @@ func TestProxy_Agent_Disconnect_HTTP_Persistent_Connection(t *testing.T) {
 			server := httptest.NewServer(newEchoServer("hello"))
 			defer server.Close()
 
-			proxy, cleanup, err := tc.proxyServerFunction()
-			if err != nil {
-				t.Fatal(err)
-			}
-			defer cleanup()
+			ps := tc.proxyServerFunction(t)
+			defer ps.Stop()
 
-			a := runAgent(t, proxy.agent)
-			waitForConnectedAgentCount(t, 1, proxy.server)
+			a := runAgent(t, ps.AgentAddr())
+			waitForConnectedAgentCount(t, 1, ps)
 
 			// run test client
 
-			c, err := tc.clientFunction(ctx, proxy.front, server.URL)
+			c, err := tc.clientFunction(ctx, ps.FrontAddr(), server.URL)
 			if err != nil {
-				t.Errorf("error obtaining client: %v", err)
+				t.Fatalf("error obtaining client: %v", err)
 			}
 
 			_, err = clientRequest(c, server.URL)
@@ -81,7 +79,7 @@ func TestProxy_Agent_Disconnect_HTTP_Persistent_Connection(t *testing.T) {
 			a.Stop()
 
 			// Wait for the agent to disconnect
-			waitForConnectedAgentCount(t, 0, proxy.server)
+			waitForConnectedAgentCount(t, 0, ps)
 
 			// Reuse same client to make the request
 			_, err = clientRequest(c, server.URL)
@@ -97,7 +95,7 @@ func TestProxy_Agent_Disconnect_HTTP_Persistent_Connection(t *testing.T) {
 func TestProxy_Agent_Reconnect(t *testing.T) {
 	testcases := []struct {
 		name                string
-		proxyServerFunction func() (proxy, func(), error)
+		proxyServerFunction func(testing.TB) framework.ProxyServer
 		clientFunction      func(context.Context, string, string) (*http.Client, error)
 	}{
 		{
@@ -119,20 +117,17 @@ func TestProxy_Agent_Reconnect(t *testing.T) {
 			server := httptest.NewServer(newEchoServer("hello"))
 			defer server.Close()
 
-			proxy, cleanup, err := tc.proxyServerFunction()
-			if err != nil {
-				t.Fatal(err)
-			}
-			defer cleanup()
+			ps := tc.proxyServerFunction(t)
+			defer ps.Stop()
 
-			ai1 := runAgent(t, proxy.agent)
+			ai1 := runAgent(t, ps.AgentAddr())
 			waitForConnectedServerCount(t, 1, ai1)
 
 			// run test client
 
-			c, err := tc.clientFunction(ctx, proxy.front, server.URL)
+			c, err := tc.clientFunction(ctx, ps.FrontAddr(), server.URL)
 			if err != nil {
-				t.Errorf("error obtaining client: %v", err)
+				t.Fatalf("error obtaining client: %v", err)
 			}
 
 			_, err = clientRequest(c, server.URL)
@@ -142,17 +137,17 @@ func TestProxy_Agent_Reconnect(t *testing.T) {
 			ai1.Stop()
 
 			// Wait for the agent to disconnect
-			waitForConnectedAgentCount(t, 0, proxy.server)
+			waitForConnectedAgentCount(t, 0, ps)
 
 			// Reconnect agent
-			ai2 := runAgent(t, proxy.agent)
+			ai2 := runAgent(t, ps.AgentAddr())
 			defer ai2.Stop()
 			waitForConnectedServerCount(t, 1, ai2)
 
 			// Proxy requests should work again after agent reconnects
-			c2, err := tc.clientFunction(ctx, proxy.front, server.URL)
+			c2, err := tc.clientFunction(ctx, ps.FrontAddr(), server.URL)
 			if err != nil {
-				t.Errorf("error obtaining client: %v", err)
+				t.Fatalf("error obtaining client: %v", err)
 			}
 
 			_, err = clientRequest(c2, server.URL)

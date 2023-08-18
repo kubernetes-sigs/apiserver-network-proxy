@@ -54,8 +54,8 @@ func TestClientReconnects(t *testing.T) {
 		}
 	}()
 
-	ai := runAgentWithID(t, "test-id", lis.Addr().String())
-	defer ai.Stop()
+	a := runAgentWithID(t, "test-id", lis.Addr().String())
+	defer a.Stop()
 
 	select {
 	case <-connections:

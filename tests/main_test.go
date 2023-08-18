@@ -28,7 +28,8 @@ import (
 )
 
 var Framework = framework.Framework{
-	AgentRunner: &framework.InProcessAgentRunner{},
+	AgentRunner:       &framework.InProcessAgentRunner{},
+	ProxyServerRunner: &framework.InProcessProxyServerRunner{},
 }
 
 func TestMain(m *testing.M) {

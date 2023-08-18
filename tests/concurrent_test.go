@@ -26,6 +26,7 @@ import (
 
 	"google.golang.org/grpc"
 	"sigs.k8s.io/apiserver-network-proxy/konnectivity-client/pkg/client"
+	"sigs.k8s.io/apiserver-network-proxy/tests/framework"
 )
 
 func TestProxy_ConcurrencyGRPC(t *testing.T) {
@@ -35,13 +36,10 @@ func TestProxy_ConcurrencyGRPC(t *testing.T) {
 	server := httptest.NewServer(newSizedServer(length, chunks))
 	defer server.Close()
 
-	proxy, cleanup, err := runGRPCProxyServer()
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer cleanup()
+	ps := runGRPCProxyServer(t)
+	defer ps.Stop()
 
-	a := runAgent(t, proxy.agent)
+	a := runAgent(t, ps.AgentAddr())
 	defer a.Stop()
 	waitForConnectedServerCount(t, 1, a)
 
@@ -50,7 +48,7 @@ func TestProxy_ConcurrencyGRPC(t *testing.T) {
 		defer wg.Done()
 
 		// run test client
-		tunnel, err := client.CreateSingleUseGrpcTunnel(ctx, proxy.front, grpc.WithInsecure())
+		tunnel, err := client.CreateSingleUseGrpcTunnel(ctx, ps.FrontAddr(), grpc.WithInsecure())
 		if err != nil {
 			t.Error(err)
 			return
@@ -95,13 +93,10 @@ func TestProxy_ConcurrencyHTTP(t *testing.T) {
 	server := httptest.NewServer(newSizedServer(length, chunks))
 	defer server.Close()
 
-	proxy, cleanup, err := runHTTPConnProxyServer()
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer cleanup()
+	ps := runHTTPConnProxyServer(t)
+	defer ps.Stop()
 
-	a := runAgent(t, proxy.agent)
+	a := runAgent(t, ps.AgentAddr())
 	defer a.Stop()
 	waitForConnectedServerCount(t, 1, a)
 
@@ -109,7 +104,7 @@ func TestProxy_ConcurrencyHTTP(t *testing.T) {
 	var wg sync.WaitGroup
 	verify := func() {
 		defer wg.Done()
-		tunnel, err := createHTTPConnectClient(ctx, proxy.front, server.URL)
+		tunnel, err := createHTTPConnectClient(ctx, ps.FrontAddr(), server.URL)
 		if err != nil {
 			t.Error(err)
 		}
@@ -135,7 +130,7 @@ func TestProxy_ConcurrencyHTTP(t *testing.T) {
 func TestAgent_MultipleConn(t *testing.T) {
 	testcases := []struct {
 		name                string
-		proxyServerFunction func() (proxy, func(), error)
+		proxyServerFunction func(testing.TB) framework.ProxyServer
 		clientFunction      func(context.Context, string, string) (*http.Client, error)
 	}{
 		{
@@ -157,18 +152,15 @@ func TestAgent_MultipleConn(t *testing.T) {
 			server := httptest.NewServer(waitServer)
 			defer server.Close()
 
-			proxy, cleanup, err := tc.proxyServerFunction()
-			if err != nil {
-				t.Fatal(err)
-			}
-			defer cleanup()
+			ps := tc.proxyServerFunction(t)
+			defer ps.Stop()
 
-			ai1 := runAgentWithID(t, "multipleAgentConn", proxy.agent)
+			ai1 := runAgentWithID(t, "multipleAgentConn", ps.AgentAddr())
 			defer ai1.Stop()
 			waitForConnectedServerCount(t, 1, ai1)
 
 			// run test client
-			c, err := tc.clientFunction(ctx, proxy.front, server.URL)
+			c, err := tc.clientFunction(ctx, ps.FrontAddr(), server.URL)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -187,11 +179,11 @@ func TestAgent_MultipleConn(t *testing.T) {
 			// Running an agent with the same ID simulates a second connection from the same agent.
 			// This simulates the scenario where a proxy agent established connections with HA proxy server
 			// and creates multiple connections with the same proxy server
-			ai2 := runAgentWithID(t, "multipleAgentConn", proxy.agent)
+			ai2 := runAgentWithID(t, "multipleAgentConn", ps.AgentAddr())
 			defer ai2.Stop()
 			waitForConnectedServerCount(t, 1, ai2)
 			// Wait for the server to run cleanup routine
-			waitForConnectedAgentCount(t, 1, proxy.server)
+			waitForConnectedAgentCount(t, 1, ps)
 			close(waitServer.respondCh)
 
 			<-fcnStopCh

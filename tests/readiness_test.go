@@ -19,55 +19,47 @@ package tests
 import "testing"
 
 func TestGRPCServerAndAgentReadiness(t *testing.T) {
-	proxy, server, cleanup, err := runGRPCProxyServerWithServerCount(1)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer cleanup()
+	ps := runGRPCProxyServerWithServerCount(t, 1)
+	defer ps.Stop()
 
-	ready, _ := server.Readiness.Ready()
-	if ready {
+	if ps.Ready() {
 		t.Fatalf("expected not ready")
 	}
 
-	ai := runAgent(t, proxy.agent)
-	defer ai.Stop()
-	waitForConnectedServerCount(t, 1, ai)
+	a := runAgent(t, ps.AgentAddr())
+	defer a.Stop()
+	waitForConnectedServerCount(t, 1, a)
 
 	// check the agent connected status
-	isAgentReady := ai.Ready()
+	isAgentReady := a.Ready()
 	if !isAgentReady {
 		t.Fatalf("expected connection status 'true', got: %t", isAgentReady)
 	}
-	ready, _ = server.Readiness.Ready()
-	if !ready {
+	if !ps.Ready() {
 		t.Fatalf("expected ready")
 	}
 }
 
 func TestHTTPConnServerAndAgentReadiness(t *testing.T) {
-	proxy, cleanup, err := runHTTPConnProxyServer()
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer cleanup()
+	ps := runHTTPConnProxyServer(t)
+	defer ps.Stop()
 
-	ai := runAgent(t, proxy.agent)
-	defer ai.Stop()
-	waitForConnectedServerCount(t, 1, ai)
+	a := runAgent(t, ps.AgentAddr())
+	defer a.Stop()
+	waitForConnectedServerCount(t, 1, a)
 
 	// check the agent connected status
-	isAgentReady := ai.Ready()
+	isAgentReady := a.Ready()
 	if !isAgentReady {
 		t.Fatalf("expected connection status 'true', got: %t", isAgentReady)
 	}
 }
 
 func TestAgentReadinessWithoutServer(t *testing.T) {
-	ai := runAgent(t, "localhost:8080")
-	defer ai.Stop()
+	a := runAgent(t, "localhost:8080")
+	defer a.Stop()
 	// check the agent connected status
-	isAgentReady := ai.Ready()
+	isAgentReady := a.Ready()
 	if isAgentReady {
 		t.Fatalf("expected connection status 'false', got: %t", isAgentReady)
 	}

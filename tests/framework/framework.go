@@ -17,5 +17,6 @@ limitations under the License.
 package framework
 
 type Framework struct {
-	AgentRunner AgentRunner
+	AgentRunner       AgentRunner
+	ProxyServerRunner ProxyServerRunner
 }

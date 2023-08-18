@@ -24,8 +24,8 @@ import (
 )
 
 type AgentOpts struct {
-	AgentID string
-	Addr    string
+	AgentID    string
+	ServerAddr string
 }
 
 type AgentRunner interface {
@@ -42,7 +42,7 @@ type InProcessAgentRunner struct{}
 
 func (*InProcessAgentRunner) Start(opts AgentOpts) (Agent, error) {
 	cc := agent.ClientSetConfig{
-		Address:       opts.Addr,
+		Address:       opts.ServerAddr,
 		AgentID:       opts.AgentID,
 		SyncInterval:  100 * time.Millisecond,
 		ProbeInterval: 100 * time.Millisecond,

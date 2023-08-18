@@ -62,18 +62,15 @@ func TestEchoServer(t *testing.T) {
 		}
 	}()
 
-	proxy, cleanup, err := runGRPCProxyServer()
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer cleanup()
+	ps := runGRPCProxyServer(t)
+	defer ps.Stop()
 
-	ai := runAgent(t, proxy.agent)
-	defer ai.Stop()
-	waitForConnectedServerCount(t, 1, ai)
+	a := runAgent(t, ps.AgentAddr())
+	defer a.Stop()
+	waitForConnectedServerCount(t, 1, a)
 
 	// run test client
-	tunnel, err := client.CreateSingleUseGrpcTunnel(ctx, proxy.front, grpc.WithInsecure())
+	tunnel, err := client.CreateSingleUseGrpcTunnel(ctx, ps.FrontAddr(), grpc.WithInsecure())
 	if err != nil {
 		t.Fatal(err)
 	}
