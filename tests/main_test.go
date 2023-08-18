@@ -24,7 +24,12 @@ import (
 	"k8s.io/klog/v2"
 
 	metricsclient "sigs.k8s.io/apiserver-network-proxy/konnectivity-client/pkg/client/metrics"
+	"sigs.k8s.io/apiserver-network-proxy/tests/framework"
 )
+
+var Framework = framework.Framework{
+	AgentRunner: &framework.InProcessAgentRunner{},
+}
 
 func TestMain(m *testing.M) {
 	fs := flag.NewFlagSet("mock-flags", flag.PanicOnError)

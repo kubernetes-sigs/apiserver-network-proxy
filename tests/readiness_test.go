@@ -19,9 +19,6 @@ package tests
 import "testing"
 
 func TestGRPCServerAndAgentReadiness(t *testing.T) {
-	stopCh := make(chan struct{})
-	defer close(stopCh)
-
 	proxy, server, cleanup, err := runGRPCProxyServerWithServerCount(1)
 	if err != nil {
 		t.Fatal(err)
@@ -33,11 +30,12 @@ func TestGRPCServerAndAgentReadiness(t *testing.T) {
 		t.Fatalf("expected not ready")
 	}
 
-	clientset := runAgent(proxy.agent, stopCh)
-	waitForConnectedServerCount(t, 1, clientset)
+	ai := runAgent(t, proxy.agent)
+	defer ai.Stop()
+	waitForConnectedServerCount(t, 1, ai)
 
 	// check the agent connected status
-	isAgentReady := clientset.Ready()
+	isAgentReady := ai.Ready()
 	if !isAgentReady {
 		t.Fatalf("expected connection status 'true', got: %t", isAgentReady)
 	}
@@ -48,32 +46,28 @@ func TestGRPCServerAndAgentReadiness(t *testing.T) {
 }
 
 func TestHTTPConnServerAndAgentReadiness(t *testing.T) {
-	stopCh := make(chan struct{})
-	defer close(stopCh)
-
 	proxy, cleanup, err := runHTTPConnProxyServer()
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer cleanup()
 
-	clientset := runAgent(proxy.agent, stopCh)
-	waitForConnectedServerCount(t, 1, clientset)
+	ai := runAgent(t, proxy.agent)
+	defer ai.Stop()
+	waitForConnectedServerCount(t, 1, ai)
 
 	// check the agent connected status
-	isAgentReady := clientset.Ready()
+	isAgentReady := ai.Ready()
 	if !isAgentReady {
 		t.Fatalf("expected connection status 'true', got: %t", isAgentReady)
 	}
 }
 
 func TestAgentReadinessWithoutServer(t *testing.T) {
-	stopCh := make(chan struct{})
-	defer close(stopCh)
-
-	clientset := runAgent("localhost:8080", stopCh)
+	ai := runAgent(t, "localhost:8080")
+	defer ai.Stop()
 	// check the agent connected status
-	isAgentReady := clientset.Ready()
+	isAgentReady := ai.Ready()
 	if isAgentReady {
 		t.Fatalf("expected connection status 'false', got: %t", isAgentReady)
 	}

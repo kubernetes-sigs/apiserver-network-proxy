@@ -39,17 +39,14 @@ func BenchmarkLargeResponse_GRPC(b *testing.B) {
 	server := httptest.NewServer(newSizedServer(length, chunks))
 	defer server.Close()
 
-	stopCh := make(chan struct{})
-	defer close(stopCh)
-
 	proxy, cleanup, err := runGRPCProxyServer()
 	if err != nil {
 		b.Fatal(err)
 	}
 	defer cleanup()
 
-	clientset := runAgent(proxy.agent, stopCh)
-	waitForConnectedServerCount(b, 1, clientset)
+	a := runAgent(b, proxy.agent)
+	waitForConnectedServerCount(b, 1, a)
 
 	req, err := http.NewRequest("GET", server.URL, nil)
 	if err != nil {
@@ -113,17 +110,14 @@ func BenchmarkLargeRequest_GRPC(b *testing.B) {
 	}))
 	defer server.Close()
 
-	stopCh := make(chan struct{})
-	defer close(stopCh)
-
 	proxy, cleanup, err := runGRPCProxyServer()
 	if err != nil {
 		b.Fatal(err)
 	}
 	defer cleanup()
 
-	clientset := runAgent(proxy.agent, stopCh)
-	waitForConnectedServerCount(b, 1, clientset)
+	a := runAgent(b, proxy.agent)
+	waitForConnectedServerCount(b, 1, a)
 
 	bodyBytes := make([]byte, length)
 	body := bytes.NewReader(bodyBytes)

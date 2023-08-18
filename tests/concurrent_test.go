@@ -35,17 +35,15 @@ func TestProxy_ConcurrencyGRPC(t *testing.T) {
 	server := httptest.NewServer(newSizedServer(length, chunks))
 	defer server.Close()
 
-	stopCh := make(chan struct{})
-	defer close(stopCh)
-
 	proxy, cleanup, err := runGRPCProxyServer()
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer cleanup()
 
-	clientset := runAgent(proxy.agent, stopCh)
-	waitForConnectedServerCount(t, 1, clientset)
+	a := runAgent(t, proxy.agent)
+	defer a.Stop()
+	waitForConnectedServerCount(t, 1, a)
 
 	var wg sync.WaitGroup
 	verify := func() {
@@ -97,17 +95,15 @@ func TestProxy_ConcurrencyHTTP(t *testing.T) {
 	server := httptest.NewServer(newSizedServer(length, chunks))
 	defer server.Close()
 
-	stopCh := make(chan struct{})
-	defer close(stopCh)
-
 	proxy, cleanup, err := runHTTPConnProxyServer()
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer cleanup()
 
-	clientset := runAgent(proxy.agent, stopCh)
-	waitForConnectedServerCount(t, 1, clientset)
+	a := runAgent(t, proxy.agent)
+	defer a.Stop()
+	waitForConnectedServerCount(t, 1, a)
 
 	// run test clients
 	var wg sync.WaitGroup
@@ -161,18 +157,15 @@ func TestAgent_MultipleConn(t *testing.T) {
 			server := httptest.NewServer(waitServer)
 			defer server.Close()
 
-			stopCh := make(chan struct{})
-			stopCh2 := make(chan struct{})
-
 			proxy, cleanup, err := tc.proxyServerFunction()
 			if err != nil {
 				t.Fatal(err)
 			}
 			defer cleanup()
 
-			cs1 := runAgentWithID("multipleAgentConn", proxy.agent, stopCh)
-			waitForConnectedServerCount(t, 1, cs1)
-			defer close(stopCh)
+			ai1 := runAgentWithID(t, "multipleAgentConn", proxy.agent)
+			defer ai1.Stop()
+			waitForConnectedServerCount(t, 1, ai1)
 
 			// run test client
 			c, err := tc.clientFunction(ctx, proxy.front, server.URL)
@@ -194,9 +187,9 @@ func TestAgent_MultipleConn(t *testing.T) {
 			// Running an agent with the same ID simulates a second connection from the same agent.
 			// This simulates the scenario where a proxy agent established connections with HA proxy server
 			// and creates multiple connections with the same proxy server
-			cs2 := runAgentWithID("multipleAgentConn", proxy.agent, stopCh2)
-			waitForConnectedServerCount(t, 1, cs2)
-			close(stopCh2)
+			ai2 := runAgentWithID(t, "multipleAgentConn", proxy.agent)
+			defer ai2.Stop()
+			waitForConnectedServerCount(t, 1, ai2)
 			// Wait for the server to run cleanup routine
 			waitForConnectedAgentCount(t, 1, proxy.server)
 			close(waitServer.respondCh)

@@ -57,15 +57,13 @@ func TestProxy_Agent_Disconnect_HTTP_Persistent_Connection(t *testing.T) {
 			server := httptest.NewServer(newEchoServer("hello"))
 			defer server.Close()
 
-			stopCh := make(chan struct{})
-
 			proxy, cleanup, err := tc.proxyServerFunction()
 			if err != nil {
 				t.Fatal(err)
 			}
 			defer cleanup()
 
-			runAgent(proxy.agent, stopCh)
+			a := runAgent(t, proxy.agent)
 			waitForConnectedAgentCount(t, 1, proxy.server)
 
 			// run test client
@@ -80,7 +78,7 @@ func TestProxy_Agent_Disconnect_HTTP_Persistent_Connection(t *testing.T) {
 			if err != nil {
 				t.Errorf("expected no error on proxy request, got %v", err)
 			}
-			close(stopCh)
+			a.Stop()
 
 			// Wait for the agent to disconnect
 			waitForConnectedAgentCount(t, 0, proxy.server)
@@ -121,16 +119,14 @@ func TestProxy_Agent_Reconnect(t *testing.T) {
 			server := httptest.NewServer(newEchoServer("hello"))
 			defer server.Close()
 
-			stopCh := make(chan struct{})
-
 			proxy, cleanup, err := tc.proxyServerFunction()
 			if err != nil {
 				t.Fatal(err)
 			}
 			defer cleanup()
 
-			cs1 := runAgent(proxy.agent, stopCh)
-			waitForConnectedServerCount(t, 1, cs1)
+			ai1 := runAgent(t, proxy.agent)
+			waitForConnectedServerCount(t, 1, ai1)
 
 			// run test client
 
@@ -143,16 +139,15 @@ func TestProxy_Agent_Reconnect(t *testing.T) {
 			if err != nil {
 				t.Errorf("expected no error on proxy request, got %v", err)
 			}
-			close(stopCh)
+			ai1.Stop()
 
 			// Wait for the agent to disconnect
 			waitForConnectedAgentCount(t, 0, proxy.server)
 
 			// Reconnect agent
-			stopCh2 := make(chan struct{})
-			defer close(stopCh2)
-			cs2 := runAgent(proxy.agent, stopCh2)
-			waitForConnectedServerCount(t, 1, cs2)
+			ai2 := runAgent(t, proxy.agent)
+			defer ai2.Stop()
+			waitForConnectedServerCount(t, 1, ai2)
 
 			// Proxy requests should work again after agent reconnects
 			c2, err := tc.clientFunction(ctx, proxy.front, server.URL)

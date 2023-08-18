@@ -140,13 +140,13 @@ func TestConcurrentClientRequest(t *testing.T) {
 	defer cleanup()
 	ps.BackendManagers = []server.BackendManager{newSingleTimeGetter(server.NewDefaultBackendManager())}
 
-	stopCh := make(chan struct{})
-	defer close(stopCh)
 	// Run two agents
-	cs1 := runAgentWithID("a", proxy.agent, stopCh)
-	cs2 := runAgentWithID("b", proxy.agent, stopCh)
-	waitForConnectedServerCount(t, 1, cs1)
-	waitForConnectedServerCount(t, 1, cs2)
+	ai1 := runAgent(t, proxy.agent)
+	ai2 := runAgent(t, proxy.agent)
+	defer ai1.Stop()
+	defer ai2.Stop()
+	waitForConnectedServerCount(t, 1, ai1)
+	waitForConnectedServerCount(t, 1, ai2)
 
 	client1 := getTestClient(proxy.front, t)
 	client2 := getTestClient(proxy.front, t)

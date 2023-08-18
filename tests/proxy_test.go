@@ -41,13 +41,13 @@ import (
 	metricsclient "sigs.k8s.io/apiserver-network-proxy/konnectivity-client/pkg/client/metrics"
 	clientmetricstest "sigs.k8s.io/apiserver-network-proxy/konnectivity-client/pkg/common/metrics/testing"
 	clientproto "sigs.k8s.io/apiserver-network-proxy/konnectivity-client/proto/client"
-	"sigs.k8s.io/apiserver-network-proxy/pkg/agent"
 	metricsagent "sigs.k8s.io/apiserver-network-proxy/pkg/agent/metrics"
 	"sigs.k8s.io/apiserver-network-proxy/pkg/server"
 	metricsserver "sigs.k8s.io/apiserver-network-proxy/pkg/server/metrics"
 	metricstest "sigs.k8s.io/apiserver-network-proxy/pkg/testing/metrics"
 	agentproto "sigs.k8s.io/apiserver-network-proxy/proto/agent"
 	"sigs.k8s.io/apiserver-network-proxy/proto/header"
+	"sigs.k8s.io/apiserver-network-proxy/tests/framework"
 )
 
 // Define a blackholed address, for which Dial is expected to hang. This address is reserved for
@@ -125,17 +125,15 @@ func TestBasicProxy_GRPC(t *testing.T) {
 	server := httptest.NewServer(newEchoServer("hello"))
 	defer server.Close()
 
-	stopCh := make(chan struct{})
-	defer close(stopCh)
-
 	proxy, cleanup, err := runGRPCProxyServer()
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer cleanup()
 
-	clientset := runAgent(proxy.agent, stopCh)
-	waitForConnectedServerCount(t, 1, clientset)
+	a := runAgent(t, proxy.agent)
+	defer a.Stop()
+	waitForConnectedServerCount(t, 1, a)
 
 	// run test client
 	tunnel, err := client.CreateSingleUseGrpcTunnel(ctx, proxy.front, grpc.WithInsecure())
@@ -175,17 +173,15 @@ func TestProxyHandleDialError_GRPC(t *testing.T) {
 	ctx := context.Background()
 	invalidServer := httptest.NewServer(newEchoServer("hello"))
 
-	stopCh := make(chan struct{})
-	defer close(stopCh)
-
 	proxy, cleanup, err := runGRPCProxyServer()
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer cleanup()
 
-	clientset := runAgent(proxy.agent, stopCh)
-	waitForConnectedServerCount(t, 1, clientset)
+	a := runAgent(t, proxy.agent)
+	defer a.Stop()
+	waitForConnectedServerCount(t, 1, a)
 
 	// run test client
 	tunnel, err := client.CreateSingleUseGrpcTunnel(ctx, proxy.front, grpc.WithInsecure())
@@ -224,17 +220,15 @@ func TestProxyHandle_DoneContext_GRPC(t *testing.T) {
 	server := httptest.NewServer(newEchoServer("hello"))
 	defer server.Close()
 
-	stopCh := make(chan struct{})
-	defer close(stopCh)
-
 	proxy, cleanup, err := runGRPCProxyServer()
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer cleanup()
 
-	clientset := runAgent(proxy.agent, stopCh)
-	waitForConnectedServerCount(t, 1, clientset)
+	a := runAgent(t, proxy.agent)
+	defer a.Stop()
+	waitForConnectedServerCount(t, 1, a)
 
 	// run test client
 	ctx, cancel := context.WithTimeout(context.Background(), -time.Second)
@@ -254,17 +248,15 @@ func TestProxyHandle_RequestDeadlineExceeded_GRPC(t *testing.T) {
 	server := httptest.NewServer(slowServer)
 	defer server.Close()
 
-	stopCh := make(chan struct{})
-	defer close(stopCh)
-
 	proxy, cleanup, err := runGRPCProxyServer()
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer cleanup()
 
-	clientset := runAgent(proxy.agent, stopCh)
-	waitForConnectedServerCount(t, 1, clientset)
+	a := runAgent(t, proxy.agent)
+	defer a.Stop()
+	waitForConnectedServerCount(t, 1, a)
 
 	func() {
 		// Ensure that tunnels aren't leaked with long-running servers.
@@ -380,10 +372,9 @@ func TestProxyDial_RequestCancelled_Concurrent_GRPC(t *testing.T) {
 	}
 	defer cleanup()
 
-	stopCh := make(chan struct{})
-	defer close(stopCh)
-	clientset := runAgent(proxy.agent, stopCh)
-	waitForConnectedServerCount(t, 1, clientset)
+	a := runAgent(t, proxy.agent)
+	defer a.Stop()
+	waitForConnectedServerCount(t, 1, a)
 
 	wg := sync.WaitGroup{}
 	dialFn := func(id int, cancelDelay time.Duration) {
@@ -460,10 +451,9 @@ func TestProxyDial_AgentTimeout_GRPC(t *testing.T) {
 	}
 	defer cleanup()
 
-	stopCh := make(chan struct{})
-	defer close(stopCh)
-	clientset := runAgent(proxy.agent, stopCh)
-	waitForConnectedServerCount(t, 1, clientset)
+	a := runAgent(t, proxy.agent)
+	defer a.Stop()
+	waitForConnectedServerCount(t, 1, a)
 
 	func() {
 		// Ensure that tunnels aren't leaked with long-running servers.
@@ -509,17 +499,15 @@ func TestProxyHandle_TunnelContextCancelled_GRPC(t *testing.T) {
 	server := httptest.NewServer(slowServer)
 	defer server.Close()
 
-	stopCh := make(chan struct{})
-	defer close(stopCh)
-
 	proxy, cleanup, err := runGRPCProxyServer()
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer cleanup()
 
-	clientset := runAgent(proxy.agent, stopCh)
-	waitForConnectedServerCount(t, 1, clientset)
+	a := runAgent(t, proxy.agent)
+	defer a.Stop()
+	waitForConnectedServerCount(t, 1, a)
 
 	// run test client
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
@@ -563,17 +551,15 @@ func TestProxy_LargeResponse(t *testing.T) {
 	server := httptest.NewServer(newSizedServer(length, chunks))
 	defer server.Close()
 
-	stopCh := make(chan struct{})
-	defer close(stopCh)
-
 	proxy, cleanup, err := runGRPCProxyServer()
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer cleanup()
 
-	clientset := runAgent(proxy.agent, stopCh)
-	waitForConnectedServerCount(t, 1, clientset)
+	a := runAgent(t, proxy.agent)
+	defer a.Stop()
+	waitForConnectedServerCount(t, 1, a)
 
 	// run test client
 	tunnel, err := client.CreateSingleUseGrpcTunnel(ctx, proxy.front, grpc.WithInsecure())
@@ -614,17 +600,15 @@ func TestBasicProxy_HTTPCONN(t *testing.T) {
 	server := httptest.NewServer(newEchoServer("hello"))
 	defer server.Close()
 
-	stopCh := make(chan struct{})
-	defer close(stopCh)
-
 	proxy, cleanup, err := runHTTPConnProxyServer()
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer cleanup()
 
-	clientset := runAgent(proxy.agent, stopCh)
-	waitForConnectedServerCount(t, 1, clientset)
+	a := runAgent(t, proxy.agent)
+	defer a.Stop()
+	waitForConnectedServerCount(t, 1, a)
 
 	conn, err := net.Dial("tcp", proxy.front)
 	if err != nil {
@@ -681,17 +665,15 @@ func TestBasicProxy_HTTPCONN(t *testing.T) {
 func TestFailedDNSLookupProxy_HTTPCONN(t *testing.T) {
 	expectCleanShutdown(t)
 
-	stopCh := make(chan struct{})
-	defer close(stopCh)
-
 	proxy, cleanup, err := runHTTPConnProxyServer()
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer cleanup()
 
-	clientset := runAgent(proxy.agent, stopCh)
-	waitForConnectedServerCount(t, 1, clientset)
+	a := runAgent(t, proxy.agent)
+	defer a.Stop()
+	waitForConnectedServerCount(t, 1, a)
 
 	conn, err := net.Dial("tcp", proxy.front)
 	if err != nil {
@@ -771,17 +753,15 @@ func TestFailedDial_HTTPCONN(t *testing.T) {
 	server := httptest.NewServer(newEchoServer("hello"))
 	server.Close() // cleanup immediately so connections will fail
 
-	stopCh := make(chan struct{})
-	defer close(stopCh)
-
 	proxy, cleanup, err := runHTTPConnProxyServer()
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer cleanup()
 
-	clientset := runAgent(proxy.agent, stopCh)
-	waitForConnectedServerCount(t, 1, clientset)
+	a := runAgent(t, proxy.agent)
+	defer a.Stop()
+	waitForConnectedServerCount(t, 1, a)
 
 	conn, err := net.Dial("tcp", proxy.front)
 	if err != nil {
@@ -957,22 +937,20 @@ func runHTTPConnProxyServer() (proxy, func(), error) {
 	return proxy, cleanup, nil
 }
 
-func runAgent(addr string, stopCh <-chan struct{}) *agent.ClientSet {
-	return runAgentWithID(uuid.New().String(), addr, stopCh)
+func runAgent(t testing.TB, addr string) framework.Agent {
+	return runAgentWithID(t, uuid.New().String(), addr)
 }
 
-func runAgentWithID(agentID, addr string, stopCh <-chan struct{}) *agent.ClientSet {
-	cc := agent.ClientSetConfig{
-		Address:       addr,
-		AgentID:       agentID,
-		SyncInterval:  100 * time.Millisecond,
-		ProbeInterval: 100 * time.Millisecond,
-		DialOptions:   []grpc.DialOption{grpc.WithInsecure()},
+func runAgentWithID(t testing.TB, agentID, addr string) framework.Agent {
+	opts := framework.AgentOpts{
+		AgentID: agentID,
+		Addr:    addr,
 	}
-
-	client := cc.NewAgentClientSet(stopCh)
-	client.Serve()
-	return client
+	a, err := Framework.AgentRunner.Start(opts)
+	if err != nil {
+		t.Fatalf("Failed to start agent: %v", err)
+	}
+	return a
 }
 
 type unresponsiveAgent struct {
@@ -1004,18 +982,22 @@ func (a *unresponsiveAgent) Close() {
 
 // waitForConnectedServerCount waits for the agent ClientSet to have the expected number of health
 // server connections (HealthyClientsCount).
-func waitForConnectedServerCount(t testing.TB, expectedServerCount int, clientset *agent.ClientSet) {
+func waitForConnectedServerCount(t testing.TB, expectedServerCount int, a framework.Agent) {
 	t.Helper()
 	err := wait.PollImmediate(100*time.Millisecond, wait.ForeverTestTimeout, func() (bool, error) {
-		hc := clientset.HealthyClientsCount()
-		if hc == expectedServerCount {
+		csc, err := a.GetConnectedServerCount()
+		if err != nil {
+			return false, err
+		}
+		if csc == expectedServerCount {
 			return true, nil
 		}
 		return false, nil
 	})
 	if err != nil {
-		hc, cc := clientset.HealthyClientsCount(), clientset.ClientsCount()
-		t.Logf("got %d clients, %d of them are healthy; expected %d", cc, hc, expectedServerCount)
+		if csc, err := a.GetConnectedServerCount(); err == nil {
+			t.Logf("got %d server connections; expected %d", csc, expectedServerCount)
+		}
 		t.Fatalf("Error waiting for healthy clients: %v", err)
 	}
 }
