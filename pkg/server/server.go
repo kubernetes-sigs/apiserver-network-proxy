@@ -255,79 +255,79 @@ func (s *ProxyServer) getBackend(reqHost string) (Backend, error) {
 	return nil, &ErrNotFound{}
 }
 
-func (s *ProxyServer) addBackend(agentID string, conn agent.AgentService_ConnectServer) (backend Backend) {
+func (s *ProxyServer) addBackend(agentID string, backend Backend) {
 	for i := 0; i < len(s.BackendManagers); i++ {
 		switch s.BackendManagers[i].(type) {
 		case *DestHostBackendManager:
-			agentIdentifiers, err := getAgentIdentifiers(conn)
+			agentIdentifiers, err := backend.GetAgentIdentifiers()
 			if err != nil {
 				klog.ErrorS(err, "fail to get the agent identifiers", "agentID", agentID)
 				break
 			}
 			for _, ipv4 := range agentIdentifiers.IPv4 {
 				klog.V(5).InfoS("Add the agent to DestHostBackendManager", "agent address", ipv4)
-				s.BackendManagers[i].AddBackend(ipv4, header.IPv4, conn)
+				s.BackendManagers[i].AddBackend(ipv4, header.IPv4, backend)
 			}
 			for _, ipv6 := range agentIdentifiers.IPv6 {
 				klog.V(5).InfoS("Add the agent to DestHostBackendManager", "agent address", ipv6)
-				s.BackendManagers[i].AddBackend(ipv6, header.IPv6, conn)
+				s.BackendManagers[i].AddBackend(ipv6, header.IPv6, backend)
 			}
 			for _, host := range agentIdentifiers.Host {
 				klog.V(5).InfoS("Add the agent to DestHostBackendManager", "agent address", host)
-				s.BackendManagers[i].AddBackend(host, header.Host, conn)
+				s.BackendManagers[i].AddBackend(host, header.Host, backend)
 			}
 		case *DefaultRouteBackendManager:
-			agentIdentifiers, err := getAgentIdentifiers(conn)
+			agentIdentifiers, err := backend.GetAgentIdentifiers()
 			if err != nil {
 				klog.ErrorS(err, "fail to get the agent identifiers", "agentID", agentID)
 				break
 			}
 			if agentIdentifiers.DefaultRoute {
 				klog.V(5).InfoS("Add the agent to DefaultRouteBackendManager", "agentID", agentID)
-				backend = s.BackendManagers[i].AddBackend(agentID, header.DefaultRoute, conn)
+				s.BackendManagers[i].AddBackend(agentID, header.DefaultRoute, backend)
 			}
 		default:
 			klog.V(5).InfoS("Add the agent to DefaultBackendManager", "agentID", agentID)
-			backend = s.BackendManagers[i].AddBackend(agentID, header.UID, conn)
+			s.BackendManagers[i].AddBackend(agentID, header.UID, backend)
 		}
 	}
 	return
 }
 
-func (s *ProxyServer) removeBackend(agentID string, conn agent.AgentService_ConnectServer) {
+func (s *ProxyServer) removeBackend(agentID string, backend Backend) {
 	for _, bm := range s.BackendManagers {
 		switch bm.(type) {
 		case *DestHostBackendManager:
-			agentIdentifiers, err := getAgentIdentifiers(conn)
+			agentIdentifiers, err := backend.GetAgentIdentifiers()
 			if err != nil {
 				klog.ErrorS(err, "fail to get the agent identifiers", "agentID", agentID)
 				break
 			}
 			for _, ipv4 := range agentIdentifiers.IPv4 {
 				klog.V(5).InfoS("Remove the agent from the DestHostBackendManager", "agentHost", ipv4)
-				bm.RemoveBackend(ipv4, header.IPv4, conn)
+				bm.RemoveBackend(ipv4, header.IPv4, backend)
 			}
 			for _, ipv6 := range agentIdentifiers.IPv6 {
 				klog.V(5).InfoS("Remove the agent from the DestHostBackendManager", "agentHost", ipv6)
-				bm.RemoveBackend(ipv6, header.IPv6, conn)
+				bm.RemoveBackend(ipv6, header.IPv6, backend)
 			}
 			for _, host := range agentIdentifiers.Host {
 				klog.V(5).InfoS("Remove the agent from the DestHostBackendManager", "agentHost", host)
-				bm.RemoveBackend(host, header.Host, conn)
+				bm.RemoveBackend(host, header.Host, backend)
 			}
 		case *DefaultRouteBackendManager:
-			agentIdentifiers, err := getAgentIdentifiers(conn)
+			agentIdentifiers, err := backend.GetAgentIdentifiers()
 			if err != nil {
 				klog.ErrorS(err, "fail to get the agent identifiers", "agentID", agentID)
 				break
 			}
 			if agentIdentifiers.DefaultRoute {
 				klog.V(5).InfoS("Remove the agent from the DefaultRouteBackendManager", "agentID", agentID)
-				bm.RemoveBackend(agentID, header.DefaultRoute, conn)
+				bm.RemoveBackend(agentID, header.DefaultRoute, backend)
 			}
 		default:
 			klog.V(5).InfoS("Remove the agent from the DefaultBackendManager", "agentID", agentID)
-			bm.RemoveBackend(agentID, header.UID, conn)
+			bm.RemoveBackend(agentID, header.UID, backend)
 		}
 	}
 }
@@ -706,27 +706,6 @@ func agentID(stream agent.AgentService_ConnectServer) (string, error) {
 	return agentIDs[0], nil
 }
 
-func getAgentIdentifiers(stream agent.AgentService_ConnectServer) (header.Identifiers, error) {
-	var agentIdentifiers header.Identifiers
-	md, ok := metadata.FromIncomingContext(stream.Context())
-	if !ok {
-		return agentIdentifiers, fmt.Errorf("failed to get context")
-	}
-	agentIDs := md.Get(header.AgentIdentifiers)
-	if len(agentIDs) > 1 {
-		return agentIdentifiers, fmt.Errorf("expected at most one agent IP in the context, got %v", agentIDs)
-	}
-	if len(agentIDs) == 0 {
-		return agentIdentifiers, nil
-	}
-
-	agentIdentifiers, err := header.GenAgentIdentifiers(agentIDs[0])
-	if err != nil {
-		return agentIdentifiers, err
-	}
-	return agentIdentifiers, nil
-}
-
 func (s *ProxyServer) validateAuthToken(ctx context.Context, token string) (username string, err error) {
 	trReq := &authv1.TokenReview{
 		Spec: authv1.TokenReviewSpec{
@@ -831,8 +810,9 @@ func (s *ProxyServer) Connect(stream agent.AgentService_ConnectServer) error {
 	}
 
 	klog.V(2).InfoS("Agent connected", "agentID", agentID, "serverID", s.serverID)
-	backend := s.addBackend(agentID, stream)
-	defer s.removeBackend(agentID, stream)
+	backend := NewBackend(stream)
+	s.addBackend(agentID, backend)
+	defer s.removeBackend(agentID, backend)
 
 	recvCh := make(chan *client.Packet, xfrChannelSize)
 

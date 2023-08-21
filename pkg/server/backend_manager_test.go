@@ -29,17 +29,17 @@ type fakeAgentServiceConnectServer struct {
 }
 
 func TestAddRemoveBackends(t *testing.T) {
-	conn1 := new(fakeAgentServiceConnectServer)
-	conn12 := new(fakeAgentServiceConnectServer)
-	conn2 := new(fakeAgentServiceConnectServer)
-	conn22 := new(fakeAgentServiceConnectServer)
-	conn3 := new(fakeAgentServiceConnectServer)
+	backend1 := NewBackend(new(fakeAgentServiceConnectServer))
+	backend12 := NewBackend(new(fakeAgentServiceConnectServer))
+	backend2 := NewBackend(new(fakeAgentServiceConnectServer))
+	backend22 := NewBackend(new(fakeAgentServiceConnectServer))
+	backend3 := NewBackend(new(fakeAgentServiceConnectServer))
 
 	p := NewDefaultBackendManager()
 
-	p.AddBackend("agent1", header.UID, conn1)
-	p.RemoveBackend("agent1", header.UID, conn1)
-	expectedBackends := make(map[string][]*backend)
+	p.AddBackend("agent1", header.UID, backend1)
+	p.RemoveBackend("agent1", header.UID, backend1)
+	expectedBackends := make(map[string][]Backend)
 	expectedAgentIDs := []string{}
 	if e, a := expectedBackends, p.backends; !reflect.DeepEqual(e, a) {
 		t.Errorf("expected %v, got %v", e, a)
@@ -49,21 +49,21 @@ func TestAddRemoveBackends(t *testing.T) {
 	}
 
 	p = NewDefaultBackendManager()
-	p.AddBackend("agent1", header.UID, conn1)
-	p.AddBackend("agent1", header.UID, conn12)
+	p.AddBackend("agent1", header.UID, backend1)
+	p.AddBackend("agent1", header.UID, backend12)
 	// Adding the same connection again should be a no-op.
-	p.AddBackend("agent1", header.UID, conn12)
-	p.AddBackend("agent2", header.UID, conn2)
-	p.AddBackend("agent2", header.UID, conn22)
-	p.AddBackend("agent3", header.UID, conn3)
-	p.RemoveBackend("agent2", header.UID, conn22)
-	p.RemoveBackend("agent2", header.UID, conn2)
-	p.RemoveBackend("agent1", header.UID, conn1)
-	// This is invalid. agent1 doesn't have conn3. This should be a no-op.
-	p.RemoveBackend("agent1", header.UID, conn3)
-	expectedBackends = map[string][]*backend{
-		"agent1": {newBackend(conn12)},
-		"agent3": {newBackend(conn3)},
+	p.AddBackend("agent1", header.UID, backend12)
+	p.AddBackend("agent2", header.UID, backend2)
+	p.AddBackend("agent2", header.UID, backend22)
+	p.AddBackend("agent3", header.UID, backend3)
+	p.RemoveBackend("agent2", header.UID, backend22)
+	p.RemoveBackend("agent2", header.UID, backend2)
+	p.RemoveBackend("agent1", header.UID, backend1)
+	// This is invalid. agent1 doesn't have backend3. This should be a no-op.
+	p.RemoveBackend("agent1", header.UID, backend3)
+	expectedBackends = map[string][]Backend{
+		"agent1": {backend12},
+		"agent3": {backend3},
 	}
 	expectedAgentIDs = []string{"agent1", "agent3"}
 	if e, a := expectedBackends, p.backends; !reflect.DeepEqual(e, a) {
@@ -75,17 +75,17 @@ func TestAddRemoveBackends(t *testing.T) {
 }
 
 func TestAddRemoveBackendsWithDefaultRoute(t *testing.T) {
-	conn1 := new(fakeAgentServiceConnectServer)
-	conn12 := new(fakeAgentServiceConnectServer)
-	conn2 := new(fakeAgentServiceConnectServer)
-	conn22 := new(fakeAgentServiceConnectServer)
-	conn3 := new(fakeAgentServiceConnectServer)
+	backend1 := NewBackend(new(fakeAgentServiceConnectServer))
+	backend12 := NewBackend(new(fakeAgentServiceConnectServer))
+	backend2 := NewBackend(new(fakeAgentServiceConnectServer))
+	backend22 := NewBackend(new(fakeAgentServiceConnectServer))
+	backend3 := NewBackend(new(fakeAgentServiceConnectServer))
 
 	p := NewDefaultRouteBackendManager()
 
-	p.AddBackend("agent1", header.DefaultRoute, conn1)
-	p.RemoveBackend("agent1", header.DefaultRoute, conn1)
-	expectedBackends := make(map[string][]*backend)
+	p.AddBackend("agent1", header.DefaultRoute, backend1)
+	p.RemoveBackend("agent1", header.DefaultRoute, backend1)
+	expectedBackends := make(map[string][]Backend)
 	expectedAgentIDs := []string{}
 	if e, a := expectedBackends, p.backends; !reflect.DeepEqual(e, a) {
 		t.Errorf("expected %v, got %v", e, a)
@@ -98,22 +98,22 @@ func TestAddRemoveBackendsWithDefaultRoute(t *testing.T) {
 	}
 
 	p = NewDefaultRouteBackendManager()
-	p.AddBackend("agent1", header.DefaultRoute, conn1)
-	p.AddBackend("agent1", header.DefaultRoute, conn12)
+	p.AddBackend("agent1", header.DefaultRoute, backend1)
+	p.AddBackend("agent1", header.DefaultRoute, backend12)
 	// Adding the same connection again should be a no-op.
-	p.AddBackend("agent1", header.DefaultRoute, conn12)
-	p.AddBackend("agent2", header.DefaultRoute, conn2)
-	p.AddBackend("agent2", header.DefaultRoute, conn22)
-	p.AddBackend("agent3", header.DefaultRoute, conn3)
-	p.RemoveBackend("agent2", header.DefaultRoute, conn22)
-	p.RemoveBackend("agent2", header.DefaultRoute, conn2)
-	p.RemoveBackend("agent1", header.DefaultRoute, conn1)
+	p.AddBackend("agent1", header.DefaultRoute, backend12)
+	p.AddBackend("agent2", header.DefaultRoute, backend2)
+	p.AddBackend("agent2", header.DefaultRoute, backend22)
+	p.AddBackend("agent3", header.DefaultRoute, backend3)
+	p.RemoveBackend("agent2", header.DefaultRoute, backend22)
+	p.RemoveBackend("agent2", header.DefaultRoute, backend2)
+	p.RemoveBackend("agent1", header.DefaultRoute, backend1)
 	// This is invalid. agent1 doesn't have conn3. This should be a no-op.
-	p.RemoveBackend("agent1", header.DefaultRoute, conn3)
+	p.RemoveBackend("agent1", header.DefaultRoute, backend3)
 
-	expectedBackends = map[string][]*backend{
-		"agent1": {newBackend(conn12)},
-		"agent3": {newBackend(conn3)},
+	expectedBackends = map[string][]Backend{
+		"agent1": {backend12},
+		"agent3": {backend3},
 	}
 	expectedDefaultRouteAgentIDs := []string{"agent1", "agent3"}
 
