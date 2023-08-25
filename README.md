@@ -22,8 +22,10 @@ Participation in the Kubernetes community is governed by the [Kubernetes Code of
 To reduce version-skew risk, it is recommended to match apiserver-network-proxy server & client
 minor release versions. With Kubernetes, this means:
 
-- Kubernetes v1.27+: `0.1.X` tags, `master` branch
-- Kubernetes versions v1.23 to v1.27: `0.0.X` tags, `release-0.0` branch
+- Kubernetes v1.28: `0.28.X` tags, `master` branch
+  *  Branch `release-0.28` will be created as needed.
+- Kubernetes v1.26 and v1.27: `0.1.X` tags, `release-0.1` branch
+- Kubernetes versions v1.23 to v1.25: `0.0.X` tags, `release-0.0` branch
 - Kubernetes versions up to v1.23: apiserver-network-proxy versions up to `v0.0.30`.
   Refer to the kubernetes go.mod file for the specific release version.
 
