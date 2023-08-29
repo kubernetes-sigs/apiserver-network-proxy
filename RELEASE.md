@@ -4,9 +4,9 @@ Please note this guide is only intended for the admins of this repository, and r
 
 Creating a new release of network proxy involves releasing a new version of the client library (konnectivity-client) and new images for the proxy agent and server. Generally we also want to upgrade kubernetes/kubernetes with the latest version of the images and library, but this is a GCE specific change.
 
-1. The first step involves creating a new git tag for the release, following semver for go libraries. A tag is required for both the repository and the konnectivity-client library. For example releasing the `0.0.15` version will have two tags `v0.0.15` and `konnectivity-client/v0.0.15` on the appropriate commit.
+1. The first step involves creating a new git tag for the release, following semver for go libraries. A tag is required for both the repository and the konnectivity-client library. For example releasing the `0.99.0` version will have two tags `v0.99.0` and `konnectivity-client/v0.99.0` on the appropriate commit. The minor version number (the `y` in `x.y.z`) should match the minor version of the Kubernetes version that is utilized by the apiserver-network-proxy. The patch level version number (the `z` in `x.y.z`) should increase by one unless a new minor version is being created, in which case it should be `0`.
 
-    In the master branch, choose the appropriate commit, and determine a patch version for the latest minor version (currently 0.1).
+    In the master branch, choose the appropriate commit, and determine a patch version based on the required Kubernetes version and the current patch level.
 
     Example commands for `HEAD` of `master` branch. (Assumes you have `git remote add upstream git@github.com:kubernetes-sigs/apiserver-network-proxy.git`.)
 
@@ -40,7 +40,18 @@ Creating a new release of network proxy involves releasing a new version of the 
 
     Once the two tags are created, the konnectivity-client can be imported as a library in kubernetes/kubernetes and other go programs.
 
-2. To publish the proxy server and proxy agent images, they must be promoted from the k8s staging repo. An example PR can be seen here: [https://github.com/kubernetes/k8s.io/pull/1602](https://github.com/kubernetes/k8s.io/pull/1602)
+2. If increasing the minor version (the `y` in `x.y.z`), a new release branch must be created. The name of this branch should be `release-x.y` where `x` and `y` correspond to the major and minor release numbers for apiserver-network-proxy. For example, if increasing the apiserver-network-proxy from verision `0.98.4` to `0.99.0` a new branch should be created named `release-0.99`.
+
+    After making the new tag for the release version, use the following command to create the new branch:
+
+    ```
+    # assuming a release version of 0.99.0
+    export RELEASE=release-0.99
+    git checkout -b "${RELEASE}"
+    git push upstream "${RELEASE}"
+    ```
+
+3. To publish the proxy server and proxy agent images, they must be promoted from the k8s staging repo. An example PR can be seen here: [https://github.com/kubernetes/k8s.io/pull/5686](https://github.com/kubernetes/k8s.io/pull/5686)
 
     The SHA in the PR corresponds to the SHA of the image within the k8s staging repo. (This is under the **Name** column)
 
@@ -50,7 +61,7 @@ Creating a new release of network proxy involves releasing a new version of the 
 
     <img src="https://user-images.githubusercontent.com/7691399/106816880-09040600-6644-11eb-8907-f50c53dfe475.png" width="400px" height="300px" /> <img src="https://user-images.githubusercontent.com/7691399/106815303-a4e04280-6641-11eb-82d2-4ef4fb34437a.png" width="400px" height="300px" />
 
-3. Finally, update kubernetes/kubernetes with the new client library and images.
+4. Finally, update kubernetes/kubernetes with the new client library and images.
 
     An example PR can be found here: [https://github.com/kubernetes/kubernetes/pull/94983](https://github.com/kubernetes/kubernetes/pull/94983)
 

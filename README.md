@@ -17,14 +17,35 @@ You can reach the maintainers of this project at:
 
 Participation in the Kubernetes community is governed by the [Kubernetes Code of Conduct](code-of-conduct.md).
 
-## Releases
+## Versioning and releases
 
-To reduce version-skew risk, it is recommended to match apiserver-network-proxy server & client
+As of the `0.28.0` release, the apiserver-network-proxy project is changing its versioning and release
+process. Going forward the project will adhere to these rules:
+
+* This project follows semantic versioning (eg `x.y.z`) for releases and tags.
+* Tags indicate readiness for a release, and project maintainers will create corresponding releases.
+* Releases and tags align with the Kubernetes minor release versions (the `y` in `x.y.z`). For instance,
+  if Kubernetes releases version `1.99.0`, the corresponding release and tag for apiserver-network-proxy will be
+  `0.99.0`.
+* Branches will be created when the minor release version (the `y` in `x.y.z`) is increased, and follow the
+  pattern of `release-x.y`. For instance, if version `0.99.0` has been released, the corresponding branch
+  will be named `release-0.99`.
+* Patch level versions for releases and tags will be updated when patches are applied to the specific release
+  branch. For example, if patches must be applied to the `release-0.99` branch and a new release is created,
+  the version will be `0.99.1`. In this manner the patch level version number (the `z` in `x.y.z`) may not
+  match the Kubernetes patch level.
+
+For Kubernetes version `1.28.0+`, we recommend using the tag that corresponds to the same minor version
+number. For example, if you are working with Kubernetes version `1.99`, please utilize the latest `0.99`
+tag and refer to the `release-0.99` branch. It is important to note that there may be disparities in the
+patch level between apiserver-network-proxy and Kubernetes.
+
+For Kubernetes version `<=1.27`, it is recommended to match apiserver-network-proxy server & client
 minor release versions. With Kubernetes, this means:
 
-- Kubernetes v1.27+: `0.1.X` tags, `master` branch
-- Kubernetes versions v1.23 to v1.27: `0.0.X` tags, `release-0.0` branch
-- Kubernetes versions up to v1.23: apiserver-network-proxy versions up to `v0.0.30`.
+* Kubernetes versions v1.26 through v1.27: `0.1.X` tags, `release-0.1` branch.
+* Kubernetes versions v1.23 through v1.25: `0.0.X` tags, `release-0.0` branch.
+* Kubernetes versions up to v1.23: apiserver-network-proxy versions up to `v0.0.30`.
   Refer to the kubernetes go.mod file for the specific release version.
 
 ## Build
