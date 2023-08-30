@@ -359,7 +359,7 @@ func prepareFrontendConn(ctrl *gomock.Controller) *agentmock.MockAgentService_Co
 	return frontendConn
 }
 
-func prepareAgentConnMD(ctrl *gomock.Controller, proxyServer *ProxyServer) *agentmock.MockAgentService_ConnectServer {
+func prepareAgentConnMD(ctrl *gomock.Controller, proxyServer *ProxyServer) (*agentmock.MockAgentService_ConnectServer, Backend) {
 	// prepare the the connection to agent of proxy-server
 	agentConn := agentmock.NewMockAgentService_ConnectServer(ctrl)
 	agentID := uuid.New().String()
@@ -372,8 +372,9 @@ func prepareAgentConnMD(ctrl *gomock.Controller, proxyServer *ProxyServer) *agen
 	}
 	agentConnCtx := metadata.NewIncomingContext(context.Background(), agentConnMD)
 	agentConn.EXPECT().Context().Return(agentConnCtx).AnyTimes()
-	_ = proxyServer.addBackend(agentID, agentConn)
-	return agentConn
+	backend := NewBackend(agentConn)
+	proxyServer.addBackend(agentID, backend)
+	return agentConn, backend
 }
 
 func baseServerProxyTestWithoutBackend(t *testing.T, validate func(*agentmock.MockAgentService_ConnectServer)) {
@@ -397,7 +398,7 @@ func baseServerProxyTestWithBackend(t *testing.T, validate func(*agentmock.MockA
 	// prepare proxy server
 	proxyServer := NewProxyServer(uuid.New().String(), []ProxyStrategy{ProxyStrategyDefault}, 1, &AgentTokenAuthenticationOptions{})
 
-	agentConn := prepareAgentConnMD(ctrl, proxyServer)
+	agentConn, _ := prepareAgentConnMD(ctrl, proxyServer)
 
 	validate(frontendConn, agentConn)
 
@@ -604,14 +605,14 @@ func TestReadyBackendsMetric(t *testing.T) {
 	p := NewProxyServer(uuid.New().String(), []ProxyStrategy{ProxyStrategyDefault}, 1, &AgentTokenAuthenticationOptions{})
 	assertReadyBackendsMetric(t, 0)
 
-	agentConn := prepareAgentConnMD(ctrl, p)
+	agentConn, backend := prepareAgentConnMD(ctrl, p)
 	assertReadyBackendsMetric(t, 1)
 
 	agentID, err := agentID(agentConn)
 	if err != nil {
 		t.Fatalf("Could not get agentID: %v", err)
 	}
-	p.removeBackend(agentID, agentConn)
+	p.removeBackend(agentID, backend)
 	assertReadyBackendsMetric(t, 0)
 }
 

@@ -30,7 +30,6 @@ import (
 	"k8s.io/apimachinery/pkg/util/wait"
 	"sigs.k8s.io/apiserver-network-proxy/konnectivity-client/pkg/client"
 	"sigs.k8s.io/apiserver-network-proxy/pkg/server"
-	"sigs.k8s.io/apiserver-network-proxy/proto/agent"
 	"sigs.k8s.io/apiserver-network-proxy/proto/header"
 )
 
@@ -74,26 +73,25 @@ func getTestClient(front string, t *testing.T) *http.Client {
 // singleTimeManager makes sure that a backend only serves one request.
 type singleTimeManager struct {
 	mu       sync.Mutex
-	backends map[string]agent.AgentService_ConnectServer
+	backends map[string]server.Backend
 	used     map[string]struct{}
 }
 
-func (s *singleTimeManager) AddBackend(agentID string, _ header.IdentifierType, conn agent.AgentService_ConnectServer) server.Backend {
+func (s *singleTimeManager) AddBackend(agentID string, _ header.IdentifierType, backend server.Backend) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	s.backends[agentID] = conn
-	return conn
+	s.backends[agentID] = backend
 }
 
-func (s *singleTimeManager) RemoveBackend(agentID string, _ header.IdentifierType, conn agent.AgentService_ConnectServer) {
+func (s *singleTimeManager) RemoveBackend(agentID string, _ header.IdentifierType, backend server.Backend) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	v, ok := s.backends[agentID]
 	if !ok {
 		panic(fmt.Errorf("no backends found for %s", agentID))
 	}
-	if v != conn {
-		panic(fmt.Errorf("recorded connection %v does not match conn %v", v, conn))
+	if v != backend {
+		panic(fmt.Errorf("recorded backend %v does not match %v", &v, backend))
 	}
 	delete(s.backends, agentID)
 }
@@ -121,7 +119,7 @@ func (s *singleTimeManager) NumBackends() int {
 func newSingleTimeGetter(m *server.DefaultBackendManager) *singleTimeManager {
 	return &singleTimeManager{
 		used:     make(map[string]struct{}),
-		backends: make(map[string]agent.AgentService_ConnectServer),
+		backends: make(map[string]server.Backend),
 	}
 }
 
@@ -145,8 +143,8 @@ func TestConcurrentClientRequest(t *testing.T) {
 	stopCh := make(chan struct{})
 	defer close(stopCh)
 	// Run two agents
-	cs1 := runAgent(proxy.agent, stopCh)
-	cs2 := runAgent(proxy.agent, stopCh)
+	cs1 := runAgentWithID("a", proxy.agent, stopCh)
+	cs2 := runAgentWithID("b", proxy.agent, stopCh)
 	waitForConnectedServerCount(t, 1, cs1)
 	waitForConnectedServerCount(t, 1, cs2)
 
