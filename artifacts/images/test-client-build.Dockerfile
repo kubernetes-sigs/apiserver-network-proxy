@@ -1,5 +1,5 @@
 # Build the client binary
-FROM golang:1.19.9 as builder
+FROM golang:1.19.13 as builder
 
 # Copy in the go src
 WORKDIR /go/src/sigs.k8s.io/apiserver-network-proxy
