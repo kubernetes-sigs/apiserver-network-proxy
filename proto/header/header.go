@@ -61,7 +61,7 @@ const (
 )
 
 // GenAgentIdentifiers generates an Identifiers based on the input string, the
-// input string should be a comma-seprated list with each item in the format
+// input string should be a comma-separated list with each item in the format
 // of <IdentifierType>=<address>
 func GenAgentIdentifiers(addrs string) (Identifiers, error) {
 	var agentIDs Identifiers
