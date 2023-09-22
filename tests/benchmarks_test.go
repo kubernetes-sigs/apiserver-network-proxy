@@ -39,17 +39,11 @@ func BenchmarkLargeResponse_GRPC(b *testing.B) {
 	server := httptest.NewServer(newSizedServer(length, chunks))
 	defer server.Close()
 
-	stopCh := make(chan struct{})
-	defer close(stopCh)
+	ps := runGRPCProxyServer(b)
+	defer ps.Stop()
 
-	proxy, cleanup, err := runGRPCProxyServer()
-	if err != nil {
-		b.Fatal(err)
-	}
-	defer cleanup()
-
-	clientset := runAgent(proxy.agent, stopCh)
-	waitForConnectedServerCount(b, 1, clientset)
+	a := runAgent(b, ps.AgentAddr())
+	waitForConnectedServerCount(b, 1, a)
 
 	req, err := http.NewRequest("GET", server.URL, nil)
 	if err != nil {
@@ -59,7 +53,7 @@ func BenchmarkLargeResponse_GRPC(b *testing.B) {
 
 	for n := 0; n < b.N; n++ {
 		// run test client
-		tunnel, err := client.CreateSingleUseGrpcTunnel(ctx, proxy.front, grpc.WithInsecure())
+		tunnel, err := client.CreateSingleUseGrpcTunnel(ctx, ps.FrontAddr(), grpc.WithInsecure())
 		if err != nil {
 			b.Fatal(err)
 		}
@@ -113,17 +107,11 @@ func BenchmarkLargeRequest_GRPC(b *testing.B) {
 	}))
 	defer server.Close()
 
-	stopCh := make(chan struct{})
-	defer close(stopCh)
+	ps := runGRPCProxyServer(b)
+	defer ps.Stop()
 
-	proxy, cleanup, err := runGRPCProxyServer()
-	if err != nil {
-		b.Fatal(err)
-	}
-	defer cleanup()
-
-	clientset := runAgent(proxy.agent, stopCh)
-	waitForConnectedServerCount(b, 1, clientset)
+	a := runAgent(b, ps.AgentAddr())
+	waitForConnectedServerCount(b, 1, a)
 
 	bodyBytes := make([]byte, length)
 	body := bytes.NewReader(bodyBytes)
@@ -134,7 +122,7 @@ func BenchmarkLargeRequest_GRPC(b *testing.B) {
 	req.Close = true
 	for n := 0; n < b.N; n++ {
 		// run test client
-		tunnel, err := client.CreateSingleUseGrpcTunnel(ctx, proxy.front, grpc.WithInsecure())
+		tunnel, err := client.CreateSingleUseGrpcTunnel(ctx, ps.FrontAddr(), grpc.WithInsecure())
 		if err != nil {
 			b.Fatal(err)
 		}

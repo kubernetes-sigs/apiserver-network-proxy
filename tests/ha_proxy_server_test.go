@@ -30,6 +30,7 @@ import (
 
 	"google.golang.org/grpc"
 	"sigs.k8s.io/apiserver-network-proxy/konnectivity-client/pkg/client"
+	"sigs.k8s.io/apiserver-network-proxy/tests/framework"
 )
 
 type tcpLB struct {
@@ -111,22 +112,12 @@ func (lb *tcpLB) randomBackend() string {
 
 const haServerCount = 3
 
-func setupHAProxyServer(t *testing.T) ([]proxy, []func()) {
-	proxy1, _, cleanup1, err := runGRPCProxyServerWithServerCount(haServerCount)
-	if err != nil {
-		t.Fatal(err)
+func setupHAProxyServer(t *testing.T) []framework.ProxyServer {
+	ps := make([]framework.ProxyServer, haServerCount)
+	for i := 0; i < haServerCount; i++ {
+		ps[i] = runGRPCProxyServerWithServerCount(t, haServerCount)
 	}
-
-	proxy2, _, cleanup2, err := runGRPCProxyServerWithServerCount(haServerCount)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	proxy3, _, cleanup3, err := runGRPCProxyServerWithServerCount(haServerCount)
-	if err != nil {
-		t.Fatal(err)
-	}
-	return []proxy{proxy1, proxy2, proxy3}, []func(){cleanup1, cleanup2, cleanup3}
+	return ps
 }
 
 func TestBasicHAProxyServer_GRPC(t *testing.T) {
@@ -136,59 +127,51 @@ func TestBasicHAProxyServer_GRPC(t *testing.T) {
 	stopCh := make(chan struct{})
 	defer close(stopCh)
 
-	proxy, cleanups := setupHAProxyServer(t)
+	proxy := setupHAProxyServer(t)
 
 	lb := tcpLB{
 		backends: []string{
-			proxy[0].agent,
-			proxy[1].agent,
-			proxy[2].agent,
+			proxy[0].AgentAddr(),
+			proxy[1].AgentAddr(),
+			proxy[2].AgentAddr(),
 		},
 		t: t,
 	}
 	lbAddr := lb.serve(stopCh)
 
-	clientset := runAgent(lbAddr, stopCh)
-	waitForConnectedServerCount(t, 3, clientset)
-	if cc := clientset.ClientsCount(); cc != 3 {
-		t.Fatalf("Expected 3 clients, got %d", cc)
-	}
+	a := runAgent(t, lbAddr)
+	defer a.Stop()
+	waitForConnectedServerCount(t, 3, a)
 
 	// run test client
-	testProxyServer(t, proxy[0].front, server.URL)
-	testProxyServer(t, proxy[1].front, server.URL)
-	testProxyServer(t, proxy[2].front, server.URL)
+	testProxyServer(t, proxy[0].FrontAddr(), server.URL)
+	testProxyServer(t, proxy[1].FrontAddr(), server.URL)
+	testProxyServer(t, proxy[2].FrontAddr(), server.URL)
 
 	t.Logf("basic HA proxy server test passed")
 
 	// interrupt the HA server
-	lb.removeBackend(proxy[0].agent)
-	cleanups[0]()
+	lb.removeBackend(proxy[0].AgentAddr())
+	proxy[0].Stop()
 
 	// give the agent some time to detect the disconnection
-	waitForConnectedServerCount(t, 2, clientset)
+	waitForConnectedServerCount(t, 2, a)
 
-	proxy4, _, cleanup4, err := runGRPCProxyServerWithServerCount(haServerCount)
-	if err != nil {
-		t.Fatal(err)
-	}
-	lb.addBackend(proxy4.agent)
+	proxy4 := runGRPCProxyServerWithServerCount(t, haServerCount)
+	lb.addBackend(proxy4.AgentAddr())
 	defer func() {
-		cleanups[1]()
-		cleanups[2]()
-		cleanup4()
+		proxy[1].Stop()
+		proxy[2].Stop()
+		proxy4.Stop()
 	}()
 
 	// wait for the new server to be connected.
-	waitForConnectedServerCount(t, 3, clientset)
-	if cc := clientset.ClientsCount(); cc != 3 && cc != 4 {
-		t.Fatalf("Expected 3 or 4 clients, got %d", cc)
-	}
+	waitForConnectedServerCount(t, 3, a)
 
 	// run test client
-	testProxyServer(t, proxy[1].front, server.URL)
-	testProxyServer(t, proxy[2].front, server.URL)
-	testProxyServer(t, proxy4.front, server.URL)
+	testProxyServer(t, proxy[1].FrontAddr(), server.URL)
+	testProxyServer(t, proxy[2].FrontAddr(), server.URL)
+	testProxyServer(t, proxy4.FrontAddr(), server.URL)
 }
 
 func testProxyServer(t *testing.T, front string, target string) {
