@@ -359,21 +359,24 @@ func prepareFrontendConn(ctrl *gomock.Controller) *agentmock.MockAgentService_Co
 	return frontendConn
 }
 
-func prepareAgentConnMD(ctrl *gomock.Controller, proxyServer *ProxyServer) (*agentmock.MockAgentService_ConnectServer, Backend) {
+func prepareAgentConnMD(t testing.TB, ctrl *gomock.Controller, proxyServer *ProxyServer) (*agentmock.MockAgentService_ConnectServer, Backend) {
+	t.Helper()
 	// prepare the the connection to agent of proxy-server
 	agentConn := agentmock.NewMockAgentService_ConnectServer(ctrl)
-	agentID := uuid.New().String()
 	agentConnMD := metadata.MD{
 		":authority":       []string{"127.0.0.1:8091"},
-		"agentid":          []string{agentID},
+		"agentid":          []string{uuid.New().String()},
 		"agentidentifiers": []string{},
 		"content-type":     []string{"application/grpc"},
 		"user-agent":       []string{"grpc-go/1.42.0"},
 	}
 	agentConnCtx := metadata.NewIncomingContext(context.Background(), agentConnMD)
 	agentConn.EXPECT().Context().Return(agentConnCtx).AnyTimes()
-	backend := NewBackend(agentConn)
-	proxyServer.addBackend(agentID, backend)
+	backend, err := NewBackend(agentConn)
+	if err != nil {
+		t.Fatalf("Unexpected NewBackend error: %v", err)
+	}
+	proxyServer.addBackend(backend)
 	return agentConn, backend
 }
 
@@ -398,7 +401,7 @@ func baseServerProxyTestWithBackend(t *testing.T, validate func(*agentmock.MockA
 	// prepare proxy server
 	proxyServer := NewProxyServer(uuid.New().String(), []ProxyStrategy{ProxyStrategyDefault}, 1, &AgentTokenAuthenticationOptions{})
 
-	agentConn, _ := prepareAgentConnMD(ctrl, proxyServer)
+	agentConn, _ := prepareAgentConnMD(t, ctrl, proxyServer)
 
 	validate(frontendConn, agentConn)
 
@@ -605,14 +608,10 @@ func TestReadyBackendsMetric(t *testing.T) {
 	p := NewProxyServer(uuid.New().String(), []ProxyStrategy{ProxyStrategyDefault}, 1, &AgentTokenAuthenticationOptions{})
 	assertReadyBackendsMetric(t, 0)
 
-	agentConn, backend := prepareAgentConnMD(ctrl, p)
+	_, backend := prepareAgentConnMD(t, ctrl, p)
 	assertReadyBackendsMetric(t, 1)
 
-	agentID, err := agentID(agentConn)
-	if err != nil {
-		t.Fatalf("Could not get agentID: %v", err)
-	}
-	p.removeBackend(agentID, backend)
+	p.removeBackend(backend)
 	assertReadyBackendsMetric(t, 0)
 }
 

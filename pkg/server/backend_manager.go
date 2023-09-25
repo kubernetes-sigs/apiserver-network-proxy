@@ -80,7 +80,8 @@ type Backend interface {
 	Send(p *client.Packet) error
 	Recv() (*client.Packet, error)
 	Context() context.Context
-	GetAgentIdentifiers() (header.Identifiers, error)
+	GetAgentID() string
+	GetAgentIdentifiers() header.Identifiers
 }
 
 var _ Backend = &backend{}
@@ -89,6 +90,10 @@ type backend struct {
 	sendLock sync.Mutex
 	recvLock sync.Mutex
 	conn     agent.AgentService_ConnectServer
+
+	// cached from conn.Context()
+	id     string
+	idents header.Identifiers
 }
 
 func (b *backend) Send(p *client.Packet) error {
@@ -125,25 +130,53 @@ func (b *backend) Context() context.Context {
 	return b.conn.Context()
 }
 
-func (b *backend) GetAgentIdentifiers() (header.Identifiers, error) {
+func (b *backend) GetAgentID() string {
+	return b.id
+}
+
+func (b *backend) GetAgentIdentifiers() header.Identifiers {
+	return b.idents
+}
+
+func getAgentID(stream agent.AgentService_ConnectServer) (string, error) {
+	md, ok := metadata.FromIncomingContext(stream.Context())
+	if !ok {
+		return "", fmt.Errorf("failed to get context")
+	}
+	agentIDs := md.Get(header.AgentID)
+	if len(agentIDs) != 1 {
+		return "", fmt.Errorf("expected one agent ID in the context, got %v", agentIDs)
+	}
+	return agentIDs[0], nil
+}
+
+func getAgentIdentifiers(conn agent.AgentService_ConnectServer) (header.Identifiers, error) {
 	var agentIdentifiers header.Identifiers
-	md, ok := metadata.FromIncomingContext(b.Context())
+	md, ok := metadata.FromIncomingContext(conn.Context())
 	if !ok {
 		return agentIdentifiers, fmt.Errorf("failed to get metadata from context")
 	}
-	agentIDs := md.Get(header.AgentIdentifiers)
-	if len(agentIDs) > 1 {
-		return agentIdentifiers, fmt.Errorf("expected at most one set of agent IDs in the context, got %v", agentIDs)
+	agentIdent := md.Get(header.AgentIdentifiers)
+	if len(agentIdent) > 1 {
+		return agentIdentifiers, fmt.Errorf("expected at most one set of agent identifiers in the context, got %v", agentIdent)
 	}
-	if len(agentIDs) == 0 {
+	if len(agentIdent) == 0 {
 		return agentIdentifiers, nil
 	}
 
-	return header.GenAgentIdentifiers(agentIDs[0])
+	return header.GenAgentIdentifiers(agentIdent[0])
 }
 
-func NewBackend(conn agent.AgentService_ConnectServer) Backend {
-	return &backend{conn: conn}
+func NewBackend(conn agent.AgentService_ConnectServer) (Backend, error) {
+	agentID, err := getAgentID(conn)
+	if err != nil {
+		return nil, err
+	}
+	agentIdentifiers, err := getAgentIdentifiers(conn)
+	if err != nil {
+		return nil, err
+	}
+	return &backend{conn: conn, id: agentID, idents: agentIdentifiers}, nil
 }
 
 // BackendStorage is an interface to manage the storage of the backend
