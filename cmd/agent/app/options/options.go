@@ -18,8 +18,10 @@ package options
 
 import (
 	"fmt"
+	"net"
 	"net/url"
 	"os"
+	"strconv"
 	"time"
 
 	"github.com/google/uuid"
@@ -81,7 +83,7 @@ type GrpcProxyAgentOptions struct {
 
 func (o *GrpcProxyAgentOptions) ClientSetConfig(dialOptions ...grpc.DialOption) *agent.ClientSetConfig {
 	return &agent.ClientSetConfig{
-		Address:                 fmt.Sprintf("%s:%d", o.ProxyServerHost, o.ProxyServerPort),
+		Address:                 net.JoinHostPort(o.ProxyServerHost, strconv.Itoa(o.ProxyServerPort)),
 		AgentID:                 o.AgentID,
 		AgentIdentifiers:        o.AgentIdentifiers,
 		SyncInterval:            o.SyncInterval,
