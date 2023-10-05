@@ -22,10 +22,10 @@ import (
 	"crypto/tls"
 	"flag"
 	"fmt"
-	"golang.org/x/net/http2"
 	"io"
 	"net"
 	"net/http"
+	"net/url"
 	"os"
 	"os/signal"
 	runpprof "runtime/pprof"
@@ -35,6 +35,7 @@ import (
 
 	"github.com/spf13/cobra"
 	"github.com/spf13/pflag"
+	"golang.org/x/net/http2"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials"
 	"k8s.io/klog/v2"
@@ -369,10 +370,14 @@ func configureHTTP2Transport(t *http.Transport) error {
 }
 
 func (c *Client) makeRequest(o *GrpcProxyClientOptions, client *http.Client) error {
-	requestURL := fmt.Sprintf("%s://%s:%d/%s", o.requestProto, o.requestHost, o.requestPort, o.requestPath)
-	request, err := http.NewRequest("GET", requestURL, nil)
+	requestURL := url.URL{
+		Scheme: o.requestProto,
+		Host:   joinHostPort(o.requestHost, o.requestPort),
+		Path:   o.requestPath,
+	}
+	request, err := http.NewRequest("GET", requestURL.String(), nil)
 	if err != nil {
-		return fmt.Errorf("failed to create request %s to send, got %v", requestURL, err)
+		return fmt.Errorf("failed to create request %v to send, got %v", requestURL, err)
 	}
 	response, err := client.Do(request)
 	if err != nil {
@@ -439,13 +444,13 @@ func (c *Client) getUDSDialer(o *GrpcProxyClientOptions) (func(ctx context.Conte
 			return nil, fmt.Errorf("failed to create tunnel %s, got %v", o.proxyUdsName, err)
 		}
 
-		requestAddress := fmt.Sprintf("%s:%d", o.requestHost, o.requestPort)
+		requestAddress := joinHostPort(o.requestHost, o.requestPort)
 		proxyConn, err = tunnel.DialContext(ctx, "tcp", requestAddress)
 		if err != nil {
 			return nil, fmt.Errorf("failed to dial request %s, got %v", requestAddress, err)
 		}
 	case "http-connect":
-		requestAddress := fmt.Sprintf("%s:%d", o.requestHost, o.requestPort)
+		requestAddress := joinHostPort(o.requestHost, o.requestPort)
 
 		proxyConn, err = net.Dial("unix", o.proxyUdsName)
 		if err != nil {
@@ -509,20 +514,20 @@ func (c *Client) getMTLSDialer(o *GrpcProxyClientOptions) (func(ctx context.Cont
 	case "grpc":
 		transportCreds := credentials.NewTLS(tlsConfig)
 		dialOption := grpc.WithTransportCredentials(transportCreds)
-		serverAddress := fmt.Sprintf("%s:%d", o.proxyHost, o.proxyPort)
+		serverAddress := joinHostPort(o.proxyHost, o.proxyPort)
 		tunnel, err := client.CreateSingleUseGrpcTunnel(ctx, serverAddress, dialOption)
 		if err != nil {
 			return nil, fmt.Errorf("failed to create tunnel %s, got %v", serverAddress, err)
 		}
 
-		requestAddress := fmt.Sprintf("%s:%d", o.requestHost, o.requestPort)
+		requestAddress := joinHostPort(o.requestHost, o.requestPort)
 		proxyConn, err = tunnel.DialContext(ctx, "tcp", requestAddress)
 		if err != nil {
 			return nil, fmt.Errorf("failed to dial request %s, got %v", requestAddress, err)
 		}
 	case "http-connect":
-		proxyAddress := fmt.Sprintf("%s:%d", o.proxyHost, o.proxyPort)
-		requestAddress := fmt.Sprintf("%s:%d", o.requestHost, o.requestPort)
+		proxyAddress := joinHostPort(o.proxyHost, o.proxyPort)
+		requestAddress := joinHostPort(o.requestHost, o.requestPort)
 
 		proxyConn, err = tls.Dial("tcp", proxyAddress, tlsConfig)
 		if err != nil {
@@ -554,4 +559,8 @@ func (c *Client) getMTLSDialer(o *GrpcProxyClientOptions) (func(ctx context.Cont
 	return func(ctx context.Context, network, addr string) (net.Conn, error) {
 		return proxyConn, nil
 	}, nil
+}
+
+func joinHostPort(host string, port int) string {
+	return net.JoinHostPort(host, strconv.Itoa(port))
 }

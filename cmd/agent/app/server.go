@@ -182,7 +182,9 @@ func (a *Agent) runAdminServer(o *options.GrpcProxyAgentOptions) error {
 		if err != nil {
 			host = r.Host
 		}
-		http.Redirect(w, r, fmt.Sprintf("%s:%d%s", host, o.HealthServerPort, r.URL.Path), http.StatusMovedPermanently)
+		dest := *r.URL
+		dest.Host = net.JoinHostPort(host, strconv.Itoa(o.HealthServerPort))
+		http.Redirect(w, r, dest.String(), http.StatusMovedPermanently)
 	}))
 	if o.EnableProfiling {
 		muxHandler.HandleFunc("/debug/pprof", util.RedirectTo("/debug/pprof/"))
