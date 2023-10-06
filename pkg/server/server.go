@@ -255,15 +255,12 @@ func (s *ProxyServer) getBackend(reqHost string) (Backend, error) {
 	return nil, &ErrNotFound{}
 }
 
-func (s *ProxyServer) addBackend(agentID string, backend Backend) {
+func (s *ProxyServer) addBackend(backend Backend) {
+	agentID := backend.GetAgentID()
 	for i := 0; i < len(s.BackendManagers); i++ {
 		switch s.BackendManagers[i].(type) {
 		case *DestHostBackendManager:
-			agentIdentifiers, err := backend.GetAgentIdentifiers()
-			if err != nil {
-				klog.ErrorS(err, "fail to get the agent identifiers", "agentID", agentID)
-				break
-			}
+			agentIdentifiers := backend.GetAgentIdentifiers()
 			for _, ipv4 := range agentIdentifiers.IPv4 {
 				klog.V(5).InfoS("Add the agent to DestHostBackendManager", "agent address", ipv4)
 				s.BackendManagers[i].AddBackend(ipv4, header.IPv4, backend)
@@ -277,11 +274,7 @@ func (s *ProxyServer) addBackend(agentID string, backend Backend) {
 				s.BackendManagers[i].AddBackend(host, header.Host, backend)
 			}
 		case *DefaultRouteBackendManager:
-			agentIdentifiers, err := backend.GetAgentIdentifiers()
-			if err != nil {
-				klog.ErrorS(err, "fail to get the agent identifiers", "agentID", agentID)
-				break
-			}
+			agentIdentifiers := backend.GetAgentIdentifiers()
 			if agentIdentifiers.DefaultRoute {
 				klog.V(5).InfoS("Add the agent to DefaultRouteBackendManager", "agentID", agentID)
 				s.BackendManagers[i].AddBackend(agentID, header.DefaultRoute, backend)
@@ -294,15 +287,12 @@ func (s *ProxyServer) addBackend(agentID string, backend Backend) {
 	return
 }
 
-func (s *ProxyServer) removeBackend(agentID string, backend Backend) {
+func (s *ProxyServer) removeBackend(backend Backend) {
+	agentID := backend.GetAgentID()
 	for _, bm := range s.BackendManagers {
 		switch bm.(type) {
 		case *DestHostBackendManager:
-			agentIdentifiers, err := backend.GetAgentIdentifiers()
-			if err != nil {
-				klog.ErrorS(err, "fail to get the agent identifiers", "agentID", agentID)
-				break
-			}
+			agentIdentifiers := backend.GetAgentIdentifiers()
 			for _, ipv4 := range agentIdentifiers.IPv4 {
 				klog.V(5).InfoS("Remove the agent from the DestHostBackendManager", "agentHost", ipv4)
 				bm.RemoveBackend(ipv4, header.IPv4, backend)
@@ -316,11 +306,7 @@ func (s *ProxyServer) removeBackend(agentID string, backend Backend) {
 				bm.RemoveBackend(host, header.Host, backend)
 			}
 		case *DefaultRouteBackendManager:
-			agentIdentifiers, err := backend.GetAgentIdentifiers()
-			if err != nil {
-				klog.ErrorS(err, "fail to get the agent identifiers", "agentID", agentID)
-				break
-			}
+			agentIdentifiers := backend.GetAgentIdentifiers()
 			if agentIdentifiers.DefaultRoute {
 				klog.V(5).InfoS("Remove the agent from the DefaultRouteBackendManager", "agentID", agentID)
 				bm.RemoveBackend(agentID, header.DefaultRoute, backend)
@@ -694,18 +680,6 @@ func (s *ProxyServer) serveRecvFrontend(frontend *GrpcFrontend, recvCh <-chan *c
 	}
 }
 
-func agentID(stream agent.AgentService_ConnectServer) (string, error) {
-	md, ok := metadata.FromIncomingContext(stream.Context())
-	if !ok {
-		return "", fmt.Errorf("failed to get context")
-	}
-	agentIDs := md.Get(header.AgentID)
-	if len(agentIDs) != 1 {
-		return "", fmt.Errorf("expected one agent ID in the context, got %v", agentIDs)
-	}
-	return agentIDs[0], nil
-}
-
 func (s *ProxyServer) validateAuthToken(ctx context.Context, token string) (username string, err error) {
 	trReq := &authv1.TokenReview{
 		Spec: authv1.TokenReviewSpec{
@@ -783,10 +757,12 @@ func (s *ProxyServer) Connect(stream agent.AgentService_ConnectServer) error {
 	metrics.Metrics.ConnectionInc(metrics.Connect)
 	defer metrics.Metrics.ConnectionDec(metrics.Connect)
 
-	agentID, err := agentID(stream)
+	backend, err := NewBackend(stream)
 	if err != nil {
+		klog.ErrorS(err, "Invalid backend")
 		return err
 	}
+	agentID := backend.GetAgentID()
 
 	klog.V(5).InfoS("Connect request from agent", "agentID", agentID, "serverID", s.serverID)
 	labels := runpprof.Labels(
@@ -810,9 +786,8 @@ func (s *ProxyServer) Connect(stream agent.AgentService_ConnectServer) error {
 	}
 
 	klog.V(2).InfoS("Agent connected", "agentID", agentID, "serverID", s.serverID)
-	backend := NewBackend(stream)
-	s.addBackend(agentID, backend)
-	defer s.removeBackend(agentID, backend)
+	s.addBackend(backend)
+	defer s.removeBackend(backend)
 
 	recvCh := make(chan *client.Packet, xfrChannelSize)
 
@@ -829,6 +804,7 @@ func (s *ProxyServer) Connect(stream agent.AgentService_ConnectServer) error {
 }
 
 func (s *ProxyServer) readBackendToChannel(backend Backend, recvCh chan *client.Packet, stopCh chan error) {
+	agentID := backend.GetAgentID()
 	for {
 		in, err := backend.Recv()
 		if err == io.EOF {
@@ -1017,6 +993,7 @@ func (s *ProxyServer) serveRecvBackend(backend Backend, agentID string, recvCh <
 }
 
 func (s *ProxyServer) sendBackendClose(backend Backend, connectID int64, random int64, reason string) {
+	agentID := backend.GetAgentID()
 	pkt := &client.Packet{
 		Type: client.PacketType_CLOSE_REQ,
 		Payload: &client.Packet_CloseRequest{
@@ -1031,6 +1008,7 @@ func (s *ProxyServer) sendBackendClose(backend Backend, connectID int64, random 
 }
 
 func (s *ProxyServer) sendBackendDialClose(backend Backend, random int64, reason string) {
+	agentID := backend.GetAgentID()
 	pkt := &client.Packet{
 		Type: client.PacketType_DIAL_CLS,
 		Payload: &client.Packet_CloseDial{

@@ -61,32 +61,33 @@ const (
 )
 
 // GenAgentIdentifiers generates an Identifiers based on the input string, the
-// input string should be a comma-separated list with each item in the format
-// of <IdentifierType>=<address>
+// input string should be a URL encoded mapping from IdentifierType to values.
 func GenAgentIdentifiers(addrs string) (Identifiers, error) {
-	var agentIDs Identifiers
+	var agentIdents Identifiers
 	decoded, err := url.ParseQuery(addrs)
 	if err != nil {
-		return agentIDs, fmt.Errorf("fail to parse url encoded string: %v", err)
+		return agentIdents, fmt.Errorf("fail to parse url encoded string: %v", err)
 	}
 	for idType, ids := range decoded {
 		switch IdentifierType(idType) {
 		case IPv4:
-			agentIDs.IPv4 = append(agentIDs.IPv4, ids...)
+			agentIdents.IPv4 = append(agentIdents.IPv4, ids...)
 		case IPv6:
-			agentIDs.IPv6 = append(agentIDs.IPv6, ids...)
+			agentIdents.IPv6 = append(agentIdents.IPv6, ids...)
 		case Host:
-			agentIDs.Host = append(agentIDs.Host, ids...)
+			agentIdents.Host = append(agentIdents.Host, ids...)
 		case CIDR:
-			agentIDs.CIDR = append(agentIDs.CIDR, ids...)
+			agentIdents.CIDR = append(agentIdents.CIDR, ids...)
 		case DefaultRoute:
 			defaultRouteIdentifier, err := strconv.ParseBool(ids[0])
 			if err == nil && defaultRouteIdentifier {
-				agentIDs.DefaultRoute = true
+				agentIdents.DefaultRoute = true
 			}
 		default:
-			return agentIDs, fmt.Errorf("Unknown address type: %s", idType)
+			// To support binary skew with agents that send new identifier type,
+			// fail open. The better place to validate more strictly is within the agent.
+			continue
 		}
 	}
-	return agentIDs, nil
+	return agentIdents, nil
 }
