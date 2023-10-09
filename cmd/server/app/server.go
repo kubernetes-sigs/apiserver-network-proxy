@@ -138,10 +138,12 @@ func (p *Proxy) run(o *options.ProxyRunOptions) error {
 	if err != nil {
 		return fmt.Errorf("failed to run the agent server: %v", err)
 	}
-	klog.V(1).Infoln("Starting admin server for debug connections.")
-	err = p.runAdminServer(o, server)
-	if err != nil {
-		return fmt.Errorf("failed to run the admin server: %v", err)
+	if o.AdminPort != 0 {
+		klog.V(1).Infoln("Starting admin server for debug connections.")
+		err = p.runAdminServer(o, server)
+		if err != nil {
+			return fmt.Errorf("failed to run the admin server: %v", err)
+		}
 	}
 	klog.V(1).Infoln("Starting health server for healthchecks.")
 	err = p.runHealthServer(o, server)

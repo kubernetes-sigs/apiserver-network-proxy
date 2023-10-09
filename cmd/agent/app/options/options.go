@@ -106,7 +106,7 @@ func (o *GrpcProxyAgentOptions) Flags() *pflag.FlagSet {
 	flags.StringSliceVar(&o.AlpnProtos, "alpn-proto", o.AlpnProtos, "Additional ALPN protocols to be presented when connecting to the server. Useful to distinguish between network proxy and apiserver connections that share the same destination address.")
 	flags.StringVar(&o.HealthServerHost, "health-server-host", o.HealthServerHost, "The host address to listen on, without port.")
 	flags.IntVar(&o.HealthServerPort, "health-server-port", o.HealthServerPort, "The port the health server is listening on.")
-	flags.IntVar(&o.AdminServerPort, "admin-server-port", o.AdminServerPort, "The port the admin server is listening on.")
+	flags.IntVar(&o.AdminServerPort, "admin-server-port", o.AdminServerPort, "The port the admin server is listening on. Setting to 0 disables the admin server.")
 	flags.StringVar(&o.AdminBindAddress, "admin-bind-address", o.AdminBindAddress, "Bind address for admin connections. If empty, we will bind to all interfaces.")
 	flags.BoolVar(&o.EnableProfiling, "enable-profiling", o.EnableProfiling, "enable pprof at host:admin-port/debug/pprof")
 	flags.BoolVar(&o.EnableContentionProfiling, "enable-contention-profiling", o.EnableContentionProfiling, "enable contention profiling at host:admin-port/debug/pprof/block. \"--enable-profiling\" must also be set.")
@@ -174,8 +174,8 @@ func (o *GrpcProxyAgentOptions) Validate() error {
 	if o.HealthServerPort <= 0 {
 		return fmt.Errorf("health server port %d must be greater than 0", o.HealthServerPort)
 	}
-	if o.AdminServerPort <= 0 {
-		return fmt.Errorf("admin server port %d must be greater than 0", o.AdminServerPort)
+	if o.AdminServerPort < 0 {
+		return fmt.Errorf("admin server port %d must not be negative", o.AdminServerPort)
 	}
 	if o.EnableContentionProfiling && !o.EnableProfiling {
 		return fmt.Errorf("if --enable-contention-profiling is set, --enable-profiling must also be set")

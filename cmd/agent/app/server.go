@@ -76,8 +76,10 @@ func (a *Agent) run(o *options.GrpcProxyAgentOptions) error {
 		return fmt.Errorf("failed to run health server with %v", err)
 	}
 
-	if err := a.runAdminServer(o); err != nil {
-		return fmt.Errorf("failed to run admin server with %v", err)
+	if o.AdminServerPort != 0 {
+		if err := a.runAdminServer(o); err != nil {
+			return fmt.Errorf("failed to run admin server with %v", err)
+		}
 	}
 
 	<-stopCh

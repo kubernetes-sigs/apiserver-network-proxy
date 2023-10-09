@@ -117,7 +117,7 @@ func (o *ProxyRunOptions) Flags() *pflag.FlagSet {
 	flags.BoolVar(&o.DeleteUDSFile, "delete-existing-uds-file", o.DeleteUDSFile, "If true and if file UdsName already exists, delete the file before listen on that UDS file. Default is true.")
 	flags.IntVar(&o.ServerPort, "server-port", o.ServerPort, "Port we listen for server connections on. Set to 0 for UDS.")
 	flags.StringVar(&o.ServerBindAddress, "server-bind-address", o.ServerBindAddress, "Bind address for server connections. If empty, we will bind to all interfaces.")
-	flags.IntVar(&o.AgentPort, "agent-port", o.AgentPort, "Port we listen for agent connections on.")
+	flags.IntVar(&o.AgentPort, "agent-port", o.AgentPort, "Port we listen for agent connections on. Setting to 0 disables the admin server.")
 	flags.StringVar(&o.AgentBindAddress, "agent-bind-address", o.AgentBindAddress, "Bind address for agent connections. If empty, we will bind to all interfaces.")
 	flags.IntVar(&o.AdminPort, "admin-port", o.AdminPort, "Port we listen for admin connections on.")
 	flags.StringVar(&o.AdminBindAddress, "admin-bind-address", o.AdminBindAddress, "Bind address for admin connections. If empty, we will bind to localhost.")
@@ -259,7 +259,7 @@ func (o *ProxyRunOptions) Validate() error {
 	if o.AgentPort < 1024 {
 		return fmt.Errorf("please do not try to use reserved port %d for the agent port", o.AgentPort)
 	}
-	if o.AdminPort < 1024 {
+	if o.AdminPort < 1024 && o.AdminPort != 0 {
 		return fmt.Errorf("please do not try to use reserved port %d for the admin port", o.AdminPort)
 	}
 	if o.HealthPort < 1024 {

@@ -18,10 +18,11 @@ package options
 
 import (
 	"fmt"
-	"github.com/stretchr/testify/assert"
 	"reflect"
 	"testing"
 	"time"
+
+	"github.com/stretchr/testify/assert"
 )
 
 /*
@@ -116,11 +117,11 @@ func TestValidate(t *testing.T) {
 		},
 		"ZeroAdminServerPort": {
 			fieldMap: map[string]interface{}{"AdminServerPort": 0},
-			expected: fmt.Errorf("admin server port 0 must be greater than 0"),
+			expected: nil,
 		},
 		"NegativeAdminServerPort": {
 			fieldMap: map[string]interface{}{"AdminServerPort": -1},
-			expected: fmt.Errorf("admin server port -1 must be greater than 0"),
+			expected: fmt.Errorf("admin server port -1 must not be negative"),
 		},
 		"ReservedAdminServerPort": {
 			fieldMap: map[string]interface{}{"AdminServerPort": 1023},
