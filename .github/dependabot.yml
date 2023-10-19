@@ -1,0 +1,22 @@
+version: 2
+updates:
+- package-ecosystem: docker
+  directory: /artifacts/images
+  schedule:
+    interval: weekly
+- package-ecosystem: gomod
+  directory: /
+  schedule:
+    interval: weekly
+  groups:
+    gomod-dependencies:
+      patterns:
+      - '*'
+- package-ecosystem: gomod
+  directory: /konnectivity-client
+  schedule:
+    interval: weekly
+  groups:
+    gomod-dependencies:
+      patterns:
+      - '*'
