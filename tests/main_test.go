@@ -18,6 +18,8 @@ package tests
 
 import (
 	"flag"
+	"log"
+	"os"
 	"testing"
 
 	"github.com/prometheus/client_golang/prometheus"
@@ -37,6 +39,14 @@ func TestMain(m *testing.M) {
 	klog.InitFlags(fs)
 	fs.Set("v", "1") // Set klog verbosity.
 	metricsclient.Metrics.RegisterMetrics(prometheus.DefaultRegisterer)
+
+	err := framework.InitCertsDir()
+	if err != nil {
+		log.Fatalf("Failed to write test certs: %v", err)
+	}
+	defer func() {
+		os.RemoveAll(framework.CertsDir)
+	}()
 
 	m.Run()
 }

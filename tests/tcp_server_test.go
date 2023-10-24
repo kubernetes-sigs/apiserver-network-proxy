@@ -21,9 +21,7 @@ import (
 	"net"
 	"testing"
 
-	"google.golang.org/grpc"
 	"k8s.io/klog/v2"
-	"sigs.k8s.io/apiserver-network-proxy/konnectivity-client/pkg/client"
 )
 
 func echo(conn net.Conn) {
@@ -70,7 +68,7 @@ func TestEchoServer(t *testing.T) {
 	waitForConnectedServerCount(t, 1, a)
 
 	// run test client
-	tunnel, err := client.CreateSingleUseGrpcTunnel(ctx, ps.FrontAddr(), grpc.WithInsecure())
+	tunnel, err := createSingleUseGrpcTunnel(ctx, ps.FrontAddr())
 	if err != nil {
 		t.Fatal(err)
 	}

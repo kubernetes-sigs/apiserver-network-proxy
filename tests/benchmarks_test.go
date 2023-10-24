@@ -23,9 +23,6 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
-
-	"google.golang.org/grpc"
-	"sigs.k8s.io/apiserver-network-proxy/konnectivity-client/pkg/client"
 )
 
 func BenchmarkLargeResponse_GRPC(b *testing.B) {
@@ -53,7 +50,7 @@ func BenchmarkLargeResponse_GRPC(b *testing.B) {
 
 	for n := 0; n < b.N; n++ {
 		// run test client
-		tunnel, err := client.CreateSingleUseGrpcTunnel(ctx, ps.FrontAddr(), grpc.WithInsecure())
+		tunnel, err := createSingleUseGrpcTunnel(ctx, ps.FrontAddr())
 		if err != nil {
 			b.Fatal(err)
 		}
@@ -122,7 +119,7 @@ func BenchmarkLargeRequest_GRPC(b *testing.B) {
 	req.Close = true
 	for n := 0; n < b.N; n++ {
 		// run test client
-		tunnel, err := client.CreateSingleUseGrpcTunnel(ctx, ps.FrontAddr(), grpc.WithInsecure())
+		tunnel, err := createSingleUseGrpcTunnel(ctx, ps.FrontAddr())
 		if err != nil {
 			b.Fatal(err)
 		}

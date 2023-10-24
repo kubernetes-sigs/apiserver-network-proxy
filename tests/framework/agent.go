@@ -17,9 +17,20 @@ limitations under the License.
 package framework
 
 import (
+	"context"
+	"fmt"
+	"log"
+	"net"
+	"path/filepath"
+	"strconv"
+	"sync"
+	"testing"
 	"time"
 
-	"google.golang.org/grpc"
+	"k8s.io/apimachinery/pkg/util/wait"
+
+	agentapp "sigs.k8s.io/apiserver-network-proxy/cmd/agent/app"
+	agentopts "sigs.k8s.io/apiserver-network-proxy/cmd/agent/app/options"
 	"sigs.k8s.io/apiserver-network-proxy/pkg/agent"
 )
 
@@ -29,44 +40,62 @@ type AgentOpts struct {
 }
 
 type AgentRunner interface {
-	Start(AgentOpts) (Agent, error)
+	Start(testing.TB, AgentOpts) (Agent, error)
 }
 
 type Agent interface {
 	GetConnectedServerCount() (int, error)
 	Ready() bool
-	Stop() error
+	Stop()
 }
-
 type InProcessAgentRunner struct{}
 
-func (*InProcessAgentRunner) Start(opts AgentOpts) (Agent, error) {
-	cc := agent.ClientSetConfig{
-		Address:       opts.ServerAddr,
-		AgentID:       opts.AgentID,
-		SyncInterval:  100 * time.Millisecond,
-		ProbeInterval: 100 * time.Millisecond,
-		DialOptions:   []grpc.DialOption{grpc.WithInsecure()},
+func (*InProcessAgentRunner) Start(t testing.TB, opts AgentOpts) (Agent, error) {
+	a := &agentapp.Agent{}
+	o, err := agentOptions(t, opts)
+	if err != nil {
+		return nil, err
 	}
 
+	ctx, cancel := context.WithCancel(context.Background())
 	stopCh := make(chan struct{})
-	client := cc.NewAgentClientSet(stopCh)
-	client.Serve()
+	go func() {
+		if err := a.Run(o, stopCh); err != nil {
+			log.Printf("ERROR running agent: %v", err)
+			cancel()
+		}
+	}()
 
-	return &inProcessAgent{
-		client: client,
-		stopCh: stopCh,
-	}, nil
+	healthAddr := net.JoinHostPort(o.HealthServerHost, strconv.Itoa(o.HealthServerPort))
+	if err := wait.PollImmediateWithContext(ctx, 100*time.Millisecond, wait.ForeverTestTimeout, func(context.Context) (bool, error) {
+		return checkLiveness(healthAddr), nil
+	}); err != nil {
+		close(stopCh)
+		return nil, fmt.Errorf("agent never came up: %v", err)
+	}
+
+	pa := &inProcessAgent{
+		client:     a.ClientSet(),
+		stopCh:     stopCh,
+		healthAddr: healthAddr,
+	}
+	t.Cleanup(pa.Stop)
+	return pa, nil
 }
 
 type inProcessAgent struct {
 	client *agent.ClientSet
-	stopCh chan struct{}
+
+	stopOnce sync.Once
+	stopCh   chan struct{}
+
+	healthAddr string
 }
 
-func (a *inProcessAgent) Stop() error {
-	close(a.stopCh)
-	return nil
+func (a *inProcessAgent) Stop() {
+	a.stopOnce.Do(func() {
+		close(a.stopCh)
+	})
 }
 
 func (a *inProcessAgent) GetConnectedServerCount() (int, error) {
@@ -74,5 +103,40 @@ func (a *inProcessAgent) GetConnectedServerCount() (int, error) {
 }
 
 func (a *inProcessAgent) Ready() bool {
-	return a.client.Ready()
+	return checkReadiness(a.healthAddr)
+}
+
+func agentOptions(t testing.TB, opts AgentOpts) (*agentopts.GrpcProxyAgentOptions, error) {
+	o := agentopts.NewGrpcProxyAgentOptions()
+
+	host, port, err := net.SplitHostPort(opts.ServerAddr)
+	if err != nil {
+		return nil, fmt.Errorf("failed to parse ServerAddr: %w", err)
+	}
+	o.ProxyServerHost = host
+	if o.ProxyServerPort, err = strconv.Atoi(port); err != nil {
+		return nil, fmt.Errorf("invalid server port: %w", err)
+	}
+
+	o.AgentID = opts.AgentID
+	o.SyncInterval = 100 * time.Millisecond
+	o.SyncIntervalCap = 1 * time.Second
+	o.ProbeInterval = 100 * time.Millisecond
+
+	o.AgentCert = filepath.Join(CertsDir, TestAgentCertFile)
+	o.AgentKey = filepath.Join(CertsDir, TestAgentKeyFile)
+	o.CaCert = filepath.Join(CertsDir, TestCAFile)
+
+	const localhost = "127.0.0.1"
+	o.HealthServerHost = localhost
+	o.AdminBindAddress = localhost
+
+	ports, err := FreePorts(2)
+	if err != nil {
+		return nil, err
+	}
+	o.HealthServerPort = ports[0]
+	o.AdminServerPort = ports[1]
+
+	return o, nil
 }
