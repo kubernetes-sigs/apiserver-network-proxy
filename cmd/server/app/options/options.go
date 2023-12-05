@@ -221,7 +221,7 @@ func (o *ProxyRunOptions) Validate() error {
 			return fmt.Errorf("error checking cluster CA cert %s, got %v", o.ClusterCaCert, err)
 		}
 	}
-	if o.Mode != "grpc" && o.Mode != "http-connect" {
+	if o.Mode != server.ModeGRPC && o.Mode != server.ModeHTTPConnect {
 		return fmt.Errorf("mode must be set to either 'grpc' or 'http-connect' not %q", o.Mode)
 	}
 	if o.UdsName != "" {

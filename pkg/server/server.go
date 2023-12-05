@@ -87,6 +87,11 @@ func (g *GrpcFrontend) Recv() (*client.Packet, error) {
 	return pkt, nil
 }
 
+const (
+	ModeGRPC        = "grpc"
+	ModeHTTPConnect = "http-connect"
+)
+
 type ProxyClientConnection struct {
 	Mode        string
 	HTTP        io.ReadWriter
@@ -107,10 +112,10 @@ const (
 
 func (c *ProxyClientConnection) send(pkt *client.Packet) error {
 	defer func(start time.Time) { metrics.Metrics.ObserveFrontendWriteLatency(time.Since(start)) }(time.Now())
-	if c.Mode == "grpc" {
+	if c.Mode == ModeGRPC {
 		return c.frontend.Send(pkt)
 	}
-	if c.Mode == "http-connect" {
+	if c.Mode == ModeHTTPConnect {
 		if pkt.Type == client.PacketType_CLOSE_RSP {
 			return c.CloseHTTP()
 		} else if pkt.Type == client.PacketType_DIAL_CLS {

@@ -59,7 +59,8 @@ func NewProxyCommand(p *Proxy, o *options.ProxyRunOptions) *cobra.Command {
 		Use:  "proxy",
 		Long: `A gRPC proxy server, receives requests from the API server and forwards to the agent.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return p.run(o)
+			stopCh := SetupSignalHandler()
+			return p.Run(o, stopCh)
 		},
 	}
 
@@ -81,11 +82,16 @@ func tlsCipherSuites(cipherNames []string) []uint16 {
 }
 
 type Proxy struct {
+	agentServer  *grpc.Server
+	adminServer  *http.Server
+	healthServer *http.Server
+
+	server *server.ProxyServer
 }
 
 type StopFunc func()
 
-func (p *Proxy) run(o *options.ProxyRunOptions) error {
+func (p *Proxy) Run(o *options.ProxyRunOptions, stopCh <-chan struct{}) error {
 	o.Print()
 	if err := o.Validate(); err != nil {
 		return fmt.Errorf("failed to validate server options with %v", err)
@@ -126,36 +132,39 @@ func (p *Proxy) run(o *options.ProxyRunOptions) error {
 	if err != nil {
 		return err
 	}
-	server := server.NewProxyServer(o.ServerID, ps, int(o.ServerCount), authOpt)
+	p.server = server.NewProxyServer(o.ServerID, ps, int(o.ServerCount), authOpt)
 
-	frontendStop, err := p.runFrontendServer(ctx, o, server)
+	frontendStop, err := p.runFrontendServer(ctx, o, p.server)
 	if err != nil {
 		return fmt.Errorf("failed to run the frontend server: %v", err)
 	}
+	if frontendStop != nil {
+		defer frontendStop()
+	}
 
 	klog.V(1).Infoln("Starting agent server for tunnel connections.")
-	err = p.runAgentServer(o, server)
+	err = p.runAgentServer(o, p.server)
 	if err != nil {
 		return fmt.Errorf("failed to run the agent server: %v", err)
 	}
+	defer p.agentServer.Stop()
+
 	klog.V(1).Infoln("Starting admin server for debug connections.")
-	err = p.runAdminServer(o, server)
+	err = p.runAdminServer(o, p.server)
 	if err != nil {
 		return fmt.Errorf("failed to run the admin server: %v", err)
 	}
+	defer p.adminServer.Close()
+
 	klog.V(1).Infoln("Starting health server for healthchecks.")
-	err = p.runHealthServer(o, server)
+	err = p.runHealthServer(o, p.server)
 	if err != nil {
 		return fmt.Errorf("failed to run the health server: %v", err)
 	}
+	defer p.healthServer.Close()
 
-	stopCh := SetupSignalHandler()
 	<-stopCh
 	klog.V(1).Infoln("Shutting down server.")
-
-	if frontendStop != nil {
-		frontendStop()
-	}
 
 	return nil
 }
@@ -379,6 +388,7 @@ func (p *Proxy) runAgentServer(o *options.ProxyRunOptions, server *server.ProxyS
 		"port", strconv.FormatUint(uint64(o.AgentPort), 10),
 	)
 	go runpprof.Do(context.Background(), labels, func(context.Context) { grpcServer.Serve(lis) })
+	p.agentServer = grpcServer
 
 	return nil
 }
@@ -396,7 +406,7 @@ func (p *Proxy) runAdminServer(o *options.ProxyRunOptions, server *server.ProxyS
 			runtime.SetBlockProfileRate(1)
 		}
 	}
-	adminServer := &http.Server{
+	p.adminServer = &http.Server{
 		Addr:              net.JoinHostPort(o.AdminBindAddress, strconv.Itoa(o.AdminPort)),
 		Handler:           muxHandler,
 		MaxHeaderBytes:    1 << 20,
@@ -408,7 +418,7 @@ func (p *Proxy) runAdminServer(o *options.ProxyRunOptions, server *server.ProxyS
 		"port", strconv.FormatUint(uint64(o.AdminPort), 10),
 	)
 	go runpprof.Do(context.Background(), labels, func(context.Context) {
-		err := adminServer.ListenAndServe()
+		err := p.adminServer.ListenAndServe()
 		if err != nil {
 			klog.ErrorS(err, "admin server could not listen")
 		}
@@ -438,7 +448,7 @@ func (p *Proxy) runHealthServer(o *options.ProxyRunOptions, server *server.Proxy
 	// "/ready" is deprecated but being maintained for backward compatibility
 	muxHandler.HandleFunc("/ready", readinessHandler)
 	muxHandler.HandleFunc("/readyz", readinessHandler)
-	healthServer := &http.Server{
+	p.healthServer = &http.Server{
 		Addr:              net.JoinHostPort(o.HealthBindAddress, strconv.Itoa(o.HealthPort)),
 		Handler:           muxHandler,
 		MaxHeaderBytes:    1 << 20,
@@ -450,7 +460,7 @@ func (p *Proxy) runHealthServer(o *options.ProxyRunOptions, server *server.Proxy
 		"port", strconv.FormatUint(uint64(o.HealthPort), 10),
 	)
 	go runpprof.Do(context.Background(), labels, func(context.Context) {
-		err := healthServer.ListenAndServe()
+		err := p.healthServer.ListenAndServe()
 		if err != nil {
 			klog.ErrorS(err, "health server could not listen")
 		}
@@ -458,4 +468,9 @@ func (p *Proxy) runHealthServer(o *options.ProxyRunOptions, server *server.Proxy
 	})
 
 	return nil
+}
+
+// ProxyServer exposes internal state for testing.
+func (p *Proxy) ProxyServer() *server.ProxyServer {
+	return p.server
 }

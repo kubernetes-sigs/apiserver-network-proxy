@@ -49,7 +49,8 @@ func NewAgentCommand(a *Agent, o *options.GrpcProxyAgentOptions) *cobra.Command 
 		Use:  "agent",
 		Long: `A gRPC agent, Connects to the proxy and then allows traffic to be forwarded to it.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return a.run(o)
+			stopCh := make(chan struct{})
+			return a.Run(o, stopCh)
 		},
 	}
 
@@ -57,35 +58,41 @@ func NewAgentCommand(a *Agent, o *options.GrpcProxyAgentOptions) *cobra.Command 
 }
 
 type Agent struct {
+	adminServer  *http.Server
+	healthServer *http.Server
+
+	cs *agent.ClientSet
 }
 
-func (a *Agent) run(o *options.GrpcProxyAgentOptions) error {
+func (a *Agent) Run(o *options.GrpcProxyAgentOptions, stopCh <-chan struct{}) error {
 	o.Print()
 	if err := o.Validate(); err != nil {
 		return fmt.Errorf("failed to validate agent options with %v", err)
 	}
 
-	stopCh := make(chan struct{})
-
 	cs, err := a.runProxyConnection(o, stopCh)
 	if err != nil {
 		return fmt.Errorf("failed to run proxy connection with %v", err)
 	}
+	a.cs = cs
 
 	if err := a.runHealthServer(o, cs); err != nil {
 		return fmt.Errorf("failed to run health server with %v", err)
 	}
+	defer a.healthServer.Close()
 
 	if err := a.runAdminServer(o); err != nil {
 		return fmt.Errorf("failed to run admin server with %v", err)
 	}
+	defer a.adminServer.Close()
 
 	<-stopCh
+	klog.V(1).Infoln("Shutting down agent.")
 
 	return nil
 }
 
-func (a *Agent) runProxyConnection(o *options.GrpcProxyAgentOptions, stopCh <-chan struct{}) (agent.ReadinessManager, error) {
+func (a *Agent) runProxyConnection(o *options.GrpcProxyAgentOptions, stopCh <-chan struct{}) (*agent.ClientSet, error) {
 	var tlsConfig *tls.Config
 	var err error
 	if tlsConfig, err = util.GetClientTLSConfig(o.CaCert, o.AgentCert, o.AgentKey, o.ProxyServerHost, o.AlpnProtos); err != nil {
@@ -149,7 +156,7 @@ func (a *Agent) runHealthServer(o *options.GrpcProxyAgentOptions, cs agent.Readi
 	// "/ready" is deprecated but being maintained for backward compatibility
 	muxHandler.HandleFunc("/ready", readinessHandler)
 	muxHandler.HandleFunc("/readyz", readinessHandler)
-	healthServer := &http.Server{
+	a.healthServer = &http.Server{
 		Addr:              net.JoinHostPort(o.HealthServerHost, strconv.Itoa(o.HealthServerPort)),
 		Handler:           muxHandler,
 		MaxHeaderBytes:    1 << 20,
@@ -160,7 +167,7 @@ func (a *Agent) runHealthServer(o *options.GrpcProxyAgentOptions, cs agent.Readi
 		"core", "healthListener",
 		"port", strconv.Itoa(o.HealthServerPort),
 	)
-	go runpprof.Do(context.Background(), labels, func(context.Context) { a.serveHealth(healthServer) })
+	go runpprof.Do(context.Background(), labels, func(context.Context) { a.serveHealth(a.healthServer) })
 
 	return nil
 }
@@ -197,7 +204,7 @@ func (a *Agent) runAdminServer(o *options.GrpcProxyAgentOptions) error {
 		}
 	}
 
-	adminServer := &http.Server{
+	a.adminServer = &http.Server{
 		Addr:              net.JoinHostPort(o.AdminBindAddress, strconv.Itoa(o.AdminServerPort)),
 		Handler:           muxHandler,
 		MaxHeaderBytes:    1 << 20,
@@ -208,7 +215,7 @@ func (a *Agent) runAdminServer(o *options.GrpcProxyAgentOptions) error {
 		"core", "adminListener",
 		"port", strconv.Itoa(o.AdminServerPort),
 	)
-	go runpprof.Do(context.Background(), labels, func(context.Context) { a.serveAdmin(adminServer) })
+	go runpprof.Do(context.Background(), labels, func(context.Context) { a.serveAdmin(a.adminServer) })
 
 	return nil
 }
@@ -219,4 +226,9 @@ func (a *Agent) serveAdmin(adminServer *http.Server) {
 		klog.ErrorS(err, "admin server could not listen")
 	}
 	klog.V(0).Infoln("Admin server stopped listening")
+}
+
+// ClientSet exposes internal state for testing.
+func (a *Agent) ClientSet() *agent.ClientSet {
+	return a.cs
 }

@@ -29,8 +29,6 @@ import (
 	"testing"
 	"time"
 
-	"google.golang.org/grpc"
-	"sigs.k8s.io/apiserver-network-proxy/konnectivity-client/pkg/client"
 	"sigs.k8s.io/apiserver-network-proxy/tests/framework"
 )
 
@@ -92,7 +90,7 @@ func TestProxy_Agent_Disconnect_Persistent_Connection(t *testing.T) {
 	}
 }
 
-func TestProxy_Agent_Reconnect(t *testing.T) {
+func TestAgentRestartReconnect(t *testing.T) {
 	testcases := []struct {
 		name                string
 		proxyServerFunction func(testing.TB) framework.ProxyServer
@@ -176,7 +174,7 @@ func clientRequest(c *http.Client, addr string) ([]byte, error) {
 }
 
 func createGrpcTunnelClient(ctx context.Context, proxyAddr, addr string) (*http.Client, error) {
-	tunnel, err := client.CreateSingleUseGrpcTunnel(ctx, proxyAddr, grpc.WithInsecure())
+	tunnel, err := createSingleUseGrpcTunnel(ctx, proxyAddr)
 	if err != nil {
 		return nil, err
 	}
@@ -192,7 +190,7 @@ func createGrpcTunnelClient(ctx context.Context, proxyAddr, addr string) (*http.
 }
 
 func createHTTPConnectClient(ctx context.Context, proxyAddr, addr string) (*http.Client, error) {
-	conn, err := net.Dial("tcp", proxyAddr)
+	conn, err := net.Dial("unix", proxyAddr)
 	if err != nil {
 		return nil, err
 	}

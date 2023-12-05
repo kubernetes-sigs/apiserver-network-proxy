@@ -26,6 +26,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
@@ -34,14 +35,18 @@ import (
 	"github.com/google/uuid"
 	"go.uber.org/goleak"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/credentials"
+	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/grpc/metadata"
 	"k8s.io/apimachinery/pkg/util/wait"
 	"sigs.k8s.io/apiserver-network-proxy/konnectivity-client/pkg/client"
 	metricsclient "sigs.k8s.io/apiserver-network-proxy/konnectivity-client/pkg/client/metrics"
 	clientmetricstest "sigs.k8s.io/apiserver-network-proxy/konnectivity-client/pkg/common/metrics/testing"
 	metricsagent "sigs.k8s.io/apiserver-network-proxy/pkg/agent/metrics"
+	"sigs.k8s.io/apiserver-network-proxy/pkg/server"
 	metricsserver "sigs.k8s.io/apiserver-network-proxy/pkg/server/metrics"
 	metricstest "sigs.k8s.io/apiserver-network-proxy/pkg/testing/metrics"
+	"sigs.k8s.io/apiserver-network-proxy/pkg/util"
 	agentproto "sigs.k8s.io/apiserver-network-proxy/proto/agent"
 	"sigs.k8s.io/apiserver-network-proxy/proto/header"
 	"sigs.k8s.io/apiserver-network-proxy/tests/framework"
@@ -118,7 +123,6 @@ func (s *delayedServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 func TestBasicProxy_GRPC(t *testing.T) {
 	expectCleanShutdown(t)
 
-	ctx := context.Background()
 	server := httptest.NewServer(newEchoServer("hello"))
 	defer server.Close()
 
@@ -130,7 +134,9 @@ func TestBasicProxy_GRPC(t *testing.T) {
 	waitForConnectedServerCount(t, 1, a)
 
 	// run test client
-	tunnel, err := client.CreateSingleUseGrpcTunnel(ctx, ps.FrontAddr(), grpc.WithInsecure())
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	tunnel, err := createSingleUseGrpcTunnel(ctx, ps.FrontAddr())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -143,18 +149,18 @@ func TestBasicProxy_GRPC(t *testing.T) {
 
 	req, err := http.NewRequest("GET", server.URL, nil)
 	if err != nil {
-		t.Error(err)
+		t.Fatal(err)
 	}
 
 	r, err := c.Do(req)
 	if err != nil {
-		t.Error(err)
+		t.Fatal(err)
 	}
 	defer r.Body.Close()
 
 	data, err := io.ReadAll(r.Body)
 	if err != nil {
-		t.Error(err)
+		t.Fatal(err)
 	}
 	if string(data) != "hello" {
 		t.Errorf("expect %v; got %v", "hello", string(data))
@@ -175,7 +181,7 @@ func TestProxyHandleDialError_GRPC(t *testing.T) {
 	waitForConnectedServerCount(t, 1, a)
 
 	// run test client
-	tunnel, err := client.CreateSingleUseGrpcTunnel(ctx, ps.FrontAddr(), grpc.WithInsecure())
+	tunnel, err := createSingleUseGrpcTunnel(ctx, ps.FrontAddr())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -221,7 +227,7 @@ func TestProxyHandle_DoneContext_GRPC(t *testing.T) {
 	// run test client
 	ctx, cancel := context.WithTimeout(context.Background(), -time.Second)
 	defer cancel()
-	_, err := client.CreateSingleUseGrpcTunnel(ctx, ps.FrontAddr(), grpc.WithInsecure())
+	_, err := createSingleUseGrpcTunnel(ctx, ps.FrontAddr())
 	if err == nil {
 		t.Error("Expected error when context is cancelled, did not receive error")
 	} else if !strings.Contains(err.Error(), "context deadline exceeded") {
@@ -248,7 +254,7 @@ func TestProxyHandle_RequestDeadlineExceeded_GRPC(t *testing.T) {
 		defer goleak.VerifyNone(t, goleak.IgnoreCurrent(), goleak.IgnoreTopFunction("google.golang.org/grpc.(*addrConn).resetTransport"))
 
 		// run test client
-		tunnel, err := client.CreateSingleUseGrpcTunnel(context.Background(), ps.FrontAddr(), grpc.WithInsecure())
+		tunnel, err := createSingleUseGrpcTunnel(context.Background(), ps.FrontAddr())
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -306,7 +312,7 @@ func TestProxyDial_RequestCancelled_GRPC(t *testing.T) {
 		defer goleak.VerifyNone(t, goleak.IgnoreCurrent(), goleak.IgnoreTopFunction("google.golang.org/grpc.(*addrConn).resetTransport"))
 
 		// run test client
-		tunnel, err := client.CreateSingleUseGrpcTunnel(context.Background(), ps.FrontAddr(), grpc.WithInsecure())
+		tunnel, err := createSingleUseGrpcTunnel(context.Background(), ps.FrontAddr())
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -360,9 +366,10 @@ func TestProxyDial_RequestCancelled_Concurrent_GRPC(t *testing.T) {
 		defer wg.Done()
 
 		// run test client
-		tunnel, err := client.CreateSingleUseGrpcTunnel(context.Background(), ps.FrontAddr(), grpc.WithInsecure())
+		tunnel, err := createSingleUseGrpcTunnel(context.Background(), ps.FrontAddr())
 		if err != nil {
 			t.Error(err)
+			return
 		}
 
 		ctx, cancel := context.WithCancel(context.Background())
@@ -381,6 +388,7 @@ func TestProxyDial_RequestCancelled_Concurrent_GRPC(t *testing.T) {
 		req, err := http.NewRequestWithContext(ctx, "GET", server.URL, nil)
 		if err != nil {
 			t.Error(err)
+			return
 		}
 
 		c.Do(req) // Errors are expected.
@@ -439,7 +447,7 @@ func TestProxyDial_AgentTimeout_GRPC(t *testing.T) {
 		defer goleak.VerifyNone(t, goleak.IgnoreCurrent(), goleak.IgnoreTopFunction("google.golang.org/grpc.(*addrConn).resetTransport"))
 
 		// run test client
-		tunnel, err := client.CreateSingleUseGrpcTunnel(context.Background(), ps.FrontAddr(), grpc.WithInsecure())
+		tunnel, err := createSingleUseGrpcTunnel(context.Background(), ps.FrontAddr())
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -487,7 +495,7 @@ func TestProxyHandle_TunnelContextCancelled_GRPC(t *testing.T) {
 
 	// run test client
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	tunnel, err := client.CreateSingleUseGrpcTunnel(ctx, ps.FrontAddr(), grpc.WithInsecure())
+	tunnel, err := createSingleUseGrpcTunnel(ctx, ps.FrontAddr())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -535,7 +543,7 @@ func TestProxy_LargeResponse(t *testing.T) {
 	waitForConnectedServerCount(t, 1, a)
 
 	// run test client
-	tunnel, err := client.CreateSingleUseGrpcTunnel(ctx, ps.FrontAddr(), grpc.WithInsecure())
+	tunnel, err := createSingleUseGrpcTunnel(ctx, ps.FrontAddr())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -558,6 +566,7 @@ func TestProxy_LargeResponse(t *testing.T) {
 	}
 
 	data, err := io.ReadAll(r.Body)
+	r.Body.Close()
 	if err != nil {
 		t.Error(err)
 	}
@@ -580,7 +589,7 @@ func TestBasicProxy_HTTPCONN(t *testing.T) {
 	defer a.Stop()
 	waitForConnectedServerCount(t, 1, a)
 
-	conn, err := net.Dial("tcp", ps.FrontAddr())
+	conn, err := net.Dial("unix", ps.FrontAddr())
 	if err != nil {
 		t.Error(err)
 	}
@@ -622,6 +631,7 @@ func TestBasicProxy_HTTPCONN(t *testing.T) {
 	}
 
 	data, err := io.ReadAll(r.Body)
+	r.Body.Close()
 	if err != nil {
 		t.Error(err)
 	}
@@ -642,7 +652,7 @@ func TestFailedDNSLookupProxy_HTTPCONN(t *testing.T) {
 	defer a.Stop()
 	waitForConnectedServerCount(t, 1, a)
 
-	conn, err := net.Dial("tcp", ps.FrontAddr())
+	conn, err := net.Dial("unix", ps.FrontAddr())
 	if err != nil {
 		t.Error(err)
 	}
@@ -689,20 +699,13 @@ func TestFailedDNSLookupProxy_HTTPCONN(t *testing.T) {
 	}
 
 	body, err := io.ReadAll(resp.Body)
+	resp.Body.Close()
 	if !strings.Contains(err.Error(), "connection reset by peer") {
 		t.Error(err)
 	}
 
 	if !strings.Contains(string(body), "no such host") {
 		t.Errorf("Unexpected error: %v", err)
-	}
-
-	err = wait.PollImmediate(100*time.Millisecond, wait.ForeverTestTimeout, func() (bool, error) {
-		return ps.FrontendConnectionCount() == 0, nil
-	})
-
-	if err != nil {
-		t.Errorf("while waiting for connection to be closed: %v", err)
 	}
 
 	if err := metricstest.ExpectServerDialFailure(metricsserver.DialFailureErrorResponse, 1); err != nil {
@@ -727,7 +730,7 @@ func TestFailedDial_HTTPCONN(t *testing.T) {
 	defer a.Stop()
 	waitForConnectedServerCount(t, 1, a)
 
-	conn, err := net.Dial("tcp", ps.FrontAddr())
+	conn, err := net.Dial("unix", ps.FrontAddr())
 	if err != nil {
 		t.Error(err)
 	}
@@ -737,17 +740,17 @@ func TestFailedDial_HTTPCONN(t *testing.T) {
 	// Send HTTP-Connect request
 	_, err = fmt.Fprintf(conn, "CONNECT %s HTTP/1.1\r\nHost: %s\r\n\r\n", serverURL.Host, "127.0.0.1")
 	if err != nil {
-		t.Error(err)
+		t.Fatal(err)
 	}
 
 	// Parse the HTTP response for Connect
 	br := bufio.NewReader(conn)
 	res, err := http.ReadResponse(br, nil)
 	if err != nil {
-		t.Errorf("reading HTTP response from CONNECT: %v", err)
+		t.Fatalf("reading HTTP response from CONNECT: %v", err)
 	}
 	if res.StatusCode != 200 {
-		t.Errorf("expect 200; got %d", res.StatusCode)
+		t.Fatalf("expect 200; got %d", res.StatusCode)
 	}
 
 	dialer := func(network, addr string) (net.Conn, error) {
@@ -762,23 +765,19 @@ func TestFailedDial_HTTPCONN(t *testing.T) {
 
 	resp, err := c.Get(server.URL)
 	if err != nil {
-		t.Error(err)
+		t.Fatal(err)
 	}
 
 	body, err := io.ReadAll(resp.Body)
-	if !strings.Contains(err.Error(), "connection reset by peer") {
+	resp.Body.Close()
+	if err == nil {
+		t.Fatalf("Expected error reading response body; response=%q", body)
+	} else if !strings.Contains(err.Error(), "connection reset by peer") {
 		t.Error(err)
 	}
 
 	if !strings.Contains(string(body), "connection refused") {
 		t.Errorf("Unexpected error: %v", err)
-	}
-
-	err = wait.PollImmediate(100*time.Millisecond, wait.ForeverTestTimeout, func() (bool, error) {
-		return ps.FrontendConnectionCount() == 0, nil
-	})
-	if err != nil {
-		t.Errorf("while waiting for connection to be closed: %v", err)
 	}
 
 	if err := metricstest.ExpectServerDialFailure(metricsserver.DialFailureErrorResponse, 1); err != nil {
@@ -796,10 +795,10 @@ func runGRPCProxyServer(t testing.TB) framework.ProxyServer {
 
 func runGRPCProxyServerWithServerCount(t testing.TB, serverCount int) framework.ProxyServer {
 	opts := framework.ProxyServerOpts{
-		Mode:        "grpc",
+		Mode:        server.ModeGRPC,
 		ServerCount: serverCount,
 	}
-	ps, err := Framework.ProxyServerRunner.Start(opts)
+	ps, err := Framework.ProxyServerRunner.Start(t, opts)
 	if err != nil {
 		t.Fatalf("Failed to start gRPC proxy server: %v", err)
 	}
@@ -808,10 +807,10 @@ func runGRPCProxyServerWithServerCount(t testing.TB, serverCount int) framework.
 
 func runHTTPConnProxyServer(t testing.TB) framework.ProxyServer {
 	opts := framework.ProxyServerOpts{
-		Mode:        "http",
+		Mode:        server.ModeHTTPConnect,
 		ServerCount: 1,
 	}
-	ps, err := Framework.ProxyServerRunner.Start(opts)
+	ps, err := Framework.ProxyServerRunner.Start(t, opts)
 	if err != nil {
 		t.Fatalf("Failed to start HTTP proxy server: %v", err)
 	}
@@ -827,7 +826,7 @@ func runAgentWithID(t testing.TB, agentID, addr string) framework.Agent {
 		AgentID:    agentID,
 		ServerAddr: addr,
 	}
-	a, err := Framework.AgentRunner.Start(opts)
+	a, err := Framework.AgentRunner.Start(t, opts)
 	if err != nil {
 		t.Fatalf("Failed to start agent: %v", err)
 	}
@@ -841,7 +840,15 @@ type unresponsiveAgent struct {
 // Connect registers the unresponsive agent with the proxy server.
 func (a *unresponsiveAgent) Connect(address string) error {
 	agentID := uuid.New().String()
-	conn, err := grpc.Dial(address, grpc.WithInsecure())
+	agentCert := filepath.Join(framework.CertsDir, framework.TestAgentCertFile)
+	agentKey := filepath.Join(framework.CertsDir, framework.TestAgentKeyFile)
+	caCert := filepath.Join(framework.CertsDir, framework.TestCAFile)
+	host, _, _ := net.SplitHostPort(address)
+	tlsConfig, err := util.GetClientTLSConfig(caCert, agentCert, agentKey, host, nil)
+	if err != nil {
+		return err
+	}
+	conn, err := grpc.Dial(address, grpc.WithTransportCredentials(credentials.NewTLS(tlsConfig)))
 	if err != nil {
 		return err
 	}
@@ -888,15 +895,19 @@ func waitForConnectedServerCount(t testing.TB, expectedServerCount int, a framew
 func waitForConnectedAgentCount(t testing.TB, expectedAgentCount int, ps framework.ProxyServer) {
 	t.Helper()
 	err := wait.PollImmediate(100*time.Millisecond, wait.ForeverTestTimeout, func() (bool, error) {
-		count := ps.ConnectedBackends()
+		count, err := ps.ConnectedBackends()
+		if err != nil {
+			return false, err
+		}
 		if count == expectedAgentCount {
 			return true, nil
 		}
 		return false, nil
 	})
 	if err != nil {
-		count := ps.ConnectedBackends()
-		t.Logf("got %d backends; expected %d", count, expectedAgentCount)
+		if count, err := ps.ConnectedBackends(); err == nil {
+			t.Logf("got %d backends; expected %d", count, expectedAgentCount)
+		}
 		t.Fatalf("Error waiting for backend count: %v", err)
 	}
 }
@@ -937,4 +948,16 @@ func expectCleanShutdown(t testing.TB) {
 		assertNoServerDialFailures(t)
 		assertNoAgentDialFailures(t)
 	})
+}
+
+func createSingleUseGrpcTunnel(ctx context.Context, addr string) (client.Tunnel, error) {
+	return client.CreateSingleUseGrpcTunnel(ctx, addr,
+		grpc.WithContextDialer(
+			func(ctx context.Context, addr string) (net.Conn, error) {
+				return (&net.Dialer{}).DialContext(ctx, "unix", addr)
+			}),
+		grpc.WithBlock(),
+		grpc.WithReturnConnectionError(),
+		grpc.WithTimeout(30*time.Second), // matches http.DefaultTransport dial timeout
+		grpc.WithTransportCredentials(insecure.NewCredentials()))
 }

@@ -29,7 +29,6 @@ import (
 )
 
 func main() {
-	// flag.CommandLine.Parse(os.Args[1:])
 	proxy := &app.Proxy{}
 	o := options.NewProxyRunOptions()
 	command := app.NewProxyCommand(proxy, o)

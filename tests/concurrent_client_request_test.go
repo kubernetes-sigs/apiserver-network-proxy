@@ -27,9 +27,7 @@ import (
 	"testing"
 	"time"
 
-	"google.golang.org/grpc"
 	"k8s.io/apimachinery/pkg/util/wait"
-	"sigs.k8s.io/apiserver-network-proxy/konnectivity-client/pkg/client"
 )
 
 type simpleServer struct {
@@ -52,7 +50,7 @@ func (s *simpleServer) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 // TODO: test http-connect as well.
 func getTestClient(front string, t *testing.T) *http.Client {
 	ctx := context.Background()
-	tunnel, err := client.CreateSingleUseGrpcTunnel(ctx, front, grpc.WithInsecure())
+	tunnel, err := createSingleUseGrpcTunnel(ctx, front)
 	if err != nil {
 		t.Fatal(err)
 	}

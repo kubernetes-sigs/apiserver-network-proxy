@@ -17,79 +17,39 @@ limitations under the License.
 package tests
 
 import (
-	"net"
 	"testing"
-	"time"
 
-	"github.com/google/uuid"
-	"google.golang.org/grpc"
-	"google.golang.org/grpc/metadata"
-	"k8s.io/apimachinery/pkg/util/wait"
-	agentproto "sigs.k8s.io/apiserver-network-proxy/proto/agent"
-	"sigs.k8s.io/apiserver-network-proxy/proto/header"
+	"sigs.k8s.io/apiserver-network-proxy/pkg/server"
+	"sigs.k8s.io/apiserver-network-proxy/tests/framework"
 )
 
-func TestClientReconnects(t *testing.T) {
-	connections := make(chan struct{})
-	s := &testAgentServerImpl{
-		onConnect: func(stream agentproto.AgentService_ConnectServer) error {
-			stream.SetHeader(metadata.New(map[string]string{
-				header.ServerID:    uuid.Must(uuid.NewRandom()).String(),
-				header.ServerCount: "1",
-			}))
-			connections <- struct{}{}
-			return nil
-		},
-	}
-
-	svr := grpc.NewServer()
-	agentproto.RegisterAgentServiceServer(svr, s)
-	lis, err := net.Listen("tcp", "127.0.0.1:0")
+func TestServerRestartAgentReconnect(t *testing.T) {
+	agentPort, err := framework.FreePorts(1)
 	if err != nil {
 		t.Fatal(err)
 	}
-	go func() {
-		if err := svr.Serve(lis); err != nil {
-			panic(err)
-		}
-	}()
+	opts := framework.ProxyServerOpts{
+		Mode:        server.ModeGRPC,
+		ServerCount: 1,
+		AgentPort:   agentPort[0],
+	}
+	ps, err := Framework.ProxyServerRunner.Start(t, opts)
+	if err != nil {
+		t.Fatalf("Failed to start gRPC proxy server: %v", err)
+	}
 
-	a := runAgentWithID(t, "test-id", lis.Addr().String())
+	a := runAgentWithID(t, "test-id", ps.AgentAddr())
 	defer a.Stop()
 
-	select {
-	case <-connections:
-		// Expected
-	case <-time.After(wait.ForeverTestTimeout):
-		t.Fatal("Timed out waiting for agent to connect")
-	}
-	svr.Stop()
+	waitForConnectedServerCount(t, 1, a)
+	ps.Stop()
+	waitForConnectedServerCount(t, 0, a)
 
-	lis2, err := net.Listen("tcp", lis.Addr().String())
+	ps2, err := Framework.ProxyServerRunner.Start(t, opts)
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("Failed to start gRPC proxy server: %v", err)
 	}
-	svr2 := grpc.NewServer()
-	agentproto.RegisterAgentServiceServer(svr2, s)
-	go func() {
-		if err := svr2.Serve(lis2); err != nil {
-			panic(err)
-		}
-	}()
-	defer svr2.Stop()
+	defer ps2.Stop()
 
-	select {
-	case <-connections:
-		// Expected
-	case <-time.After(wait.ForeverTestTimeout):
-		t.Fatal("Timed out waiting for agent to reconnect")
-	}
-}
-
-type testAgentServerImpl struct {
-	onConnect func(agentproto.AgentService_ConnectServer) error
-}
-
-func (t *testAgentServerImpl) Connect(svr agentproto.AgentService_ConnectServer) error {
-	return t.onConnect(svr)
+	waitForConnectedServerCount(t, 1, a)
 }

@@ -19,210 +19,146 @@ package framework
 import (
 	"context"
 	"fmt"
+	"log"
 	"net"
-	"net/http"
-	"sync/atomic"
+	"path/filepath"
+	"strconv"
+	"sync"
+	"testing"
 	"time"
 
 	"github.com/google/uuid"
-	"google.golang.org/grpc"
-	clientproto "sigs.k8s.io/apiserver-network-proxy/konnectivity-client/proto/client"
+	"k8s.io/apimachinery/pkg/util/wait"
+	serverapp "sigs.k8s.io/apiserver-network-proxy/cmd/server/app"
+	serveropts "sigs.k8s.io/apiserver-network-proxy/cmd/server/app/options"
 	"sigs.k8s.io/apiserver-network-proxy/pkg/server"
-	agentproto "sigs.k8s.io/apiserver-network-proxy/proto/agent"
 )
 
 type ProxyServerOpts struct {
 	ServerCount int
 	Mode        string
+	AgentPort   int // Defaults to random port.
 }
 
 type ProxyServerRunner interface {
-	Start(ProxyServerOpts) (ProxyServer, error)
+	Start(testing.TB, ProxyServerOpts) (ProxyServer, error)
 }
 
 type ProxyServer interface {
-	ConnectedBackends() int
-	FrontendConnectionCount() int
+	ConnectedBackends() (int, error)
 	AgentAddr() string
 	FrontAddr() string
 	Ready() bool
-	Stop() error
+	Stop()
 }
 
 type InProcessProxyServerRunner struct{}
 
-func (*InProcessProxyServerRunner) Start(opts ProxyServerOpts) (ProxyServer, error) {
-	switch opts.Mode {
-	case "http":
-		return startHTTP(opts)
-	case "grpc":
-		return startGRPC(opts)
-	default:
-		panic("must specify proxy server mode")
-	}
-}
-
-func startGRPC(opts ProxyServerOpts) (ProxyServer, error) {
-	var err error
-
-	commonServer, err := startInProcessCommonProxyServer(opts)
+func (*InProcessProxyServerRunner) Start(t testing.TB, opts ProxyServerOpts) (ProxyServer, error) {
+	s := &serverapp.Proxy{}
+	o, err := serverOptions(t, opts)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("error building server options: %w", err)
 	}
 
-	ps := &inProcessGRPCProxyServer{
-		inProcessCommonProxyServer: commonServer,
-		grpcServer:                 grpc.NewServer(),
-	}
-
-	clientproto.RegisterProxyServiceServer(ps.grpcServer, ps.proxyServer)
-	ps.grpcListener, err = net.Listen("tcp", "")
-	if err != nil {
-		return ps, err
-	}
-	go ps.grpcServer.Serve(ps.grpcListener)
-
-	return ps, nil
-}
-
-type inProcessGRPCProxyServer struct {
-	*inProcessCommonProxyServer
-
-	grpcServer   *grpc.Server
-	grpcListener net.Listener
-}
-
-func (ps *inProcessGRPCProxyServer) Stop() error {
-	ps.stopCommonProxyServer()
-
-	if ps.grpcListener != nil {
-		ps.grpcListener.Close()
-	}
-	ps.grpcServer.Stop()
-	return nil
-}
-
-func (ps *inProcessGRPCProxyServer) FrontAddr() string {
-	return ps.grpcListener.Addr().String()
-}
-
-func (ps *inProcessGRPCProxyServer) FrontendConnectionCount() int {
-	panic("unimplemented: inProcessGRPCProxyServer.FrontendConnectionCount") // FIXME: consider reading from metrics
-}
-
-func startHTTP(opts ProxyServerOpts) (ProxyServer, error) {
-	var err error
-
-	commonServer, err := startInProcessCommonProxyServer(opts)
-	if err != nil {
-		return nil, err
-	}
-
-	ps := &inProcessHTTPProxyServer{
-		inProcessCommonProxyServer: commonServer,
-	}
-
-	// http-connect
-	handler := &server.Tunnel{
-		Server: ps.proxyServer,
-	}
-	ps.httpServer = &http.Server{
-		ReadHeaderTimeout: 60 * time.Second,
-		Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			atomic.AddInt32(&ps.httpConnectionCount, 1)
-			defer atomic.AddInt32(&ps.httpConnectionCount, -1)
-			handler.ServeHTTP(w, r)
-		}),
-	}
-	ps.httpListener, err = net.Listen("tcp", "")
-	if err != nil {
-		return ps, err
-	}
-
+	ctx, cancel := context.WithCancel(context.Background())
+	stopCh := make(chan struct{})
 	go func() {
-		err := ps.httpServer.Serve(ps.httpListener)
-		if err != nil {
-			fmt.Println("http connect server error: ", err)
+		if err := s.Run(o, stopCh); err != nil {
+			log.Printf("ERROR running proxy server: %v", err)
+			cancel()
 		}
 	}()
 
+	healthAddr := net.JoinHostPort(o.HealthBindAddress, strconv.Itoa(o.HealthPort))
+	if err := wait.PollImmediateWithContext(ctx, 100*time.Millisecond, wait.ForeverTestTimeout, func(context.Context) (bool, error) {
+		return checkLiveness(healthAddr), nil
+	}); err != nil {
+		close(stopCh)
+		return nil, fmt.Errorf("server never came up: %v", err)
+	}
+
+	ps := &inProcessProxyServer{
+		proxyServer: s.ProxyServer(),
+		stopCh:      stopCh,
+		mode:        opts.Mode,
+		healthAddr:  healthAddr,
+		agentAddr:   net.JoinHostPort(o.AgentBindAddress, strconv.Itoa(o.AgentPort)),
+		frontAddr:   o.UdsName,
+	}
+	t.Cleanup(ps.Stop)
 	return ps, nil
 }
 
-type inProcessHTTPProxyServer struct {
-	*inProcessCommonProxyServer
-
-	httpServer   *http.Server
-	httpListener net.Listener
-
-	httpConnectionCount int32 // atomic
-}
-
-func (ps *inProcessHTTPProxyServer) Stop() error {
-	ps.stopCommonProxyServer()
-
-	if ps.httpListener != nil {
-		ps.httpListener.Close()
-	}
-	ps.httpServer.Shutdown(context.Background())
-
-	return nil
-}
-
-func (ps *inProcessHTTPProxyServer) FrontAddr() string {
-	return ps.httpListener.Addr().String()
-}
-
-func (ps *inProcessHTTPProxyServer) FrontendConnectionCount() int {
-	return int(atomic.LoadInt32(&ps.httpConnectionCount))
-}
-
-// inProcessCommonProxyServer handles the common agent (backend) serving shared between the
-// inProccessGRPCProxyServer and inProcessHTTPProxyServer
-type inProcessCommonProxyServer struct {
+type inProcessProxyServer struct {
 	proxyServer *server.ProxyServer
 
-	agentServer   *grpc.Server
-	agentListener net.Listener
+	stopOnce sync.Once
+	stopCh   chan struct{}
+
+	mode string
+
+	healthAddr string
+	agentAddr  string
+	frontAddr  string
 }
 
-func startInProcessCommonProxyServer(opts ProxyServerOpts) (*inProcessCommonProxyServer, error) {
-	s := server.NewProxyServer(uuid.New().String(), []server.ProxyStrategy{server.ProxyStrategyDefault}, opts.ServerCount, &server.AgentTokenAuthenticationOptions{})
-	ps := &inProcessCommonProxyServer{
-		proxyServer: s,
-		agentServer: grpc.NewServer(),
-	}
-	agentproto.RegisterAgentServiceServer(ps.agentServer, s)
-	var err error
-	ps.agentListener, err = net.Listen("tcp", "")
-	if err != nil {
-		return ps, err
-	}
-	go ps.agentServer.Serve(ps.agentListener)
-
-	return ps, nil
+func (ps *inProcessProxyServer) Stop() {
+	ps.stopOnce.Do(func() {
+		close(ps.stopCh)
+	})
 }
 
-func (ps *inProcessCommonProxyServer) stopCommonProxyServer() {
-	if ps.agentListener != nil {
-		ps.agentListener.Close()
-	}
-	ps.agentServer.Stop()
+func (ps *inProcessProxyServer) AgentAddr() string {
+	return ps.agentAddr
 }
 
-func (ps *inProcessCommonProxyServer) AgentAddr() string {
-	return ps.agentListener.Addr().String()
+func (ps *inProcessProxyServer) FrontAddr() string {
+	return ps.frontAddr
 }
 
-func (ps *inProcessCommonProxyServer) ConnectedBackends() int {
+func (ps *inProcessProxyServer) ConnectedBackends() (int, error) {
 	numBackends := 0
 	for _, bm := range ps.proxyServer.BackendManagers {
 		numBackends += bm.NumBackends()
 	}
-	return numBackends
+	return numBackends, nil
 }
 
-func (ps *inProcessCommonProxyServer) Ready() bool {
-	ready, _ := ps.proxyServer.Readiness.Ready()
-	return ready
+func (ps *inProcessProxyServer) Ready() bool {
+	return checkReadiness(ps.healthAddr)
+}
+
+func serverOptions(t testing.TB, opts ProxyServerOpts) (*serveropts.ProxyRunOptions, error) {
+	o := serveropts.NewProxyRunOptions()
+
+	o.ServerCount = uint(opts.ServerCount)
+	o.Mode = opts.Mode
+
+	uid := uuid.New().String()
+	o.UdsName = filepath.Join(CertsDir, fmt.Sprintf("server-%s.sock", uid))
+	o.ServerPort = 0 // Required for UDS
+
+	o.ClusterCert = filepath.Join(CertsDir, TestServerCertFile)
+	o.ClusterKey = filepath.Join(CertsDir, TestServerKeyFile)
+	o.ClusterCaCert = filepath.Join(CertsDir, TestCAFile)
+
+	const localhost = "127.0.0.1"
+	o.AgentBindAddress = localhost
+	o.HealthBindAddress = localhost
+	o.AdminBindAddress = localhost
+
+	ports, err := FreePorts(3)
+	if err != nil {
+		return nil, err
+	}
+	if opts.AgentPort != 0 {
+		o.AgentPort = opts.AgentPort
+	} else {
+		o.AgentPort = ports[0]
+	}
+	o.HealthPort = ports[1]
+	o.AdminPort = ports[2]
+
+	return o, nil
 }

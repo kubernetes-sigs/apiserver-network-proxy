@@ -24,8 +24,6 @@ import (
 	"sync"
 	"testing"
 
-	"google.golang.org/grpc"
-	"sigs.k8s.io/apiserver-network-proxy/konnectivity-client/pkg/client"
 	"sigs.k8s.io/apiserver-network-proxy/tests/framework"
 )
 
@@ -48,7 +46,7 @@ func TestProxy_ConcurrencyGRPC(t *testing.T) {
 		defer wg.Done()
 
 		// run test client
-		tunnel, err := client.CreateSingleUseGrpcTunnel(ctx, ps.FrontAddr(), grpc.WithInsecure())
+		tunnel, err := createSingleUseGrpcTunnel(ctx, ps.FrontAddr())
 		if err != nil {
 			t.Error(err)
 			return
