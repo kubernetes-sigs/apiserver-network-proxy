@@ -60,6 +60,10 @@ test:
 	go test -race -covermode=atomic -coverprofile=konnectivity.out ./... && go tool cover -html=konnectivity.out -o=konnectivity.html
 	cd konnectivity-client && go test -race -covermode=atomic -coverprofile=client.out ./... && go tool cover -html=client.out -o=client.html
 
+.PHONY: test-integration
+test-integration: build
+	go test -race ./tests -agent-path $(PWD)/bin/proxy-agent
+
 ## --------------------------------------
 ## Binaries
 ## --------------------------------------

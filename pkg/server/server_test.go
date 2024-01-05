@@ -442,7 +442,7 @@ func TestServerProxyNoBackend(t *testing.T) {
 	}
 	baseServerProxyTestWithoutBackend(t, validate)
 
-	if err := metricstest.ExpectServerDialFailure(metrics.DialFailureNoAgent, 1); err != nil {
+	if err := metricstest.DefaultTester.ExpectServerDialFailure(metrics.DialFailureNoAgent, 1); err != nil {
 		t.Error(err)
 	}
 }
@@ -664,14 +664,14 @@ func closeRspPkt(connectID int64, errMsg string) *client.Packet {
 
 func assertEstablishedConnsMetric(t testing.TB, expect int) {
 	t.Helper()
-	if err := metricstest.ExpectServerEstablishedConns(expect); err != nil {
+	if err := metricstest.DefaultTester.ExpectServerEstablishedConns(expect); err != nil {
 		t.Errorf("Expected %d %s metric: %v", expect, "established_connections", err)
 	}
 }
 
 func assertReadyBackendsMetric(t testing.TB, expect int) {
 	t.Helper()
-	if err := metricstest.ExpectServerReadyBackends(expect); err != nil {
+	if err := metricstest.DefaultTester.ExpectServerReadyBackends(expect); err != nil {
 		t.Errorf("Expected %d %s metric: %v", expect, "ready_backend_connections", err)
 	}
 }
