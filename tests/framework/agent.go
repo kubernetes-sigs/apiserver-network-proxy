@@ -21,17 +21,24 @@ import (
 	"fmt"
 	"log"
 	"net"
+	"net/http"
+	"os"
+	"os/exec"
 	"path/filepath"
 	"strconv"
 	"sync"
 	"testing"
 	"time"
 
+	"github.com/prometheus/client_golang/prometheus"
+	"github.com/spf13/pflag"
 	"k8s.io/apimachinery/pkg/util/wait"
 
 	agentapp "sigs.k8s.io/apiserver-network-proxy/cmd/agent/app"
 	agentopts "sigs.k8s.io/apiserver-network-proxy/cmd/agent/app/options"
 	"sigs.k8s.io/apiserver-network-proxy/pkg/agent"
+	agentmetrics "sigs.k8s.io/apiserver-network-proxy/pkg/agent/metrics"
+	metricstest "sigs.k8s.io/apiserver-network-proxy/pkg/testing/metrics"
 )
 
 type AgentOpts struct {
@@ -47,6 +54,7 @@ type Agent interface {
 	GetConnectedServerCount() (int, error)
 	Ready() bool
 	Stop()
+	Metrics() metricstest.AgentTester
 }
 type InProcessAgentRunner struct{}
 
@@ -104,6 +112,99 @@ func (a *inProcessAgent) GetConnectedServerCount() (int, error) {
 
 func (a *inProcessAgent) Ready() bool {
 	return checkReadiness(a.healthAddr)
+}
+
+func (a *inProcessAgent) Metrics() metricstest.AgentTester {
+	return metricstest.DefaultTester
+}
+
+type ExternalAgentRunner struct {
+	ExecutablePath string
+}
+
+func (r *ExternalAgentRunner) Start(t testing.TB, opts AgentOpts) (Agent, error) {
+	o, err := agentOptions(t, opts)
+	if err != nil {
+		return nil, err
+	}
+
+	args := []string{}
+	o.Flags().VisitAll(func(f *pflag.Flag) {
+		args = append(args, fmt.Sprintf("--%s=%s", f.Name, f.Value.String()))
+	})
+
+	cmd := exec.Command(r.ExecutablePath, args...)
+	cmd.Stdout = os.Stdout // Forward stdout & stderr
+	cmd.Stderr = os.Stderr
+	if err := cmd.Start(); err != nil {
+		return nil, err
+	}
+
+	healthAddr := net.JoinHostPort(o.HealthServerHost, strconv.Itoa(o.HealthServerPort))
+	a := &externalAgent{
+		cmd:        cmd,
+		healthAddr: healthAddr,
+		adminAddr:  net.JoinHostPort(o.AdminBindAddress, strconv.Itoa(o.AdminServerPort)),
+		agentID:    opts.AgentID,
+		metrics:    &metricstest.Tester{Endpoint: fmt.Sprintf("http://%s/metrics", healthAddr)},
+	}
+	t.Cleanup(a.Stop)
+
+	a.waitForLiveness()
+	return a, nil
+}
+
+type externalAgent struct {
+	healthAddr, adminAddr string
+	agentID               string
+	cmd                   *exec.Cmd
+	metrics               *metricstest.Tester
+
+	stopOnce sync.Once
+}
+
+func (a *externalAgent) Stop() {
+	a.stopOnce.Do(func() {
+		if err := a.cmd.Process.Kill(); err != nil {
+			log.Fatalf("Error stopping agent process: %v", err)
+		}
+	})
+}
+
+var (
+	agentConnectedServerCountMetric = prometheus.BuildFQName(agentmetrics.Namespace, agentmetrics.Subsystem, "open_server_connections")
+)
+
+func (a *externalAgent) GetConnectedServerCount() (int, error) {
+	return readIntGauge(a.metrics.Endpoint, agentConnectedServerCountMetric)
+}
+
+func (a *externalAgent) Ready() bool {
+	resp, err := http.Get(fmt.Sprintf("http://%s/readyz", a.healthAddr))
+	if err != nil {
+		return false
+	}
+	resp.Body.Close()
+	return resp.StatusCode == http.StatusOK
+}
+
+func (a *externalAgent) Metrics() metricstest.AgentTester {
+	return a.metrics
+}
+
+func (a *externalAgent) waitForLiveness() error {
+	err := wait.PollImmediate(100*time.Millisecond, wait.ForeverTestTimeout, func() (bool, error) {
+		resp, err := http.Get(fmt.Sprintf("http://%s/healthz", a.healthAddr))
+		if err != nil {
+			return false, nil
+		}
+		resp.Body.Close()
+		return resp.StatusCode == http.StatusOK, nil
+	})
+	if err != nil {
+		return fmt.Errorf("timed out waiting for agent liveness check")
+	}
+	return nil
 }
 
 func agentOptions(t testing.TB, opts AgentOpts) (*agentopts.GrpcProxyAgentOptions, error) {

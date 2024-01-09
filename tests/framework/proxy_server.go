@@ -32,6 +32,7 @@ import (
 	serverapp "sigs.k8s.io/apiserver-network-proxy/cmd/server/app"
 	serveropts "sigs.k8s.io/apiserver-network-proxy/cmd/server/app/options"
 	"sigs.k8s.io/apiserver-network-proxy/pkg/server"
+	metricstest "sigs.k8s.io/apiserver-network-proxy/pkg/testing/metrics"
 )
 
 type ProxyServerOpts struct {
@@ -50,6 +51,7 @@ type ProxyServer interface {
 	FrontAddr() string
 	Ready() bool
 	Stop()
+	Metrics() metricstest.ServerTester
 }
 
 type InProcessProxyServerRunner struct{}
@@ -127,6 +129,10 @@ func (ps *inProcessProxyServer) ConnectedBackends() (int, error) {
 
 func (ps *inProcessProxyServer) Ready() bool {
 	return checkReadiness(ps.healthAddr)
+}
+
+func (ps *inProcessProxyServer) Metrics() metricstest.ServerTester {
+	return metricstest.DefaultTester
 }
 
 func serverOptions(t testing.TB, opts ProxyServerOpts) (*serveropts.ProxyRunOptions, error) {

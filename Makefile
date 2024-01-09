@@ -60,6 +60,10 @@ test:
 	go test -race -covermode=atomic -coverprofile=konnectivity.out ./... && go tool cover -html=konnectivity.out -o=konnectivity.html
 	cd konnectivity-client && go test -race -covermode=atomic -coverprofile=client.out ./... && go tool cover -html=client.out -o=client.html
 
+.PHONY: test-integration
+test-integration: build
+	go test -race ./tests -agent-path $(PWD)/bin/proxy-agent
+
 ## --------------------------------------
 ## Binaries
 ## --------------------------------------
@@ -91,7 +95,7 @@ bin/proxy-server: bin $(SOURCE)
 .PHONY: lint
 lint:
 	curl -sSfL https://raw.githubusercontent.com/golangci/golangci-lint/master/install.sh | sh -s -- -b $(INSTALL_LOCATION) v$(GOLANGCI_LINT_VERSION)
-	$(INSTALL_LOCATION)/golangci-lint run --no-config --disable-all --enable=gofmt,revive,gosec,govet,unused --fix --verbose --timeout 3m
+	$(INSTALL_LOCATION)/golangci-lint run --verbose
 
 ## --------------------------------------
 ## Go

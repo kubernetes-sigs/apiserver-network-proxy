@@ -202,10 +202,10 @@ func TestProxyHandleDialError_GRPC(t *testing.T) {
 		t.Errorf("Unexpected error: %v", err)
 	}
 
-	if err := metricstest.ExpectServerDialFailure(metricsserver.DialFailureErrorResponse, 1); err != nil {
+	if err := ps.Metrics().ExpectServerDialFailure(metricsserver.DialFailureErrorResponse, 1); err != nil {
 		t.Error(err)
 	}
-	if err := metricstest.ExpectAgentDialFailure(metricsagent.DialFailureUnknown, 1); err != nil {
+	if err := a.Metrics().ExpectAgentDialFailure(metricsagent.DialFailureUnknown, 1); err != nil {
 		t.Error(err)
 	}
 	resetAllMetrics() // For clean shutdown.
@@ -341,7 +341,7 @@ func TestProxyDial_RequestCancelled_GRPC(t *testing.T) {
 	if err := clientmetricstest.ExpectClientDialFailure(metricsclient.DialFailureContext, 1); err != nil {
 		t.Error(err)
 	}
-	if err := metricstest.ExpectServerDialFailure(metricsserver.DialFailureFrontendClose, 1); err != nil {
+	if err := ps.Metrics().ExpectServerDialFailure(metricsserver.DialFailureFrontendClose, 1); err != nil {
 		t.Error(err)
 	}
 	resetAllMetrics() // For clean shutdown.
@@ -417,7 +417,7 @@ func TestProxyDial_RequestCancelled_Concurrent_GRPC(t *testing.T) {
 	// Wait for the closed connections to propogate
 	var endpointConnsErr, goLeaksErr error
 	wait.PollImmediate(time.Second, wait.ForeverTestTimeout, func() (done bool, err error) {
-		endpointConnsErr = metricstest.ExpectAgentEndpointConnections(0)
+		endpointConnsErr = a.Metrics().ExpectAgentEndpointConnections(0)
 		goLeaksErr = goleak.Find(ignoredGoRoutines...)
 		return endpointConnsErr == nil && goLeaksErr == nil, nil
 	})
@@ -463,10 +463,10 @@ func TestProxyDial_AgentTimeout_GRPC(t *testing.T) {
 		if err := clientmetricstest.ExpectClientDialFailure(metricsclient.DialFailureEndpoint, 1); err != nil {
 			t.Error(err)
 		}
-		if err := metricstest.ExpectServerDialFailure(metricsserver.DialFailureErrorResponse, 1); err != nil {
+		if err := ps.Metrics().ExpectServerDialFailure(metricsserver.DialFailureErrorResponse, 1); err != nil {
 			t.Error(err)
 		}
-		if err := metricstest.ExpectAgentDialFailure(metricsagent.DialFailureTimeout, 1); err != nil {
+		if err := a.Metrics().ExpectAgentDialFailure(metricsagent.DialFailureTimeout, 1); err != nil {
 			t.Error(err)
 		}
 		resetAllMetrics() // For clean shutdown.
@@ -708,10 +708,10 @@ func TestFailedDNSLookupProxy_HTTPCONN(t *testing.T) {
 		t.Errorf("Unexpected error: %v", err)
 	}
 
-	if err := metricstest.ExpectServerDialFailure(metricsserver.DialFailureErrorResponse, 1); err != nil {
+	if err := ps.Metrics().ExpectServerDialFailure(metricsserver.DialFailureErrorResponse, 1); err != nil {
 		t.Error(err)
 	}
-	if err := metricstest.ExpectAgentDialFailure(metricsagent.DialFailureUnknown, 1); err != nil {
+	if err := a.Metrics().ExpectAgentDialFailure(metricsagent.DialFailureUnknown, 1); err != nil {
 		t.Error(err)
 	}
 	resetAllMetrics() // For clean shutdown.
@@ -780,10 +780,10 @@ func TestFailedDial_HTTPCONN(t *testing.T) {
 		t.Errorf("Unexpected error: %v", err)
 	}
 
-	if err := metricstest.ExpectServerDialFailure(metricsserver.DialFailureErrorResponse, 1); err != nil {
+	if err := ps.Metrics().ExpectServerDialFailure(metricsserver.DialFailureErrorResponse, 1); err != nil {
 		t.Error(err)
 	}
-	if err := metricstest.ExpectAgentDialFailure(metricsagent.DialFailureUnknown, 1); err != nil {
+	if err := a.Metrics().ExpectAgentDialFailure(metricsagent.DialFailureUnknown, 1); err != nil {
 		t.Error(err)
 	}
 	resetAllMetrics() // For clean shutdown.
@@ -872,13 +872,19 @@ func (a *unresponsiveAgent) Close() {
 // server connections (HealthyClientsCount).
 func waitForConnectedServerCount(t testing.TB, expectedServerCount int, a framework.Agent) {
 	t.Helper()
-	err := wait.PollImmediate(100*time.Millisecond, wait.ForeverTestTimeout, func() (bool, error) {
+	startTime := time.Now()
+	lastUpdate := startTime
+	err := wait.PollImmediate(100*time.Millisecond, 5*time.Minute, func() (bool, error) {
 		csc, err := a.GetConnectedServerCount()
 		if err != nil {
 			return false, err
 		}
 		if csc == expectedServerCount {
 			return true, nil
+		}
+		if time.Since(lastUpdate) > 5*time.Second {
+			t.Logf("[%s] Waiting for %d servers, got %d", time.Since(startTime), expectedServerCount, csc)
+			lastUpdate = time.Now()
 		}
 		return false, nil
 	})
@@ -912,27 +918,6 @@ func waitForConnectedAgentCount(t testing.TB, expectedAgentCount int, ps framewo
 	}
 }
 
-func assertNoClientDialFailures(t testing.TB) {
-	t.Helper()
-	if err := clientmetricstest.ExpectClientDialFailures(nil); err != nil {
-		t.Errorf("Unexpected %s metric: %v", "dial_failure_total", err)
-	}
-}
-
-func assertNoServerDialFailures(t testing.TB) {
-	t.Helper()
-	if err := metricstest.ExpectServerDialFailures(nil); err != nil {
-		t.Errorf("Unexpected %s metric: %v", "dial_failure_count", err)
-	}
-}
-
-func assertNoAgentDialFailures(t testing.TB) {
-	t.Helper()
-	if err := metricstest.ExpectAgentDialFailures(nil); err != nil {
-		t.Errorf("Unexpected %s metric: %v", "endpoint_dial_failure_total", err)
-	}
-}
-
 func resetAllMetrics() {
 	metricsclient.Metrics.Reset()
 	metricsserver.Metrics.Reset()
@@ -944,9 +929,17 @@ func expectCleanShutdown(t testing.TB) {
 	currentGoRoutines := goleak.IgnoreCurrent()
 	t.Cleanup(func() {
 		goleak.VerifyNone(t, currentGoRoutines, goleak.IgnoreTopFunction("google.golang.org/grpc.(*addrConn).resetTransport"))
-		assertNoClientDialFailures(t)
-		assertNoServerDialFailures(t)
-		assertNoAgentDialFailures(t)
+		if err := clientmetricstest.ExpectClientDialFailures(nil); err != nil {
+			t.Errorf("Unexpected %s metric: %v", "dial_failure_total", err)
+		}
+
+		// The following checks are only used with in-process agent/server testing.
+		if err := metricstest.DefaultTester.ExpectServerDialFailures(nil); err != nil {
+			t.Errorf("Unexpected %s metric: %v", "dial_failure_count", err)
+		}
+		if err := metricstest.DefaultTester.ExpectAgentDialFailures(nil); err != nil {
+			t.Errorf("Unexpected %s metric: %v", "endpoint_dial_failure_total", err)
+		}
 	})
 }
 
