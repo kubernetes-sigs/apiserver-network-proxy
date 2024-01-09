@@ -133,7 +133,6 @@ func (t *Tester) ExpectMetric(namespace, subsystem, name, expected string) error
 	fqName := prometheus.BuildFQName(namespace, subsystem, name)
 	if t.Endpoint == "" {
 		return promtest.GatherAndCompare(prometheus.DefaultGatherer, strings.NewReader(expected), fqName)
-	} else {
-		return promtest.ScrapeAndCompare(t.Endpoint, strings.NewReader(expected), fqName)
 	}
+	return promtest.ScrapeAndCompare(t.Endpoint, strings.NewReader(expected), fqName)
 }
