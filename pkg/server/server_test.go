@@ -25,8 +25,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/golang/mock/gomock"
 	"github.com/google/uuid"
+	"go.uber.org/mock/gomock"
 	"google.golang.org/grpc/metadata"
 
 	promtest "github.com/prometheus/client_golang/prometheus/testutil"

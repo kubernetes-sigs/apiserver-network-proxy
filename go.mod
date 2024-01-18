@@ -3,13 +3,13 @@ module sigs.k8s.io/apiserver-network-proxy
 go 1.21
 
 require (
-	github.com/golang/mock v1.6.0
 	github.com/google/uuid v1.3.0
 	github.com/prometheus/client_golang v1.14.0
 	github.com/spf13/cobra v1.6.0
 	github.com/spf13/pflag v1.0.5
 	github.com/stretchr/testify v1.8.1
 	go.uber.org/goleak v1.2.1
+	go.uber.org/mock v0.3.0
 	golang.org/x/net v0.17.0
 	google.golang.org/grpc v1.56.3
 	google.golang.org/protobuf v1.30.0

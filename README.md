@@ -58,7 +58,11 @@ want to use the images in.
 
 ### Mockgen
 
-The [```mockgen```](https://github.com/golang/mock) tool must be installed on your system.
+The [```mockgen```](https://github.com/uber-go/mock) tool must be installed on your system.
+
+Currently, we are using go.uber.org/mock/mockgen@v0.4.0
+
+`go install go.uber.org/mock/mockgen@v0.4.0`
 
 ### Protoc
 
