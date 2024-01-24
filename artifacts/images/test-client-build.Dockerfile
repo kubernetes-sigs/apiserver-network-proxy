@@ -8,13 +8,11 @@ WORKDIR /go/src/sigs.k8s.io/apiserver-network-proxy
 COPY go.mod go.mod
 COPY go.sum go.sum
 
-# This is required before go mod download because we have a
-# replace directive for konnectivity-client in go.mod
-# The download will fail without the directory present
+# We have a replace directive for konnectivity-client in go.mod
 COPY konnectivity-client/ konnectivity-client/
 
-# Cache dependencies
-RUN go mod download
+# Copy vendored modules
+COPY vendor/ vendor/
 
 # Copy the sources
 COPY pkg/    pkg/
@@ -23,7 +21,7 @@ COPY proto/  proto/
 
 # Build
 ARG ARCH
-RUN CGO_ENABLED=0 GOOS=linux GOARCH=${ARCH} go build -v -a -ldflags '-extldflags "-static"' -o proxy-test-client sigs.k8s.io/apiserver-network-proxy/cmd/test-client
+RUN CGO_ENABLED=0 GOOS=linux GOARCH=${ARCH} go build -mod=vendor -v -a -ldflags '-extldflags "-static"' -o proxy-test-client sigs.k8s.io/apiserver-network-proxy/cmd/test-client
 
 # Copy the loader into a thin image
 FROM gcr.io/distroless/static-debian11
