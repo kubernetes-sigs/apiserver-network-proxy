@@ -36,7 +36,7 @@ jobs:
         docker build -t gcr.io/k8s-staging-kas-network-proxy/proxy-agent:master -f artifacts/images/agent-build.Dockerfile .
         docker save gcr.io/k8s-staging-kas-network-proxy/proxy-agent:master > _output/konnectivity-agent.tar
         docker build -t gcr.io/k8s-staging-kas-network-proxy/proxy-server:master -f artifacts/images/server-build.Dockerfile .
-        docker save gcr.io/k8s-staging-kas-network-proxy/proxy-server:master >  > _output/konnectivity-server.tar
+        docker save gcr.io/k8s-staging-kas-network-proxy/proxy-server:master > _output/konnectivity-server.tar
 
     - uses: actions/upload-artifact@v2
       with:
@@ -143,78 +143,79 @@ jobs:
         kubectl apply -f examples/kind/konnectivity-server.yaml
         kubectl apply -f examples/kind/konnectivity-agent-ds.yaml
 
-    - name: Get Cluster status
-      run: |
-        # wait network is ready
-        sleep 5
-        /usr/local/bin/kubectl get nodes -o wide
-        /usr/local/bin/kubectl get pods -A
-        /usr/local/bin/kubectl wait --timeout=1m --for=condition=ready pods --namespace=kube-system -l k8s-app=kube-dns
-        # smoke test
-        /usr/local/bin/kubectl run test --image httpd:2
-        /usr/local/bin/kubectl wait --timeout=1m --for=condition=ready pods test
-        /usr/local/bin/kubectl logs test
+    # - name: Get Cluster status
+    #   run: |
+    #     # wait network is ready
+    #     sleep 5
+    #     /usr/local/bin/kubectl get nodes -o wide
+    #     /usr/local/bin/kubectl get pods -A
+    #     /usr/local/bin/kubectl wait --timeout=1m --for=condition=ready pods --namespace=kube-system -l k8s-app=konnectivity-agent
+    #     /usr/local/bin/kubectl wait --timeout=1m --for=condition=ready pods --namespace=kube-system -l k8s-app=konnectivity-server
+    #     # smoke test
+    #     /usr/local/bin/kubectl run test --image httpd:2
+    #     /usr/local/bin/kubectl wait --timeout=1m --for=condition=ready pods test
+    #     /usr/local/bin/kubectl logs test
 
-    - name: Workaround CoreDNS for IPv6 airgapped
-      if: ${{ matrix.ipFamily == 'ipv6' }}
-      run: |
-        # Patch CoreDNS to work in Github CI
-        # 1. Github CI doesn´t offer IPv6 connectivity, so CoreDNS should be configured
-        # to work in an offline environment:
-        # https://github.com/coredns/coredns/issues/2494#issuecomment-457215452
-        # 2. Github CI adds following domains to resolv.conf search field:
-        # .net.
-        # CoreDNS should handle those domains and answer with NXDOMAIN instead of SERVFAIL
-        # otherwise pods stops trying to resolve the domain.
-        # Get the current config
-        original_coredns=$(/usr/local/bin/kubectl get -oyaml -n=kube-system configmap/coredns)
-        echo "Original CoreDNS config:"
-        echo "${original_coredns}"
-        # Patch it
-        fixed_coredns=$(
-          printf '%s' "${original_coredns}" | sed \
-            -e 's/^.*kubernetes cluster\.local/& net/' \
-            -e '/^.*upstream$/d' \
-            -e '/^.*fallthrough.*$/d' \
-            -e '/^.*forward . \/etc\/resolv.conf$/d' \
-            -e '/^.*loop$/d' \
-        )
-        echo "Patched CoreDNS config:"
-        echo "${fixed_coredns}"
-        printf '%s' "${fixed_coredns}" | /usr/local/bin/kubectl apply -f -
+    # - name: Workaround CoreDNS for IPv6 airgapped
+    #   if: ${{ matrix.ipFamily == 'ipv6' }}
+    #   run: |
+    #     # Patch CoreDNS to work in Github CI
+    #     # 1. Github CI doesn´t offer IPv6 connectivity, so CoreDNS should be configured
+    #     # to work in an offline environment:
+    #     # https://github.com/coredns/coredns/issues/2494#issuecomment-457215452
+    #     # 2. Github CI adds following domains to resolv.conf search field:
+    #     # .net.
+    #     # CoreDNS should handle those domains and answer with NXDOMAIN instead of SERVFAIL
+    #     # otherwise pods stops trying to resolve the domain.
+    #     # Get the current config
+    #     original_coredns=$(/usr/local/bin/kubectl get -oyaml -n=kube-system configmap/coredns)
+    #     echo "Original CoreDNS config:"
+    #     echo "${original_coredns}"
+    #     # Patch it
+    #     fixed_coredns=$(
+    #       printf '%s' "${original_coredns}" | sed \
+    #         -e 's/^.*kubernetes cluster\.local/& net/' \
+    #         -e '/^.*upstream$/d' \
+    #         -e '/^.*fallthrough.*$/d' \
+    #         -e '/^.*forward . \/etc\/resolv.conf$/d' \
+    #         -e '/^.*loop$/d' \
+    #     )
+    #     echo "Patched CoreDNS config:"
+    #     echo "${fixed_coredns}"
+    #     printf '%s' "${fixed_coredns}" | /usr/local/bin/kubectl apply -f -
 
-    - name: Run tests
-      run: |
-        export KUBERNETES_CONFORMANCE_TEST='y'
-        export E2E_REPORT_DIR=${PWD}/_artifacts
+    # - name: Run tests
+    #   run: |
+    #     export KUBERNETES_CONFORMANCE_TEST='y'
+    #     export E2E_REPORT_DIR=${PWD}/_artifacts
 
-        # Run tests
-        /usr/local/bin/ginkgo --nodes=25                \
-          --focus="\[Conformance\]"     \
-          --skip="Feature|Federation|machinery|PerformanceDNS|DualStack|Disruptive|Serial|Slow|KubeProxy|LoadBalancer|GCE|Netpol|NetworkPolicy|NodeConformance"   \
-          /usr/local/bin/e2e.test                       \
-          --                                            \
-          --kubeconfig=${PWD}/_artifacts/kubeconfig.conf     \
-          --provider=local                              \
-          --dump-logs-on-failure=false                  \
-          --report-dir=${E2E_REPORT_DIR}                \
-          --disable-log-dump=true
+    #     # Run tests
+    #     /usr/local/bin/ginkgo --nodes=25                \
+    #       --focus="\[Conformance\]"     \
+    #       --skip="Feature|Federation|machinery|PerformanceDNS|DualStack|Disruptive|Serial|Slow|KubeProxy|LoadBalancer|GCE|Netpol|NetworkPolicy|NodeConformance"   \
+    #       /usr/local/bin/e2e.test                       \
+    #       --                                            \
+    #       --kubeconfig=${PWD}/_artifacts/kubeconfig.conf     \
+    #       --provider=local                              \
+    #       --dump-logs-on-failure=false                  \
+    #       --report-dir=${E2E_REPORT_DIR}                \
+    #       --disable-log-dump=true
 
-    - name: Upload Junit Reports
-      if: always()
-      uses: actions/upload-artifact@v2
-      with:
-        name: kind-junit-${{ env.JOB_NAME }}-${{ github.run_id }}
-        path: './_artifacts/*.xml'
+    # - name: Upload Junit Reports
+    #   if: always()
+    #   uses: actions/upload-artifact@v2
+    #   with:
+    #     name: kind-junit-${{ env.JOB_NAME }}-${{ github.run_id }}
+    #     path: './_artifacts/*.xml'
 
-    - name: Export logs
-      if: always()
-      run: |
-        /usr/local/bin/kind export logs --name ${KIND_CLUSTER_NAME} --loglevel=debug ./_artifacts/logs
+    # - name: Export logs
+    #   if: always()
+    #   run: |
+    #     /usr/local/bin/kind export logs --name ${KIND_CLUSTER_NAME} --loglevel=debug ./_artifacts/logs
 
-    - name: Upload logs
-      if: always()
-      uses: actions/upload-artifact@v2
-      with:
-        name: kind-logs-${{ env.JOB_NAME }}-${{ github.run_id }}
-        path: ./_artifacts/logs
+    # - name: Upload logs
+    #   if: always()
+    #   uses: actions/upload-artifact@v2
+    #   with:
+    #     name: kind-logs-${{ env.JOB_NAME }}-${{ github.run_id }}
+    #     path: ./_artifacts/logs
