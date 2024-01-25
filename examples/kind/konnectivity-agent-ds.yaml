@@ -74,6 +74,13 @@ spec:
             path: /healthz
           initialDelaySeconds: 15
           timeoutSeconds: 15
+        readinessProbe:
+          httpGet:
+            scheme: HTTP
+            port: 8093
+            path: /readyz
+          initialDelaySeconds: 15
+          timeoutSeconds: 15
         volumeMounts:
           - mountPath: /var/run/secrets/tokens
             name: konnectivity-agent-token
