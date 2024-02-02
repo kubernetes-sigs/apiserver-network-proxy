@@ -57,18 +57,16 @@ mock_gen:
 
 .PHONY: test
 test:
-	go test -race -covermode=atomic -coverprofile=konnectivity.out ./... && go tool cover -html=konnectivity.out -o=konnectivity.html
+	go test -mod=vendor -race -covermode=atomic -coverprofile=konnectivity.out ./... && go tool cover -html=konnectivity.out -o=konnectivity.html
 	cd konnectivity-client && go test -race -covermode=atomic -coverprofile=client.out ./... && go tool cover -html=client.out -o=client.html
 
 .PHONY: test-integration
 test-integration: build
-	go test -race ./tests -agent-path $(PWD)/bin/proxy-agent
+	go test -mod=vendor -race ./tests -agent-path $(PWD)/bin/proxy-agent
 
 ## --------------------------------------
 ## Binaries
 ## --------------------------------------
-
-SOURCE = $(shell find . -name \*.go)
 
 bin:
 	mkdir -p bin
@@ -76,17 +74,21 @@ bin:
 .PHONY: build
 build: bin/proxy-agent bin/proxy-server bin/proxy-test-client bin/http-test-server
 
-bin/proxy-agent: bin $(SOURCE)
-	GO111MODULE=on go build -o bin/proxy-agent cmd/agent/main.go
+.PHONY: bin/proxy-agent
+bin/proxy-agent:
+	GO111MODULE=on go build -mod=vendor -o bin/proxy-agent cmd/agent/main.go
 
-bin/proxy-test-client: bin $(SOURCE)
-	GO111MODULE=on go build -o bin/proxy-test-client cmd/test-client/main.go
+.PHONY: bin/proxy-test-client
+bin/proxy-test-client:
+	GO111MODULE=on go build -mod=vendor -o bin/proxy-test-client cmd/test-client/main.go
 
-bin/http-test-server: bin $(SOURCE)
-	GO111MODULE=on go build -o bin/http-test-server cmd/test-server/main.go
+.PHONY: bin/http-test-server
+bin/http-test-server:
+	GO111MODULE=on go build -mod=vendor -o bin/http-test-server cmd/test-server/main.go
 
-bin/proxy-server: bin $(SOURCE)
-	GO111MODULE=on go build -o bin/proxy-server cmd/server/main.go
+.PHONY: bin/proxy-server
+bin/proxy-server:
+	GO111MODULE=on go build -mod=vendor -o bin/proxy-server cmd/server/main.go
 
 ## --------------------------------------
 ## Linting
