@@ -1,5 +1,5 @@
 # Build the proxy-agent binary
-FROM golang:1.21.6 as builder
+FROM golang:1.22.0 as builder
 
 # Copy in the go src
 WORKDIR /go/src/sigs.k8s.io/apiserver-network-proxy
