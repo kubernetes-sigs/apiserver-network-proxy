@@ -51,7 +51,7 @@ PROXY_SERVER_IP ?= 127.0.0.1
 .PHONY: mock_gen
 mock_gen:
 	mkdir -p proto/agent/mocks
-	mockgen sigs.k8s.io/apiserver-network-proxy/proto/agent AgentService_ConnectServer > proto/agent/mocks/agent_mock.go
+	mockgen --build_flags=--mod=mod sigs.k8s.io/apiserver-network-proxy/proto/agent AgentService_ConnectServer > proto/agent/mocks/agent_mock.go
 	cat hack/go-license-header.txt proto/agent/mocks/agent_mock.go > proto/agent/mocks/agent_mock.licensed.go
 	mv proto/agent/mocks/agent_mock.licensed.go proto/agent/mocks/agent_mock.go
 
