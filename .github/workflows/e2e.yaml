@@ -114,19 +114,19 @@ jobs:
               kind: ClusterConfiguration
               apiServer:
                 extraArgs:
-                  "egress-selector-config-file": "/etc/kubernetes/konnectivity-server-config/egress_selector_configuration.yaml"
+                  "egress-selector-config-file": "/etc/srv/kubernetes/konnectivity-server-config/egress_selector_configuration.yaml"
                 extraVolumes:
                 - name: egress-selector-config-file
-                  hostPath: "/etc/kubernetes/konnectivity-server-config/egress_selector_configuration.yaml"
-                  mountPath: "/etc/kubernetes/konnectivity-server-config/egress_selector_configuration.yaml"
+                  hostPath: "/etc/srv/kubernetes/konnectivity-server-config/egress_selector_configuration.yaml"
+                  mountPath: "/etc/srv/kubernetes/konnectivity-server-config/egress_selector_configuration.yaml"
                   readOnly: true
                 - name: konnectivity-server
-                  hostPath: "/etc/kubernetes/konnectivity-server"
-                  mountPath: "/etc/kubernetes/konnectivity-server"
+                  hostPath: "/etc/srv/kubernetes/konnectivity-server"
+                  mountPath: "/etc/srv/kubernetes/konnectivity-server"
                   readOnly: true
             extraMounts:
             - hostPath: ./examples/kind/egress_selector_configuration.yaml
-              containerPath: /etc/kubernetes/konnectivity-server-config/egress_selector_configuration.yaml
+              containerPath: /etc/srv/kubernetes/konnectivity-server-config/egress_selector_configuration.yaml
           - role: worker
           - role: worker
         EOF
@@ -149,6 +149,13 @@ jobs:
         docker load --input konnectivity-agent.tar
         /usr/local/bin/kind load docker-image gcr.io/k8s-staging-kas-network-proxy/proxy-server:master --name ${{ env.KIND_CLUSTER_NAME}}
         /usr/local/bin/kind load docker-image gcr.io/k8s-staging-kas-network-proxy/proxy-agent:master --name ${{ env.KIND_CLUSTER_NAME}}
+
+        docker exec kind-control-plane mkdir -p /etc/srv/kubernetes/{konnectivity-server,pki}
+        docker exec kind-control-plane cp -f /etc/kubernetes/pki/apiserver.crt /etc/srv/kubernetes/pki/apiserver.crt
+        docker exec kind-control-plane cp -f /etc/kubernetes/pki/apiserver.key /etc/srv/kubernetes/pki/apiserver.key
+        docker exec kind-control-plane cp -f /etc/kubernetes/admin.conf /etc/srv/kubernetes/admin.conf
+        docker exec kind-control-plane chown -R 1002:1000 /etc/srv/kubernetes
+
         kubectl apply -f examples/kind/konnectivity-server.yaml
         kubectl apply -f examples/kind/konnectivity-agent-ds.yaml
 

@@ -6,7 +6,7 @@ egressSelections:
     proxyProtocol: GRPC
     transport:
       uds:
-        udsName: /etc/kubernetes/konnectivity-server/konnectivity-server.socket
+        udsName: /etc/srv/kubernetes/konnectivity-server/konnectivity-server.socket
 - name: master
   connection:
     proxyProtocol: Direct

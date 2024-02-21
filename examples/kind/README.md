@@ -27,6 +27,17 @@ Have a nice day! 👋
 Once the cluster is ready install the `apiserver-network-proxy` components:
 
 ```sh
+
+$ docker exec kind-control-plane mkdir -p /etc/srv/kubernetes/{konnectivity-server,pki}
+
+$ docker exec kind-control-plane cp -f /etc/kubernetes/pki/apiserver.crt /etc/srv/kubernetes/pki/apiserver.crt
+
+$ docker exec kind-control-plane cp -f /etc/kubernetes/pki/apiserver.key /etc/srv/kubernetes/pki/apiserver.key
+
+$ docker exec kind-control-plane cp -f /etc/kubernetes/admin.conf /etc/srv/kubernetes/admin.conf
+
+$ docker exec kind-control-plane chown -R 1002:1000 /etc/srv/kubernetes
+
 $ kubectl apply -f konnectivity-server.yaml
 clusterrolebinding.rbac.authorization.k8s.io/system:konnectivity-server created
 daemonset.apps/konnectivity-server created
