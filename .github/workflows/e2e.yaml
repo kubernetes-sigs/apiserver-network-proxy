@@ -11,7 +11,10 @@ on:
   workflow_dispatch:
 
 env:
-  GO_VERSION: "1.21.4"
+  GO_TOOLCHAIN: "golang"
+  GO_VERSION: "1.21.6"
+  # TODO: match BASEIMAGE with Makefile default (nonroot variant)
+  BASEIMAGE: "gcr.io/distroless/static-debian11"
   K8S_VERSION: "v1.27.3"
   KIND_CLUSTER_NAME: "kind"
 
@@ -33,9 +36,9 @@ jobs:
       run: |
         mkdir _output
 
-        docker build -t gcr.io/k8s-staging-kas-network-proxy/proxy-agent:master -f artifacts/images/agent-build.Dockerfile .
+        docker build -t gcr.io/k8s-staging-kas-network-proxy/proxy-agent:master -f artifacts/images/agent-build.Dockerfile --build-arg GO_TOOLCHAIN=${{ env.GO_TOOLCHAIN }} --build-arg GO_VERSION=${{ env.GO_VERSION }} --build-arg BASEIMAGE=${{ env.BASEIMAGE }} .
         docker save gcr.io/k8s-staging-kas-network-proxy/proxy-agent:master > _output/konnectivity-agent.tar
-        docker build -t gcr.io/k8s-staging-kas-network-proxy/proxy-server:master -f artifacts/images/server-build.Dockerfile .
+        docker build -t gcr.io/k8s-staging-kas-network-proxy/proxy-server:master -f artifacts/images/server-build.Dockerfile --build-arg GO_TOOLCHAIN=${{ env.GO_TOOLCHAIN }} --build-arg GO_VERSION=${{ env.GO_VERSION }} --build-arg BASEIMAGE=${{ env.BASEIMAGE }} .
         docker save gcr.io/k8s-staging-kas-network-proxy/proxy-server:master > _output/konnectivity-server.tar
 
     - uses: actions/upload-artifact@v2
