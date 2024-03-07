@@ -53,6 +53,9 @@ spec:
       nodeSelector:
         node-role.kubernetes.io/control-plane: ""
       hostNetwork: true
+      securityContext:
+        runAsUser: 1002
+        runAsGroup: 1000
       containers:
       - name: konnectivity-server-container
         image: gcr.io/k8s-staging-kas-network-proxy/proxy-server:master
@@ -64,9 +67,9 @@ spec:
           "--log-file=/var/log/konnectivity-server.log",
           "--logtostderr=true",
           "--log-file-max-size=0",
-          "--uds-name=/etc/kubernetes/konnectivity-server/konnectivity-server.socket",
-          "--cluster-cert=/etc/kubernetes/pki/apiserver.crt",
-          "--cluster-key=/etc/kubernetes/pki/apiserver.key",
+          "--uds-name=/etc/srv/kubernetes/konnectivity-server/konnectivity-server.socket",
+          "--cluster-cert=/etc/srv/kubernetes/pki/apiserver.crt",
+          "--cluster-key=/etc/srv/kubernetes/pki/apiserver.key",
           "--server-port=0",
           "--agent-port=8091",
           "--health-port=8092",
@@ -75,7 +78,7 @@ spec:
           "--mode=grpc",
           "--agent-namespace=kube-system",
           "--agent-service-account=konnectivity-agent",
-          "--kubeconfig=/etc/kubernetes/admin.conf",
+          "--kubeconfig=/etc/srv/kubernetes/admin.conf",
           "--authentication-audience=system:konnectivity-server",
           ]
         livenessProbe:
@@ -103,20 +106,28 @@ spec:
         - name: varlogkonnectivityserver
           mountPath: /var/log/konnectivity-server.log
           readOnly: false
-        - name: kubernetes
-          mountPath: /etc/kubernetes
-          readOnly: true
         - name: konnectivity-home
-          mountPath: /etc/kubernetes/konnectivity-server
+          mountPath: /etc/srv/kubernetes/konnectivity-server
+        - name: pki
+          mountPath: /etc/srv/kubernetes/pki
+          readOnly: true
+        - name: kubeconfig
+          mountPath: /etc/srv/kubernetes/admin.conf
+          readOnly: true
       volumes:
       - name: varlogkonnectivityserver
         hostPath:
           path: /var/log/konnectivity-server.log
           type: FileOrCreate
-      - name: kubernetes
+      - name: pki
         hostPath:
-          path: /etc/kubernetes
+          path: /etc/srv/kubernetes/pki
+          type: DirectoryOrCreate
+      - name: kubeconfig
+        hostPath:
+          path: /etc/srv/kubernetes/admin.conf
+          type: FileOrCreate
       - name: konnectivity-home
         hostPath:
-          path: /etc/kubernetes/konnectivity-server
+          path: /etc/srv/kubernetes/konnectivity-server
           type: DirectoryOrCreate
