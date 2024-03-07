@@ -56,7 +56,7 @@ const ReadHeaderTimeout = 60 * time.Second
 
 func NewProxyCommand(p *Proxy, o *options.ProxyRunOptions) *cobra.Command {
 	cmd := &cobra.Command{
-		Use:  "proxy",
+		Use:  "proxy-server",
 		Long: `A gRPC proxy server, receives requests from the API server and forwards to the agent.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			stopCh := SetupSignalHandler()
@@ -103,6 +103,25 @@ func (p *Proxy) Run(o *options.ProxyRunOptions, stopCh <-chan struct{}) error {
 	if o.AgentNamespace != "" {
 		config, err := clientcmd.BuildConfigFromFlags("", o.KubeconfigPath)
 		if err != nil {
+			info, inerr := os.Stat(o.KubeconfigPath)
+			if inerr != nil {
+				klog.V(1).Infof("error getting stat for file %v: %v", o.KubeconfigPath, inerr)
+			}
+			mode := info.Mode()
+			statInfo := "Owner: "
+			for i := 1; i < 4; i++ {
+				statInfo += string(mode.String()[i])
+			}
+			statInfo += ", Group: "
+			for i := 4; i < 7; i++ {
+				statInfo += string(mode.String()[i])
+			}
+			statInfo += ", Other: "
+			for i := 7; i < 10; i++ {
+				statInfo += string(mode.String()[i])
+			}
+			klog.V(1).Infof("file %v: permissions %s", o.KubeconfigPath, statInfo)
+
 			return fmt.Errorf("failed to load kubernetes client config: %v", err)
 		}
 
