@@ -17,6 +17,9 @@ ARCH_LIST ?= amd64 arm arm64 ppc64le s390x
 RELEASE_ARCH_LIST = amd64 arm64
 # The output type could either be docker (local), or registry.
 OUTPUT_TYPE ?= docker
+GO_TOOLCHAIN ?= golang
+GO_VERSION ?= 1.21.6
+BASEIMAGE ?= gcr.io/distroless/static-debian11:nonroot
 
 ifeq ($(GOPATH),)
 export GOPATH := $(shell go env GOPATH)
@@ -199,7 +202,7 @@ docker-push: docker-push/proxy-agent docker-push/proxy-server
 docker-build/proxy-agent: cmd/agent/main.go proto/agent/agent.pb.go buildx-setup
 	@[ "${TAG}" ] || ( echo "TAG is not set"; exit 1 )
 	echo "Building proxy-agent for ${ARCH}"
-	${DOCKER_CMD} buildx build . --pull --output=type=$(OUTPUT_TYPE) --platform linux/$(ARCH) --build-arg ARCH=$(ARCH) -f artifacts/images/agent-build.Dockerfile -t ${AGENT_FULL_IMAGE}-$(ARCH):${TAG}
+	${DOCKER_CMD} buildx build . --pull --output=type=$(OUTPUT_TYPE) --platform linux/$(ARCH) --build-arg GO_TOOLCHAIN=$(GO_TOOLCHAIN) --build-arg GO_VERSION=$(GO_VERSION) --build-arg ARCH=$(ARCH) --build-arg BASEIMAGE=$(BASEIMAGE) -f artifacts/images/agent-build.Dockerfile -t ${AGENT_FULL_IMAGE}-$(ARCH):${TAG}
 
 .PHONY: docker-push/proxy-agent
 docker-push/proxy-agent: docker-build/proxy-agent
@@ -210,7 +213,7 @@ docker-push/proxy-agent: docker-build/proxy-agent
 docker-build/proxy-server: cmd/server/main.go proto/agent/agent.pb.go buildx-setup
 	@[ "${TAG}" ] || ( echo "TAG is not set"; exit 1 )
 	echo "Building proxy-server for ${ARCH}"
-	${DOCKER_CMD} buildx build . --pull --output=type=$(OUTPUT_TYPE) --platform linux/$(ARCH) --build-arg ARCH=$(ARCH) -f artifacts/images/server-build.Dockerfile -t ${SERVER_FULL_IMAGE}-$(ARCH):${TAG}
+	${DOCKER_CMD} buildx build . --pull --output=type=$(OUTPUT_TYPE) --platform linux/$(ARCH) --build-arg GO_TOOLCHAIN=$(GO_TOOLCHAIN) --build-arg GO_VERSION=$(GO_VERSION) --build-arg ARCH=$(ARCH) --build-arg BASEIMAGE=$(BASEIMAGE) -f artifacts/images/server-build.Dockerfile -t ${SERVER_FULL_IMAGE}-$(ARCH):${TAG}
 
 .PHONY: docker-push/proxy-server
 docker-push/proxy-server: docker-build/proxy-server
@@ -221,7 +224,7 @@ docker-push/proxy-server: docker-build/proxy-server
 docker-build/proxy-test-client: cmd/test-client/main.go proto/agent/agent.pb.go buildx-setup
 	@[ "${TAG}" ] || ( echo "TAG is not set"; exit 1 )
 	echo "Building proxy-test-client for ${ARCH}"
-	${DOCKER_CMD} buildx build . --pull --output=type=$(OUTPUT_TYPE) --platform linux/$(ARCH) --build-arg ARCH=$(ARCH) -f artifacts/images/test-client-build.Dockerfile -t ${TEST_CLIENT_FULL_IMAGE}-$(ARCH):${TAG}
+	${DOCKER_CMD} buildx build . --pull --output=type=$(OUTPUT_TYPE) --platform linux/$(ARCH) --build-arg GO_TOOLCHAIN=$(GO_TOOLCHAIN) --build-arg GO_VERSION=$(GO_VERSION) --build-arg ARCH=$(ARCH) --build-arg BASEIMAGE=$(BASEIMAGE) -f artifacts/images/test-client-build.Dockerfile -t ${TEST_CLIENT_FULL_IMAGE}-$(ARCH):${TAG}
 
 .PHONY: docker-push/proxy-test-client
 docker-push/proxy-test-client: docker-build/proxy-test-client
@@ -232,7 +235,7 @@ docker-push/proxy-test-client: docker-build/proxy-test-client
 docker-build/http-test-server: cmd/test-server/main.go buildx-setup
 	@[ "${TAG}" ] || ( echo "TAG is not set"; exit 1 )
 	echo "Building http-test-server for ${ARCH}"
-	${DOCKER_CMD} buildx build . --pull --output=type=$(OUTPUT_TYPE) --platform linux/$(ARCH) --build-arg ARCH=$(ARCH) -f artifacts/images/test-server-build.Dockerfile -t ${TEST_SERVER_FULL_IMAGE}-$(ARCH):${TAG}
+	${DOCKER_CMD} buildx build . --pull --output=type=$(OUTPUT_TYPE) --platform linux/$(ARCH) --build-arg GO_TOOLCHAIN=$(GO_TOOLCHAIN) --build-arg GO_VERSION=$(GO_VERSION) --build-arg ARCH=$(ARCH) --build-arg BASEIMAGE=$(BASEIMAGE) -f artifacts/images/test-server-build.Dockerfile -t ${TEST_SERVER_FULL_IMAGE}-$(ARCH):${TAG}
 
 .PHONY: docker-push/http-test-server
 docker-push/http-test-server: docker-build/http-test-server
