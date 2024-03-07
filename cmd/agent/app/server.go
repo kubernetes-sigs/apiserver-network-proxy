@@ -63,6 +63,7 @@ type Agent struct {
 	healthServer *http.Server
 
 	cs *agent.ClientSet
+	csStopCh <-chan struct{}
 }
 
 func (a *Agent) Run(o *options.GrpcProxyAgentOptions, stopCh <-chan struct{}) error {
@@ -71,13 +72,12 @@ func (a *Agent) Run(o *options.GrpcProxyAgentOptions, stopCh <-chan struct{}) er
 		return fmt.Errorf("failed to validate agent options with %v", err)
 	}
 
-	cs, err := a.runProxyConnection(o, stopCh)
+	err := a.runProxyConnection(o, stopCh)
 	if err != nil {
 		return fmt.Errorf("failed to run proxy connection with %v", err)
 	}
-	a.cs = cs
 
-	if err := a.runHealthServer(o, cs); err != nil {
+	if err := a.runHealthServer(o); err != nil {
 		return fmt.Errorf("failed to run health server with %v", err)
 	}
 	defer a.healthServer.Close()
@@ -87,13 +87,14 @@ func (a *Agent) Run(o *options.GrpcProxyAgentOptions, stopCh <-chan struct{}) er
 	}
 	defer a.adminServer.Close()
 
+	<-a.csStopCh
 	<-stopCh
 	klog.V(1).Infoln("Shutting down agent.")
 
 	return nil
 }
 
-func (a *Agent) runProxyConnection(o *options.GrpcProxyAgentOptions, stopCh <-chan struct{}) (*agent.ClientSet, error) {
+func (a *Agent) runProxyConnection(o *options.GrpcProxyAgentOptions, stopCh <-chan struct{}) error {
 	var tlsConfig *tls.Config
 	var err error
 
@@ -110,13 +111,13 @@ func (a *Agent) runProxyConnection(o *options.GrpcProxyAgentOptions, stopCh <-ch
 
 	// Watch the certificate files
 	if err := watcher.Add(o.AgentCert); err != nil {
-		return nil, err
+		return err
 	}
 	if err := watcher.Add(o.AgentKey); err != nil {
-		return nil, err
+		return err
 	}
 	if err := watcher.Add(o.CaCert); err != nil {
-		return nil, err
+		return err
 	}
 
 	reload := make(chan bool)
@@ -163,8 +164,12 @@ func (a *Agent) runProxyConnection(o *options.GrpcProxyAgentOptions, stopCh <-ch
 					}),
 				}
 				cc := o.ClientSetConfig(dialOptions...)
-				cs := cc.NewAgentClientSet(stopCh)
-				cs.Serve()
+				if a.cs != nil {
+					<-a.csStopCh
+				}
+				a.csStopCh = make(chan struct{})
+				a.cs = cc.NewAgentClientSet(a.csStopCh)
+				a.cs.Serve()
 
 			case <-stopCh:
 				// Handle server shutdown
@@ -173,15 +178,15 @@ func (a *Agent) runProxyConnection(o *options.GrpcProxyAgentOptions, stopCh <-ch
 		}
 	}()
 
-	return cs, nil
+	return nil
 }
 
-func (a *Agent) runHealthServer(o *options.GrpcProxyAgentOptions, cs agent.ReadinessManager) error {
+func (a *Agent) runHealthServer(o *options.GrpcProxyAgentOptions/*, cs agent.ReadinessManager*/) error {
 	livenessHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		fmt.Fprintf(w, "ok")
 	})
 
-	checks := []agent.HealthChecker{agent.Ping, agent.NewServerConnected(cs)}
+	checks := []agent.HealthChecker{agent.Ping, agent.NewServerConnected(a.cs)}
 	readinessHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		var failedChecks []string
 		var individualCheckOutput bytes.Buffer

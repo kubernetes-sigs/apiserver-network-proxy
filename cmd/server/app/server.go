@@ -473,7 +473,7 @@ func (p *Proxy) runAgentServer(o *options.ProxyRunOptions, server *server.ProxyS
 				return
 			}
 		}
-	}()
+	})
 
 	// Initial restart to start the server
 	restartServer <- true
