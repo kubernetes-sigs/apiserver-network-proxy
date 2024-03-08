@@ -36,10 +36,10 @@ jobs:
       run: |
         mkdir _output
 
-        docker build -t gcr.io/k8s-staging-kas-network-proxy/proxy-agent:master -f artifacts/images/agent-build.Dockerfile --build-arg GO_TOOLCHAIN=${{ env.GO_TOOLCHAIN }} --build-arg GO_VERSION=${{ env.GO_VERSION }} --build-arg BASEIMAGE=${{ env.BASEIMAGE }} .
-        docker save gcr.io/k8s-staging-kas-network-proxy/proxy-agent:master > _output/konnectivity-agent.tar
-        docker build -t gcr.io/k8s-staging-kas-network-proxy/proxy-server:master -f artifacts/images/server-build.Dockerfile --build-arg GO_TOOLCHAIN=${{ env.GO_TOOLCHAIN }} --build-arg GO_VERSION=${{ env.GO_VERSION }} --build-arg BASEIMAGE=${{ env.BASEIMAGE }} .
-        docker save gcr.io/k8s-staging-kas-network-proxy/proxy-server:master > _output/konnectivity-server.tar
+        make docker-build/proxy-agent-amd64 REGISTRY=gcr.io/k8s-staging-kas-network-proxy TAG=local BASEIMAGE=${{ env.BASEIMAGE }}
+        docker save gcr.io/k8s-staging-kas-network-proxy/proxy-agent-amd64:local > _output/konnectivity-agent.tar
+        make docker-build/proxy-server-amd64 REGISTRY=gcr.io/k8s-staging-kas-network-proxy TAG=local BASEIMAGE=${{ env.BASEIMAGE }}
+        docker save gcr.io/k8s-staging-kas-network-proxy/proxy-server-amd64:local > _output/konnectivity-server.tar
 
     - uses: actions/upload-artifact@v2
       with:
@@ -150,8 +150,8 @@ jobs:
         # preload konnectivity images
         docker load --input konnectivity-server.tar
         docker load --input konnectivity-agent.tar
-        /usr/local/bin/kind load docker-image gcr.io/k8s-staging-kas-network-proxy/proxy-server:master --name ${{ env.KIND_CLUSTER_NAME}}
-        /usr/local/bin/kind load docker-image gcr.io/k8s-staging-kas-network-proxy/proxy-agent:master --name ${{ env.KIND_CLUSTER_NAME}}
+        /usr/local/bin/kind load docker-image gcr.io/k8s-staging-kas-network-proxy/proxy-server-amd64:local --name ${{ env.KIND_CLUSTER_NAME}}
+        /usr/local/bin/kind load docker-image gcr.io/k8s-staging-kas-network-proxy/proxy-agent-amd64:local --name ${{ env.KIND_CLUSTER_NAME}}
         kubectl apply -f examples/kind/konnectivity-server.yaml
         kubectl apply -f examples/kind/konnectivity-agent-ds.yaml
 

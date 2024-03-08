@@ -1,10 +1,11 @@
 # Build the client binary
 
+ARG BUILDARCH
 ARG GO_TOOLCHAIN
 ARG GO_VERSION
 ARG BASEIMAGE
 
-FROM ${GO_TOOLCHAIN}:${GO_VERSION} as builder
+FROM --platform=linux/${BUILDARCH} ${GO_TOOLCHAIN}:${GO_VERSION} as builder
 
 # Copy in the go src
 WORKDIR /go/src/sigs.k8s.io/apiserver-network-proxy
@@ -25,8 +26,8 @@ COPY cmd/    cmd/
 COPY proto/  proto/
 
 # Build
-ARG ARCH
-RUN CGO_ENABLED=0 GOOS=linux GOARCH=${ARCH} go build -mod=vendor -v -a -ldflags '-extldflags "-static"' -o proxy-test-client sigs.k8s.io/apiserver-network-proxy/cmd/test-client
+ARG TARGETARCH
+RUN CGO_ENABLED=0 GOOS=linux GOARCH=${TARGETARCH} go build -mod=vendor -v -a -ldflags '-extldflags "-static"' -o proxy-test-client sigs.k8s.io/apiserver-network-proxy/cmd/test-client
 
 FROM ${BASEIMAGE}
 
