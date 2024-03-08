@@ -1,5 +1,10 @@
 # Build the proxy-server binary
-FROM golang:1.21.6 as builder
+
+ARG GO_TOOLCHAIN
+ARG GO_VERSION
+ARG BASEIMAGE
+
+FROM ${GO_TOOLCHAIN}:${GO_VERSION} as builder
 
 # Copy in the go src
 WORKDIR /go/src/sigs.k8s.io/apiserver-network-proxy
@@ -23,8 +28,8 @@ COPY proto/  proto/
 ARG ARCH
 RUN CGO_ENABLED=0 GOOS=linux GOARCH=${ARCH} go build -mod=vendor -v -a -ldflags '-extldflags "-static"' -o proxy-server sigs.k8s.io/apiserver-network-proxy/cmd/server
 
-# Copy the loader into a thin image
-FROM gcr.io/distroless/static-debian11:nonroot
+FROM ${BASEIMAGE}
+
 WORKDIR /
 COPY --from=builder /go/src/sigs.k8s.io/apiserver-network-proxy/proxy-server .
 ENTRYPOINT ["/proxy-server"]
