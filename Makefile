@@ -12,7 +12,14 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+# ARCH specifies the golang target platform, for docker build
+# targetes. It is supported for backward compatibility, but prefer
+# BUILDARCH and TARGETARCH.
 ARCH ?= amd64
+# BUILDARCH specifies the golang build platform, for docker build targets.
+BUILDARCH ?= amd64
+# TARGETARCH specifies the golang target platform, for docker build targets.
+TARGETARCH ?= $(ARCH)
 ARCH_LIST ?= amd64 arm arm64 ppc64le s390x
 RELEASE_ARCH_LIST = amd64 arm64
 # The output type could either be docker (local), or registry.
@@ -60,14 +67,16 @@ mock_gen:
 
 .PHONY: test
 test:
-	go test -race -covermode=atomic -coverprofile=konnectivity.out ./... && go tool cover -html=konnectivity.out -o=konnectivity.html
+	go test -mod=vendor -race -covermode=atomic -coverprofile=konnectivity.out ./... && go tool cover -html=konnectivity.out -o=konnectivity.html
 	cd konnectivity-client && go test -race -covermode=atomic -coverprofile=client.out ./... && go tool cover -html=client.out -o=client.html
+
+.PHONY: test-integration
+test-integration: build
+	go test -mod=vendor -race ./tests -agent-path $(PWD)/bin/proxy-agent
 
 ## --------------------------------------
 ## Binaries
 ## --------------------------------------
-
-SOURCE = $(shell find . -name \*.go)
 
 bin:
 	mkdir -p bin
@@ -75,17 +84,21 @@ bin:
 .PHONY: build
 build: bin/proxy-agent bin/proxy-server bin/proxy-test-client bin/http-test-server
 
-bin/proxy-agent: bin $(SOURCE)
-	GO111MODULE=on go build -o bin/proxy-agent cmd/agent/main.go
+.PHONY: bin/proxy-agent
+bin/proxy-agent:
+	GO111MODULE=on go build -mod=vendor -o bin/proxy-agent cmd/agent/main.go
 
-bin/proxy-test-client: bin $(SOURCE)
-	GO111MODULE=on go build -o bin/proxy-test-client cmd/test-client/main.go
+.PHONY: bin/proxy-test-client
+bin/proxy-test-client:
+	GO111MODULE=on go build -mod=vendor -o bin/proxy-test-client cmd/test-client/main.go
 
-bin/http-test-server: bin $(SOURCE)
-	GO111MODULE=on go build -o bin/http-test-server cmd/test-server/main.go
+.PHONY: bin/http-test-server
+bin/http-test-server:
+	GO111MODULE=on go build -mod=vendor -o bin/http-test-server cmd/test-server/main.go
 
-bin/proxy-server: bin $(SOURCE)
-	GO111MODULE=on go build -o bin/proxy-server cmd/server/main.go
+.PHONY: bin/proxy-server
+bin/proxy-server:
+	GO111MODULE=on go build -mod=vendor -o bin/proxy-server cmd/server/main.go
 
 ## --------------------------------------
 ## Linting
@@ -195,53 +208,53 @@ docker-push: docker-push/proxy-agent docker-push/proxy-server
 .PHONY: docker-build/proxy-agent
 docker-build/proxy-agent: cmd/agent/main.go proto/agent/agent.pb.go buildx-setup
 	@[ "${TAG}" ] || ( echo "TAG is not set"; exit 1 )
-	echo "Building proxy-agent for ${ARCH}"
-	${DOCKER_CMD} buildx build . --pull --output=type=$(OUTPUT_TYPE) --platform linux/$(ARCH) --build-arg GO_TOOLCHAIN=$(GO_TOOLCHAIN) --build-arg GO_VERSION=$(GO_VERSION) --build-arg ARCH=$(ARCH) --build-arg BASEIMAGE=$(BASEIMAGE) -f artifacts/images/agent-build.Dockerfile -t ${AGENT_FULL_IMAGE}-$(ARCH):${TAG}
+	echo "Building proxy-agent with ${BUILDARCH} for ${TARGETARCH}"
+	${DOCKER_CMD} buildx build . --pull --output=type=$(OUTPUT_TYPE) --platform linux/$(TARGETARCH) --build-arg GO_TOOLCHAIN=$(GO_TOOLCHAIN) --build-arg GO_VERSION=$(GO_VERSION) --build-arg BUILDARCH=$(BUILDARCH) --build-arg TARGETARCH=$(TARGETARCH) --build-arg BASEIMAGE=$(BASEIMAGE) -f artifacts/images/agent-build.Dockerfile -t ${AGENT_FULL_IMAGE}-$(TARGETARCH):${TAG}
 
 .PHONY: docker-push/proxy-agent
 docker-push/proxy-agent: docker-build/proxy-agent
 	@[ "${DOCKER_CMD}" ] || ( echo "DOCKER_CMD is not set"; exit 1 )
-	${DOCKER_CMD} push ${AGENT_FULL_IMAGE}-$(ARCH):${TAG}
+	${DOCKER_CMD} push ${AGENT_FULL_IMAGE}-$(TARGETARCH):${TAG}
 
 .PHONY: docker-build/proxy-server
 docker-build/proxy-server: cmd/server/main.go proto/agent/agent.pb.go buildx-setup
 	@[ "${TAG}" ] || ( echo "TAG is not set"; exit 1 )
-	echo "Building proxy-server for ${ARCH}"
-	${DOCKER_CMD} buildx build . --pull --output=type=$(OUTPUT_TYPE) --platform linux/$(ARCH) --build-arg GO_TOOLCHAIN=$(GO_TOOLCHAIN) --build-arg GO_VERSION=$(GO_VERSION) --build-arg ARCH=$(ARCH) --build-arg BASEIMAGE=$(BASEIMAGE) -f artifacts/images/server-build.Dockerfile -t ${SERVER_FULL_IMAGE}-$(ARCH):${TAG}
+	echo "Building proxy-server with ${BUILDARCH} for ${TARGETARCH}"
+	${DOCKER_CMD} buildx build . --pull --output=type=$(OUTPUT_TYPE) --platform linux/$(TARGETARCH) --build-arg GO_TOOLCHAIN=$(GO_TOOLCHAIN) --build-arg GO_VERSION=$(GO_VERSION) --build-arg BUILDARCH=$(BUILDARCH) --build-arg TARGETARCH=$(TARGETARCH) --build-arg BASEIMAGE=$(BASEIMAGE) -f artifacts/images/server-build.Dockerfile -t ${SERVER_FULL_IMAGE}-$(TARGETARCH):${TAG}
 
 .PHONY: docker-push/proxy-server
 docker-push/proxy-server: docker-build/proxy-server
 	@[ "${DOCKER_CMD}" ] || ( echo "DOCKER_CMD is not set"; exit 1 )
-	${DOCKER_CMD} push ${SERVER_FULL_IMAGE}-$(ARCH):${TAG}
+	${DOCKER_CMD} push ${SERVER_FULL_IMAGE}-$(TARGETARCH):${TAG}
 
 .PHONY: docker-build/proxy-test-client
 docker-build/proxy-test-client: cmd/test-client/main.go proto/agent/agent.pb.go buildx-setup
 	@[ "${TAG}" ] || ( echo "TAG is not set"; exit 1 )
-	echo "Building proxy-test-client for ${ARCH}"
-	${DOCKER_CMD} buildx build . --pull --output=type=$(OUTPUT_TYPE) --platform linux/$(ARCH) --build-arg GO_TOOLCHAIN=$(GO_TOOLCHAIN) --build-arg GO_VERSION=$(GO_VERSION) --build-arg ARCH=$(ARCH) --build-arg BASEIMAGE=$(BASEIMAGE) -f artifacts/images/test-client-build.Dockerfile -t ${TEST_CLIENT_FULL_IMAGE}-$(ARCH):${TAG}
+	echo "Building proxy-test-client with ${BUILDARCH} for ${TARGETARCH}"
+	${DOCKER_CMD} buildx build . --pull --output=type=$(OUTPUT_TYPE) --platform linux/$(TARGETARCH) --build-arg GO_TOOLCHAIN=$(GO_TOOLCHAIN) --build-arg GO_VERSION=$(GO_VERSION) --build-arg BUILDARCH=$(BUILDARCH) --build-arg TARGETARCH=$(TARGETARCH) --build-arg BASEIMAGE=$(BASEIMAGE) -f artifacts/images/test-client-build.Dockerfile -t ${TEST_CLIENT_FULL_IMAGE}-$(TARGETARCH):${TAG}
 
 .PHONY: docker-push/proxy-test-client
 docker-push/proxy-test-client: docker-build/proxy-test-client
 	@[ "${DOCKER_CMD}" ] || ( echo "DOCKER_CMD is not set"; exit 1 )
-	${DOCKER_CMD} push ${TEST_CLIENT_FULL_IMAGE}-$(ARCH):${TAG}
+	${DOCKER_CMD} push ${TEST_CLIENT_FULL_IMAGE}-$(TARGETARCH):${TAG}
 
 .PHONY: docker-build/http-test-server
 docker-build/http-test-server: cmd/test-server/main.go buildx-setup
 	@[ "${TAG}" ] || ( echo "TAG is not set"; exit 1 )
-	echo "Building http-test-server for ${ARCH}"
-	${DOCKER_CMD} buildx build . --pull --output=type=$(OUTPUT_TYPE) --platform linux/$(ARCH) --build-arg GO_TOOLCHAIN=$(GO_TOOLCHAIN) --build-arg GO_VERSION=$(GO_VERSION) --build-arg ARCH=$(ARCH) --build-arg BASEIMAGE=$(BASEIMAGE) -f artifacts/images/test-server-build.Dockerfile -t ${TEST_SERVER_FULL_IMAGE}-$(ARCH):${TAG}
+	echo "Building http-test-server with ${BUILDARCH} for ${TARGETARCH}"
+	${DOCKER_CMD} buildx build . --pull --output=type=$(OUTPUT_TYPE) --platform linux/$(TARGETARCH) --build-arg GO_TOOLCHAIN=$(GO_TOOLCHAIN) --build-arg GO_VERSION=$(GO_VERSION) --build-arg BUILDARCH=$(BUILDARCH) --build-arg TARGETARCH=$(TARGETARCH) --build-arg BASEIMAGE=$(BASEIMAGE) -f artifacts/images/test-server-build.Dockerfile -t ${TEST_SERVER_FULL_IMAGE}-$(TARGETARCH):${TAG}
 
 .PHONY: docker-push/http-test-server
 docker-push/http-test-server: docker-build/http-test-server
 	@[ "${DOCKER_CMD}" ] || ( echo "DOCKER_CMD is not set"; exit 1 )
-	${DOCKER_CMD} push ${TEST_SERVER_FULL_IMAGE}-$(ARCH):${TAG}
+	${DOCKER_CMD} push ${TEST_SERVER_FULL_IMAGE}-$(TARGETARCH):${TAG}
 
 ## --------------------------------------
 ## Docker — All ARCH
 ## --------------------------------------
 
 # As `docker buildx` is time and resource consuming, if not necessary, building specific arch images,
-# like `make docker-build-arch-aamd64`, is recommended.
+# like `make docker-build-arch-amd64`, is recommended.
 .PHONY: docker-build-all
 docker-build-all: $(addprefix docker-build-arch-,$(ARCH_LIST))
 
@@ -255,16 +268,16 @@ docker-build-arch-%:
 	$(MAKE) docker-build/proxy-server-$*
 
 docker-build/proxy-agent-%:
-	$(MAKE) ARCH=$* docker-build/proxy-agent
+	$(MAKE) TARGETARCH=$* docker-build/proxy-agent
 
 docker-push/proxy-agent-%:
-	$(MAKE) ARCH=$* docker-push/proxy-agent
+	$(MAKE) TARGETARCH=$* docker-push/proxy-agent
 
 docker-build/proxy-server-%:
-	$(MAKE) ARCH=$* docker-build/proxy-server
+	$(MAKE) TARGETARCH=$* docker-build/proxy-server
 
 docker-push/proxy-server-%:
-	$(MAKE) ARCH=$* docker-push/proxy-server
+	$(MAKE) TARGETARCH=$* docker-push/proxy-server
 
 .PHONY: docker-push-manifest/proxy-agent
 docker-push-manifest/proxy-agent: ## Push the fat manifest docker image.
