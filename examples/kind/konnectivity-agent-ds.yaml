@@ -36,7 +36,8 @@ spec:
       dnsPolicy: ClusterFirstWithHostNet
       containers:
       - name: konnectivity-agent-container
-        image: gcr.io/k8s-staging-kas-network-proxy/proxy-agent:master
+        image: gcr.io/k8s-staging-kas-network-proxy/proxy-agent-amd64:local
+        imagePullPolicy: Never
         resources:
           requests:
             cpu: 50m
