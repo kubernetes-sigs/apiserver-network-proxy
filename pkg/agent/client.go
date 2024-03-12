@@ -137,7 +137,11 @@ type Client struct {
 	address string
 	opts    []grpc.DialOption
 	conn    *grpc.ClientConn
-	stopCh  chan struct{}
+
+	drainCh   <-chan struct{}
+	drainOnce sync.Once
+	stopCh    chan struct{}
+
 	// locks
 	sendLock      sync.Mutex
 	recvLock      sync.Mutex
@@ -158,6 +162,7 @@ func newAgentClient(address, agentID, agentIdentifiers string, cs *ClientSet, op
 		agentIdentifiers:        agentIdentifiers,
 		opts:                    opts,
 		probeInterval:           cs.probeInterval,
+		drainCh:                 cs.drainCh,
 		stopCh:                  make(chan struct{}),
 		serviceAccountTokenPath: cs.serviceAccountTokenPath,
 		connManager:             newConnectionManager(),
@@ -325,6 +330,19 @@ func (a *Client) Serve() {
 		case <-a.stopCh:
 			klog.V(2).InfoS("stop agent client.")
 			return
+		case <-a.drainCh:
+			a.drainOnce.Do(func() {
+				klog.V(2).InfoS("drain agent client", "serverID", a.serverID, "agentID", a.agentID)
+				drainPkt := &client.Packet{
+					Type: client.PacketType_DRAIN,
+					Payload: &client.Packet_Drain{
+						Drain: &client.Drain{},
+					},
+				}
+				if err := a.Send(drainPkt); err != nil {
+					klog.ErrorS(err, "drain failure", "")
+				}
+			})
 		default:
 		}
 

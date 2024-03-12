@@ -27,6 +27,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"sync"
+	"syscall"
 	"testing"
 	"time"
 
@@ -53,6 +54,7 @@ type AgentRunner interface {
 type Agent interface {
 	GetConnectedServerCount() (int, error)
 	Ready() bool
+	Drain()
 	Stop()
 	Metrics() metricstest.AgentTester
 }
@@ -66,9 +68,10 @@ func (*InProcessAgentRunner) Start(t testing.TB, opts AgentOpts) (Agent, error) 
 	}
 
 	ctx, cancel := context.WithCancel(context.Background())
+	drainCh := make(chan struct{})
 	stopCh := make(chan struct{})
 	go func() {
-		if err := a.Run(o, stopCh); err != nil {
+		if err := a.Run(o, drainCh, stopCh); err != nil {
 			log.Printf("ERROR running agent: %v", err)
 			cancel()
 		}
@@ -84,6 +87,7 @@ func (*InProcessAgentRunner) Start(t testing.TB, opts AgentOpts) (Agent, error) 
 
 	pa := &inProcessAgent{
 		client:     a.ClientSet(),
+		drainCh:    drainCh,
 		stopCh:     stopCh,
 		healthAddr: healthAddr,
 	}
@@ -94,10 +98,19 @@ func (*InProcessAgentRunner) Start(t testing.TB, opts AgentOpts) (Agent, error) 
 type inProcessAgent struct {
 	client *agent.ClientSet
 
+	drainOnce sync.Once
+	drainCh   chan struct{}
+
 	stopOnce sync.Once
 	stopCh   chan struct{}
 
 	healthAddr string
+}
+
+func (a *inProcessAgent) Drain() {
+	a.drainOnce.Do(func() {
+		close(a.drainCh)
+	})
 }
 
 func (a *inProcessAgent) Stop() {
@@ -160,7 +173,16 @@ type externalAgent struct {
 	cmd                   *exec.Cmd
 	metrics               *metricstest.Tester
 
-	stopOnce sync.Once
+	drainOnce sync.Once
+	stopOnce  sync.Once
+}
+
+func (a *externalAgent) Drain() {
+	a.drainOnce.Do(func() {
+		if err := a.cmd.Process.Signal(syscall.SIGTERM); err != nil {
+			log.Fatalf("Error draining agent process: %v", err)
+		}
+	})
 }
 
 func (a *externalAgent) Stop() {

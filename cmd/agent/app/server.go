@@ -24,10 +24,13 @@ import (
 	"net"
 	"net/http"
 	"net/http/pprof"
+	"os"
+	"os/signal"
 	"runtime"
 	runpprof "runtime/pprof"
 	"strconv"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/prometheus/client_golang/prometheus/promhttp"
@@ -49,8 +52,8 @@ func NewAgentCommand(a *Agent, o *options.GrpcProxyAgentOptions) *cobra.Command 
 		Use:  "agent",
 		Long: `A gRPC agent, Connects to the proxy and then allows traffic to be forwarded to it.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			stopCh := make(chan struct{})
-			return a.Run(o, stopCh)
+			drainCh, stopCh := SetupSignalHandler()
+			return a.Run(o, drainCh, stopCh)
 		},
 	}
 
@@ -64,13 +67,13 @@ type Agent struct {
 	cs *agent.ClientSet
 }
 
-func (a *Agent) Run(o *options.GrpcProxyAgentOptions, stopCh <-chan struct{}) error {
+func (a *Agent) Run(o *options.GrpcProxyAgentOptions, drainCh, stopCh <-chan struct{}) error {
 	o.Print()
 	if err := o.Validate(); err != nil {
 		return fmt.Errorf("failed to validate agent options with %v", err)
 	}
 
-	cs, err := a.runProxyConnection(o, stopCh)
+	cs, err := a.runProxyConnection(o, drainCh, stopCh)
 	if err != nil {
 		return fmt.Errorf("failed to run proxy connection with %v", err)
 	}
@@ -92,7 +95,31 @@ func (a *Agent) Run(o *options.GrpcProxyAgentOptions, stopCh <-chan struct{}) er
 	return nil
 }
 
-func (a *Agent) runProxyConnection(o *options.GrpcProxyAgentOptions, stopCh <-chan struct{}) (*agent.ClientSet, error) {
+var shutdownSignals = []os.Signal{os.Interrupt, syscall.SIGTERM}
+
+func SetupSignalHandler() (drainCh, stopCh <-chan struct{}) {
+	drain := make(chan struct{})
+	stop := make(chan struct{})
+	c := make(chan os.Signal, 2)
+	signal.Notify(c, shutdownSignals...)
+	labels := runpprof.Labels(
+		"core", "signalHandler",
+	)
+	go runpprof.Do(context.Background(), labels, func(context.Context) { handleSignals(c, drain, stop) })
+
+	return drain, stop
+}
+
+func handleSignals(signalCh chan os.Signal, drainCh, stopCh chan struct{}) {
+	s := <-signalCh
+	klog.V(2).InfoS("Received first signal", "signal", s)
+	close(drainCh)
+	s = <-signalCh
+	klog.V(2).InfoS("Received second signal", "signal", s)
+	close(stopCh)
+}
+
+func (a *Agent) runProxyConnection(o *options.GrpcProxyAgentOptions, drainCh, stopCh <-chan struct{}) (*agent.ClientSet, error) {
 	var tlsConfig *tls.Config
 	var err error
 	if tlsConfig, err = util.GetClientTLSConfig(o.CaCert, o.AgentCert, o.AgentKey, o.ProxyServerHost, o.AlpnProtos); err != nil {
@@ -106,7 +133,7 @@ func (a *Agent) runProxyConnection(o *options.GrpcProxyAgentOptions, stopCh <-ch
 		}),
 	}
 	cc := o.ClientSetConfig(dialOptions...)
-	cs := cc.NewAgentClientSet(stopCh)
+	cs := cc.NewAgentClientSet(drainCh, stopCh)
 	cs.Serve()
 
 	return cs, nil
