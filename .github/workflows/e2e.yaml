@@ -15,7 +15,6 @@ env:
   GO_VERSION: "1.21.6"
   # TODO: match BASEIMAGE with Makefile default (nonroot variant)
   BASEIMAGE: "gcr.io/distroless/static-debian11"
-  K8S_VERSION: "v1.27.3"
   KIND_CLUSTER_NAME: "kind"
 
 jobs:
@@ -60,6 +59,7 @@ jobs:
       fail-fast: false
       matrix:
         ipFamily: ["ipv4", "ipv6", "dual"]
+        k8s: [ v1.27.11, v1.28.7, v1.29.2 ]
     env:
       JOB_NAME: "kindnetd-e2e-${{ matrix.ipFamily }}"
       IP_FAMILY: ${{ matrix.ipFamily }}
@@ -76,12 +76,12 @@ jobs:
       run: |
         TMP_DIR=$(mktemp -d)
         # Test binaries
-        curl -L https://dl.k8s.io/${{ env.K8S_VERSION }}/kubernetes-test-linux-amd64.tar.gz -o ${TMP_DIR}/kubernetes-test-linux-amd64.tar.gz
+        curl -L https://dl.k8s.io/${{ matrix.k8s }}/kubernetes-test-linux-amd64.tar.gz -o ${TMP_DIR}/kubernetes-test-linux-amd64.tar.gz
         tar xvzf ${TMP_DIR}/kubernetes-test-linux-amd64.tar.gz \
           --directory ${TMP_DIR} \
           --strip-components=3 kubernetes/test/bin/ginkgo kubernetes/test/bin/e2e.test
         # kubectl
-        curl -L https://dl.k8s.io/${{ env.K8S_VERSION }}/bin/linux/amd64/kubectl -o ${TMP_DIR}/kubectl
+        curl -L https://dl.k8s.io/${{ matrix.k8s }}/bin/linux/amd64/kubectl -o ${TMP_DIR}/kubectl
         # kind
         curl -Lo ${TMP_DIR}/kind https://kind.sigs.k8s.io/dl/v0.20.0/kind-linux-amd64
         # Install
@@ -98,7 +98,7 @@ jobs:
         # create cluster
         cat <<EOF | /usr/local/bin/kind create cluster \
           --name ${{ env.KIND_CLUSTER_NAME}}           \
-          --image kindest/node:${{ env.K8S_VERSION }}  \
+          --image kindest/node:${{ matrix.k8s }}  \
           -v7 --wait 1m --retain --config=-
         kind: Cluster
         apiVersion: kind.x-k8s.io/v1alpha4
@@ -106,6 +106,7 @@ jobs:
           ipFamily: ${IP_FAMILY}
         nodes:
           - role: control-plane
+            image: ${{ matrix.k8s }}
             kubeadmConfigPatchesJSON6902:
             - kind: ClusterConfiguration
               patch: |
@@ -131,7 +132,9 @@ jobs:
             - hostPath: ./examples/kind/egress_selector_configuration.yaml
               containerPath: /etc/kubernetes/konnectivity-server-config/egress_selector_configuration.yaml
           - role: worker
+            image: ${{ matrix.k8s }}
           - role: worker
+            image: ${{ matrix.k8s }}
         EOF
 
         # dump the kubeconfig for later
