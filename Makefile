@@ -20,8 +20,7 @@ ARCH ?= amd64
 BUILDARCH ?= amd64
 # TARGETARCH specifies the golang target platform, for docker build targets.
 TARGETARCH ?= $(ARCH)
-ARCH_LIST ?= amd64 arm arm64 ppc64le s390x
-RELEASE_ARCH_LIST = amd64 arm64
+ALL_ARCH ?= amd64 arm arm64 ppc64le s390x
 # The output type could either be docker (local), or registry.
 OUTPUT_TYPE ?= docker
 GO_TOOLCHAIN ?= golang
@@ -256,10 +255,10 @@ docker-push/http-test-server: docker-build/http-test-server
 # As `docker buildx` is time and resource consuming, if not necessary, building specific arch images,
 # like `make docker-build-arch-amd64`, is recommended.
 .PHONY: docker-build-all
-docker-build-all: $(addprefix docker-build-arch-,$(ARCH_LIST))
+docker-build-all: $(addprefix docker-build-arch-,$(ALL_ARCH))
 
 .PHONY: docker-push-all
-docker-push-all: $(addprefix docker-push/proxy-agent-,$(ARCH_LIST)) $(addprefix docker-push/proxy-server-,$(ARCH_LIST))
+docker-push-all: $(addprefix docker-push/proxy-agent-,$(ALL_ARCH)) $(addprefix docker-push/proxy-server-,$(ALL_ARCH))
 	$(MAKE) docker-push-manifest/proxy-agent
 	$(MAKE) docker-push-manifest/proxy-server
 
@@ -282,15 +281,15 @@ docker-push/proxy-server-%:
 .PHONY: docker-push-manifest/proxy-agent
 docker-push-manifest/proxy-agent: ## Push the fat manifest docker image.
 	## Minimum docker version 18.06.0 is required for creating and pushing manifest images.
-	${DOCKER_CMD} manifest create --amend $(AGENT_FULL_IMAGE):$(TAG) $(shell echo $(ARCH_LIST) | sed -e "s~[^ ]*~$(AGENT_FULL_IMAGE)\-&:$(TAG)~g")
-	@for arch in $(ARCH_LIST); do ${DOCKER_CMD} manifest annotate --arch $${arch} ${AGENT_FULL_IMAGE}:${TAG} ${AGENT_FULL_IMAGE}-$${arch}:${TAG}; done
+	${DOCKER_CMD} manifest create --amend $(AGENT_FULL_IMAGE):$(TAG) $(shell echo $(ALL_ARCH) | sed -e "s~[^ ]*~$(AGENT_FULL_IMAGE)\-&:$(TAG)~g")
+	@for arch in $(ALL_ARCH); do ${DOCKER_CMD} manifest annotate --arch $${arch} ${AGENT_FULL_IMAGE}:${TAG} ${AGENT_FULL_IMAGE}-$${arch}:${TAG}; done
 	${DOCKER_CMD} manifest push --purge $(AGENT_FULL_IMAGE):$(TAG)
 
 .PHONY: docker-push-manifest/proxy-server
 docker-push-manifest/proxy-server: ## Push the fat manifest docker image.
 	## Minimum docker version 18.06.0 is required for creating and pushing manifest images.
-	${DOCKER_CMD} manifest create --amend $(SERVER_FULL_IMAGE):$(TAG) $(shell echo $(ARCH_LIST) | sed -e "s~[^ ]*~$(SERVER_FULL_IMAGE)\-&:$(TAG)~g")
-	@for arch in $(ARCH_LIST); do ${DOCKER_CMD} manifest annotate --arch $${arch} ${SERVER_FULL_IMAGE}:${TAG} ${SERVER_FULL_IMAGE}-$${arch}:${TAG}; done
+	${DOCKER_CMD} manifest create --amend $(SERVER_FULL_IMAGE):$(TAG) $(shell echo $(ALL_ARCH) | sed -e "s~[^ ]*~$(SERVER_FULL_IMAGE)\-&:$(TAG)~g")
+	@for arch in $(ALL_ARCH); do ${DOCKER_CMD} manifest annotate --arch $${arch} ${SERVER_FULL_IMAGE}:${TAG} ${SERVER_FULL_IMAGE}-$${arch}:${TAG}; done
 	${DOCKER_CMD} manifest push --purge $(SERVER_FULL_IMAGE):$(TAG)
 
 ## --------------------------------------
@@ -299,7 +298,7 @@ docker-push-manifest/proxy-server: ## Push the fat manifest docker image.
 
 .PHONY: release-staging
 release-staging: ## Builds and push container images to the staging bucket.
-	REGISTRY=$(STAGING_REGISTRY) ARCH_LIST="$(RELEASE_ARCH_LIST)" $(MAKE) docker-push-all release-alias-tag
+	REGISTRY=$(STAGING_REGISTRY) $(MAKE) docker-push-all release-alias-tag
 
 .PHONY: release-alias-tag
 release-alias-tag: # Adds the tag to the last build tag. BASE_REF comes from the cloudbuild.yaml
