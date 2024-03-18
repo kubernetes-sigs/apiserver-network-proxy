@@ -140,11 +140,11 @@ jobs:
         # dump the kubeconfig for later
         /usr/local/bin/kind get kubeconfig --name ${{ env.KIND_CLUSTER_NAME}} > _artifacts/kubeconfig.conf
 
-    - uses: actions/download-artifact@v2
+    - uses: actions/download-artifact@v4
       with:
         name: konnectivity-server
 
-    - uses: actions/download-artifact@v2
+    - uses: actions/download-artifact@v4
       with:
         name: konnectivity-agent
 
