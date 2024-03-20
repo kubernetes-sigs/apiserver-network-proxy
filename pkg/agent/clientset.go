@@ -52,6 +52,8 @@ type ClientSet struct {
 	dialOptions []grpc.DialOption
 	// file path contains service account token
 	serviceAccountTokenPath string
+	// channel to signal that the agent is pending termination.
+	drainCh <-chan struct{}
 	// channel to signal shutting down the client set. Primarily for test.
 	stopCh <-chan struct{}
 
@@ -141,7 +143,7 @@ type ClientSetConfig struct {
 	SyncForever             bool
 }
 
-func (cc *ClientSetConfig) NewAgentClientSet(stopCh <-chan struct{}) *ClientSet {
+func (cc *ClientSetConfig) NewAgentClientSet(drainCh, stopCh <-chan struct{}) *ClientSet {
 	return &ClientSet{
 		clients:                 make(map[string]*Client),
 		agentID:                 cc.AgentID,
@@ -154,6 +156,7 @@ func (cc *ClientSetConfig) NewAgentClientSet(stopCh <-chan struct{}) *ClientSet 
 		serviceAccountTokenPath: cc.ServiceAccountTokenPath,
 		warnOnChannelLimit:      cc.WarnOnChannelLimit,
 		syncForever:             cc.SyncForever,
+		drainCh:                 drainCh,
 		stopCh:                  stopCh,
 	}
 }
