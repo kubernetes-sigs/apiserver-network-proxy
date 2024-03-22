@@ -107,7 +107,7 @@ type ProxyClientConnection struct {
 }
 
 const (
-	destHost key = iota
+	destHostKey key = iota
 )
 
 func (c *ProxyClientConnection) send(pkt *client.Packet) error {
@@ -216,6 +216,7 @@ type ProxyServer struct {
 	// agent authentication
 	AgentAuthenticationOptions *AgentTokenAuthenticationOptions
 
+	// TODO: move strategies into BackendStorage
 	proxyStrategies []ProxyStrategy
 }
 
@@ -238,7 +239,7 @@ func genContext(proxyStrategies []ProxyStrategy, reqHost string) context.Context
 		switch ps {
 		case ProxyStrategyDestHost:
 			addr := util.RemovePortFromHost(reqHost)
-			ctx = context.WithValue(ctx, destHost, addr)
+			ctx = context.WithValue(ctx, destHostKey, addr)
 		}
 	}
 	return ctx
@@ -261,65 +262,15 @@ func (s *ProxyServer) getBackend(reqHost string) (Backend, error) {
 }
 
 func (s *ProxyServer) addBackend(backend Backend) {
-	agentID := backend.GetAgentID()
-	for i := 0; i < len(s.BackendManagers); i++ {
-		switch s.BackendManagers[i].(type) {
-		case *DestHostBackendManager:
-			agentIdentifiers := backend.GetAgentIdentifiers()
-			for _, ipv4 := range agentIdentifiers.IPv4 {
-				klog.V(5).InfoS("Add the agent to DestHostBackendManager", "agent address", ipv4)
-				s.BackendManagers[i].AddBackend(ipv4, header.IPv4, backend)
-			}
-			for _, ipv6 := range agentIdentifiers.IPv6 {
-				klog.V(5).InfoS("Add the agent to DestHostBackendManager", "agent address", ipv6)
-				s.BackendManagers[i].AddBackend(ipv6, header.IPv6, backend)
-			}
-			for _, host := range agentIdentifiers.Host {
-				klog.V(5).InfoS("Add the agent to DestHostBackendManager", "agent address", host)
-				s.BackendManagers[i].AddBackend(host, header.Host, backend)
-			}
-		case *DefaultRouteBackendManager:
-			agentIdentifiers := backend.GetAgentIdentifiers()
-			if agentIdentifiers.DefaultRoute {
-				klog.V(5).InfoS("Add the agent to DefaultRouteBackendManager", "agentID", agentID)
-				s.BackendManagers[i].AddBackend(agentID, header.DefaultRoute, backend)
-			}
-		default:
-			klog.V(5).InfoS("Add the agent to DefaultBackendManager", "agentID", agentID)
-			s.BackendManagers[i].AddBackend(agentID, header.UID, backend)
-		}
+	// TODO: refactor BackendStorage to acquire lock once, not up to 3 times.
+	for _, bm := range s.BackendManagers {
+		bm.AddBackend(backend)
 	}
-	return
 }
 
 func (s *ProxyServer) removeBackend(backend Backend) {
-	agentID := backend.GetAgentID()
 	for _, bm := range s.BackendManagers {
-		switch bm.(type) {
-		case *DestHostBackendManager:
-			agentIdentifiers := backend.GetAgentIdentifiers()
-			for _, ipv4 := range agentIdentifiers.IPv4 {
-				klog.V(5).InfoS("Remove the agent from the DestHostBackendManager", "agentHost", ipv4)
-				bm.RemoveBackend(ipv4, header.IPv4, backend)
-			}
-			for _, ipv6 := range agentIdentifiers.IPv6 {
-				klog.V(5).InfoS("Remove the agent from the DestHostBackendManager", "agentHost", ipv6)
-				bm.RemoveBackend(ipv6, header.IPv6, backend)
-			}
-			for _, host := range agentIdentifiers.Host {
-				klog.V(5).InfoS("Remove the agent from the DestHostBackendManager", "agentHost", host)
-				bm.RemoveBackend(host, header.Host, backend)
-			}
-		case *DefaultRouteBackendManager:
-			agentIdentifiers := backend.GetAgentIdentifiers()
-			if agentIdentifiers.DefaultRoute {
-				klog.V(5).InfoS("Remove the agent from the DefaultRouteBackendManager", "agentID", agentID)
-				bm.RemoveBackend(agentID, header.DefaultRoute, backend)
-			}
-		default:
-			klog.V(5).InfoS("Remove the agent from the DefaultBackendManager", "agentID", agentID)
-			bm.RemoveBackend(agentID, header.UID, backend)
-		}
+		bm.RemoveBackend(backend)
 	}
 }
 

@@ -35,17 +35,25 @@ func NewDefaultRouteBackendManager() *DefaultRouteBackendManager {
 			[]header.IdentifierType{header.DefaultRoute})}
 }
 
-// Backend tries to get a backend associating to the request destination host.
+// Backend tries to get a backend that advertises default route, with random selection.
 func (dibm *DefaultRouteBackendManager) Backend(ctx context.Context) (Backend, error) {
-	dibm.mu.RLock()
-	defer dibm.mu.RUnlock()
-	if len(dibm.backends) == 0 {
-		return nil, &ErrNotFound{}
+	return dibm.GetRandomBackend()
+}
+
+func (dibm *DefaultRouteBackendManager) AddBackend(backend Backend) {
+	agentID := backend.GetAgentID()
+	agentIdentifiers := backend.GetAgentIdentifiers()
+	if agentIdentifiers.DefaultRoute {
+		klog.V(5).InfoS("Add the agent to DefaultRouteBackendManager", "agentID", agentID)
+		dibm.addBackend(agentID, header.DefaultRoute, backend)
 	}
-	if len(dibm.defaultRouteAgentIDs) == 0 {
-		return nil, &ErrNotFound{}
+}
+
+func (dibm *DefaultRouteBackendManager) RemoveBackend(backend Backend) {
+	agentID := backend.GetAgentID()
+	agentIdentifiers := backend.GetAgentIdentifiers()
+	if agentIdentifiers.DefaultRoute {
+		klog.V(5).InfoS("Remove the agent from the DefaultRouteBackendManager", "agentID", agentID)
+		dibm.removeBackend(agentID, header.DefaultRoute, backend)
 	}
-	agentID := dibm.defaultRouteAgentIDs[dibm.random.Intn(len(dibm.defaultRouteAgentIDs))]
-	klog.V(4).InfoS("Picked agent as backend", "agentID", agentID)
-	return dibm.backends[agentID][0], nil
 }

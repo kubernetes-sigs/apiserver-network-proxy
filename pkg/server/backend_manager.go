@@ -182,10 +182,10 @@ func NewBackend(conn agent.AgentService_ConnectServer) (Backend, error) {
 // BackendStorage is an interface to manage the storage of the backend
 // connections, i.e., get, add and remove
 type BackendStorage interface {
-	// AddBackend adds a backend.
-	AddBackend(identifier string, idType header.IdentifierType, backend Backend)
-	// RemoveBackend removes a backend.
-	RemoveBackend(identifier string, idType header.IdentifierType, backend Backend)
+	// addBackend adds a backend.
+	addBackend(identifier string, idType header.IdentifierType, backend Backend)
+	// removeBackend removes a backend.
+	removeBackend(identifier string, idType header.IdentifierType, backend Backend)
 	// NumBackends returns the number of backends.
 	NumBackends() int
 }
@@ -199,6 +199,10 @@ type BackendManager interface {
 	// pick a backend for every tunnel session and each tunnel session may
 	// contains multiple requests.
 	Backend(ctx context.Context) (Backend, error)
+	// AddBackend adds a backend.
+	AddBackend(backend Backend)
+	// RemoveBackend adds a backend.
+	RemoveBackend(backend Backend)
 	BackendStorage
 	ReadinessManager
 }
@@ -215,6 +219,18 @@ func (dbm *DefaultBackendManager) Backend(_ context.Context) (Backend, error) {
 	return dbm.DefaultBackendStorage.GetRandomBackend()
 }
 
+func (dbm *DefaultBackendManager) AddBackend(backend Backend) {
+	agentID := backend.GetAgentID()
+	klog.V(5).InfoS("Add the agent to DefaultBackendManager", "agentID", agentID)
+	dbm.addBackend(agentID, header.UID, backend)
+}
+
+func (dbm *DefaultBackendManager) RemoveBackend(backend Backend) {
+	agentID := backend.GetAgentID()
+	klog.V(5).InfoS("Remove the agent from the DefaultBackendManager", "agentID", agentID)
+	dbm.removeBackend(agentID, header.UID, backend)
+}
+
 // DefaultBackendStorage is the default backend storage.
 type DefaultBackendStorage struct {
 	mu sync.RWMutex //protects the following
@@ -222,6 +238,9 @@ type DefaultBackendStorage struct {
 	// For a given agent, ProxyServer prefers backends[agentID][0] to send
 	// traffic, because backends[agentID][1:] are more likely to be closed
 	// by the agent to deduplicate connections to the same server.
+	//
+	// TODO: fix documentation. This is not always agentID, e.g. in
+	// the case of DestHostBackendManager.
 	backends map[string][]Backend
 	// agentID is tracked in this slice to enable randomly picking an
 	// agentID in the Backend() method. There is no reliable way to
@@ -267,8 +286,8 @@ func containIDType(idTypes []header.IdentifierType, idType header.IdentifierType
 	return false
 }
 
-// AddBackend adds a backend.
-func (s *DefaultBackendStorage) AddBackend(identifier string, idType header.IdentifierType, backend Backend) {
+// addBackend adds a backend.
+func (s *DefaultBackendStorage) addBackend(identifier string, idType header.IdentifierType, backend Backend) {
 	if !containIDType(s.idTypes, idType) {
 		klog.V(4).InfoS("fail to add backend", "backend", identifier, "error", &ErrWrongIDType{idType, s.idTypes})
 		return
@@ -295,8 +314,8 @@ func (s *DefaultBackendStorage) AddBackend(identifier string, idType header.Iden
 	}
 }
 
-// RemoveBackend removes a backend.
-func (s *DefaultBackendStorage) RemoveBackend(identifier string, idType header.IdentifierType, backend Backend) {
+// removeBackend removes a backend.
+func (s *DefaultBackendStorage) removeBackend(identifier string, idType header.IdentifierType, backend Backend) {
 	if !containIDType(s.idTypes, idType) {
 		klog.ErrorS(&ErrWrongIDType{idType, s.idTypes}, "fail to remove backend")
 		return
