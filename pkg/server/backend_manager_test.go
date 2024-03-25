@@ -121,14 +121,10 @@ func TestDefaultBackendManager_AddRemoveBackends(t *testing.T) {
 	p.RemoveBackend(backend1)
 	expectedBackends := make(map[string][]Backend)
 	expectedAgentIDs := []string{}
-	expectedDefaultRouteAgentIDs := []string(nil)
 	if e, a := expectedBackends, p.backends; !reflect.DeepEqual(e, a) {
 		t.Errorf("expected %v, got %v", e, a)
 	}
 	if e, a := expectedAgentIDs, p.agentIDs; !reflect.DeepEqual(e, a) {
-		t.Errorf("expected %v, got %v", e, a)
-	}
-	if e, a := expectedDefaultRouteAgentIDs, p.defaultRouteAgentIDs; !reflect.DeepEqual(e, a) {
 		t.Errorf("expected %v, got %v", e, a)
 	}
 
@@ -148,14 +144,10 @@ func TestDefaultBackendManager_AddRemoveBackends(t *testing.T) {
 		"agent3": {backend3},
 	}
 	expectedAgentIDs = []string{"agent1", "agent3"}
-	expectedDefaultRouteAgentIDs = []string(nil)
 	if e, a := expectedBackends, p.backends; !reflect.DeepEqual(e, a) {
 		t.Errorf("expected %v, got %v", e, a)
 	}
 	if e, a := expectedAgentIDs, p.agentIDs; !reflect.DeepEqual(e, a) {
-		t.Errorf("expected %v, got %v", e, a)
-	}
-	if e, a := expectedDefaultRouteAgentIDs, p.defaultRouteAgentIDs; !reflect.DeepEqual(e, a) {
 		t.Errorf("expected %v, got %v", e, a)
 	}
 }
@@ -176,14 +168,10 @@ func TestDefaultRouteBackendManager_AddRemoveBackends(t *testing.T) {
 	p.RemoveBackend(backend1)
 	expectedBackends := make(map[string][]Backend)
 	expectedAgentIDs := []string{}
-	expectedDefaultRouteAgentIDs := []string{}
 	if e, a := expectedBackends, p.backends; !reflect.DeepEqual(e, a) {
 		t.Errorf("expected %v, got %v", e, a)
 	}
 	if e, a := expectedAgentIDs, p.agentIDs; !reflect.DeepEqual(e, a) {
-		t.Errorf("expected %v, got %v", e, a)
-	}
-	if e, a := expectedDefaultRouteAgentIDs, p.defaultRouteAgentIDs; !reflect.DeepEqual(e, a) {
 		t.Errorf("expected %v, got %v", e, a)
 	}
 
@@ -204,15 +192,11 @@ func TestDefaultRouteBackendManager_AddRemoveBackends(t *testing.T) {
 		"agent3": {backend3},
 	}
 	expectedAgentIDs = []string{"agent1", "agent3"}
-	expectedDefaultRouteAgentIDs = []string{"agent1", "agent3"}
 
 	if e, a := expectedBackends, p.backends; !reflect.DeepEqual(e, a) {
 		t.Errorf("expected %v, got %v", e, a)
 	}
 	if e, a := expectedAgentIDs, p.agentIDs; !reflect.DeepEqual(e, a) {
-		t.Errorf("expected %v, got %v", e, a)
-	}
-	if e, a := expectedDefaultRouteAgentIDs, p.defaultRouteAgentIDs; !reflect.DeepEqual(e, a) {
 		t.Errorf("expected %v, got %v", e, a)
 	}
 }
@@ -233,14 +217,10 @@ func TestDestHostBackendManager_AddRemoveBackends(t *testing.T) {
 	p.RemoveBackend(backend1)
 	expectedBackends := make(map[string][]Backend)
 	expectedAgentIDs := []string{}
-	expectedDefaultRouteAgentIDs := []string(nil)
 	if e, a := expectedBackends, p.backends; !reflect.DeepEqual(e, a) {
 		t.Errorf("expected %v, got %v", e, a)
 	}
 	if e, a := expectedAgentIDs, p.agentIDs; !reflect.DeepEqual(e, a) {
-		t.Errorf("expected %v, got %v", e, a)
-	}
-	if e, a := expectedDefaultRouteAgentIDs, p.defaultRouteAgentIDs; !reflect.DeepEqual(e, a) {
 		t.Errorf("expected %v, got %v", e, a)
 	}
 
@@ -266,9 +246,6 @@ func TestDestHostBackendManager_AddRemoveBackends(t *testing.T) {
 	if e, a := expectedAgentIDs, p.agentIDs; !reflect.DeepEqual(e, a) {
 		t.Errorf("expected %v, got %v", e, a)
 	}
-	if e, a := expectedDefaultRouteAgentIDs, p.defaultRouteAgentIDs; !reflect.DeepEqual(e, a) {
-		t.Errorf("expected %v, got %v", e, a)
-	}
 
 	p.AddBackend(backend2)
 	p.AddBackend(backend3)
@@ -291,15 +268,11 @@ func TestDestHostBackendManager_AddRemoveBackends(t *testing.T) {
 		"::",
 		"node2.mydomain.com",
 	}
-	expectedDefaultRouteAgentIDs = []string(nil)
 
 	if e, a := expectedBackends, p.backends; !reflect.DeepEqual(e, a) {
 		t.Errorf("expected %v, got %v", e, a)
 	}
 	if e, a := expectedAgentIDs, p.agentIDs; !reflect.DeepEqual(e, a) {
-		t.Errorf("expected %v, got %v", e, a)
-	}
-	if e, a := expectedDefaultRouteAgentIDs, p.defaultRouteAgentIDs; !reflect.DeepEqual(e, a) {
 		t.Errorf("expected %v, got %v", e, a)
 	}
 
@@ -323,9 +296,6 @@ func TestDestHostBackendManager_AddRemoveBackends(t *testing.T) {
 	if e, a := expectedAgentIDs, p.agentIDs; !reflect.DeepEqual(e, a) {
 		t.Errorf("expected %v, got %v", e, a)
 	}
-	if e, a := expectedDefaultRouteAgentIDs, p.defaultRouteAgentIDs; !reflect.DeepEqual(e, a) {
-		t.Errorf("expected %v, got %v", e, a)
-	}
 
 	p.RemoveBackend(backend3)
 	expectedBackends = map[string][]Backend{}
@@ -335,9 +305,6 @@ func TestDestHostBackendManager_AddRemoveBackends(t *testing.T) {
 		t.Errorf("expected %v, got %v", e, a)
 	}
 	if e, a := expectedAgentIDs, p.agentIDs; !reflect.DeepEqual(e, a) {
-		t.Errorf("expected %v, got %v", e, a)
-	}
-	if e, a := expectedDefaultRouteAgentIDs, p.defaultRouteAgentIDs; !reflect.DeepEqual(e, a) {
 		t.Errorf("expected %v, got %v", e, a)
 	}
 }
@@ -374,15 +341,11 @@ func TestDestHostBackendManager_WithDuplicateIdents(t *testing.T) {
 		"::",
 		"node2.mydomain.com",
 	}
-	expectedDefaultRouteAgentIDs := []string(nil)
 
 	if e, a := expectedBackends, p.backends; !reflect.DeepEqual(e, a) {
 		t.Errorf("expected %v, got %v", e, a)
 	}
 	if e, a := expectedAgentIDs, p.agentIDs; !reflect.DeepEqual(e, a) {
-		t.Errorf("expected %v, got %v", e, a)
-	}
-	if e, a := expectedDefaultRouteAgentIDs, p.defaultRouteAgentIDs; !reflect.DeepEqual(e, a) {
 		t.Errorf("expected %v, got %v", e, a)
 	}
 
@@ -408,9 +371,6 @@ func TestDestHostBackendManager_WithDuplicateIdents(t *testing.T) {
 	if e, a := expectedAgentIDs, p.agentIDs; !reflect.DeepEqual(e, a) {
 		t.Errorf("expected %v, got %v", e, a)
 	}
-	if e, a := expectedDefaultRouteAgentIDs, p.defaultRouteAgentIDs; !reflect.DeepEqual(e, a) {
-		t.Errorf("expected %v, got %v", e, a)
-	}
 
 	p.RemoveBackend(backend2)
 	expectedBackends = map[string][]Backend{}
@@ -420,9 +380,6 @@ func TestDestHostBackendManager_WithDuplicateIdents(t *testing.T) {
 		t.Errorf("expected %v, got %v", e, a)
 	}
 	if e, a := expectedAgentIDs, p.agentIDs; !reflect.DeepEqual(e, a) {
-		t.Errorf("expected %v, got %v", e, a)
-	}
-	if e, a := expectedDefaultRouteAgentIDs, p.defaultRouteAgentIDs; !reflect.DeepEqual(e, a) {
 		t.Errorf("expected %v, got %v", e, a)
 	}
 }
