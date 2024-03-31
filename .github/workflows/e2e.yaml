@@ -222,7 +222,7 @@ jobs:
       if: always()
       uses: actions/upload-artifact@v4
       with:
-        name: kind-junit-${{ env.JOB_NAME }}-${{ github.run_id }}
+        name: kind-junit-${{ env.JOB_NAME }}-${{ matrix.k8s }}-${{ matrix.ipFamily }}-${{ github.run_id }}
         path: './_artifacts/*.xml'
 
     - name: Export logs
@@ -234,5 +234,5 @@ jobs:
       if: always()
       uses: actions/upload-artifact@v4
       with:
-        name: kind-logs-${{ env.JOB_NAME }}-${{ github.run_id }}
+        name: kind-logs-${{ env.JOB_NAME }}-${{ matrix.k8s }}-${{ matrix.ipFamily }}-${{ github.run_id }}
         path: ./_artifacts/logs
