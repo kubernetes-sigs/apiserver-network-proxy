@@ -64,6 +64,13 @@ mock_gen:
 	cat hack/go-license-header.txt proto/agent/mocks/agent_mock.go > proto/agent/mocks/agent_mock.licensed.go
 	mv proto/agent/mocks/agent_mock.licensed.go proto/agent/mocks/agent_mock.go
 
+# Unit tests with faster execution (nicer for development).
+.PHONY: fast-test
+fast-test:
+	go test -mod=vendor -race ./...
+	cd konnectivity-client && go test -race ./...
+
+# Unit tests with fuller coverage, invoked by CI system.
 .PHONY: test
 test:
 	go test -mod=vendor -race -covermode=atomic -coverprofile=konnectivity.out ./... && go tool cover -html=konnectivity.out -o=konnectivity.html

@@ -25,7 +25,6 @@ import (
 	"google.golang.org/grpc/metadata"
 
 	agentmock "sigs.k8s.io/apiserver-network-proxy/proto/agent/mocks"
-	"sigs.k8s.io/apiserver-network-proxy/proto/header"
 )
 
 func mockAgentConn(ctrl *gomock.Controller, agentID string, agentIdentifiers []string) *agentmock.MockAgentService_ConnectServer {
@@ -106,7 +105,7 @@ func TestNewBackend(t *testing.T) {
 	}
 }
 
-func TestAddRemoveBackendsWithDefaultStrategy(t *testing.T) {
+func TestDefaultBackendManager_AddRemoveBackends(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	defer ctrl.Finish()
 
@@ -118,8 +117,8 @@ func TestAddRemoveBackendsWithDefaultStrategy(t *testing.T) {
 
 	p := NewDefaultBackendManager()
 
-	p.AddBackend("agent1", header.UID, backend1)
-	p.RemoveBackend("agent1", header.UID, backend1)
+	p.AddBackend(backend1)
+	p.RemoveBackend(backend1)
 	expectedBackends := make(map[string][]Backend)
 	expectedAgentIDs := []string{}
 	expectedDefaultRouteAgentIDs := []string(nil)
@@ -134,18 +133,16 @@ func TestAddRemoveBackendsWithDefaultStrategy(t *testing.T) {
 	}
 
 	p = NewDefaultBackendManager()
-	p.AddBackend("agent1", header.UID, backend1)
-	p.AddBackend("agent1", header.UID, backend12)
+	p.AddBackend(backend1)
+	p.AddBackend(backend12)
 	// Adding the same connection again should be a no-op.
-	p.AddBackend("agent1", header.UID, backend12)
-	p.AddBackend("agent2", header.UID, backend2)
-	p.AddBackend("agent2", header.UID, backend22)
-	p.AddBackend("agent3", header.UID, backend3)
-	p.RemoveBackend("agent2", header.UID, backend22)
-	p.RemoveBackend("agent2", header.UID, backend2)
-	p.RemoveBackend("agent1", header.UID, backend1)
-	// This is invalid. agent1 doesn't have backend3. This should be a no-op.
-	p.RemoveBackend("agent1", header.UID, backend3)
+	p.AddBackend(backend12)
+	p.AddBackend(backend2)
+	p.AddBackend(backend22)
+	p.AddBackend(backend3)
+	p.RemoveBackend(backend22)
+	p.RemoveBackend(backend2)
+	p.RemoveBackend(backend1)
 	expectedBackends = map[string][]Backend{
 		"agent1": {backend12},
 		"agent3": {backend3},
@@ -163,20 +160,20 @@ func TestAddRemoveBackendsWithDefaultStrategy(t *testing.T) {
 	}
 }
 
-func TestAddRemoveBackendsWithDefaultRouteStrategy(t *testing.T) {
+func TestDefaultRouteBackendManager_AddRemoveBackends(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	defer ctrl.Finish()
 
-	backend1, _ := NewBackend(mockAgentConn(ctrl, "agent1", []string{"default-route"}))
-	backend12, _ := NewBackend(mockAgentConn(ctrl, "agent1", []string{"default-route"}))
-	backend2, _ := NewBackend(mockAgentConn(ctrl, "agent2", []string{"default-route"}))
-	backend22, _ := NewBackend(mockAgentConn(ctrl, "agent2", []string{"default-route"}))
-	backend3, _ := NewBackend(mockAgentConn(ctrl, "agent3", []string{"default-route"}))
+	backend1, _ := NewBackend(mockAgentConn(ctrl, "agent1", []string{"default-route=true"}))
+	backend12, _ := NewBackend(mockAgentConn(ctrl, "agent1", []string{"default-route=true"}))
+	backend2, _ := NewBackend(mockAgentConn(ctrl, "agent2", []string{"default-route=true"}))
+	backend22, _ := NewBackend(mockAgentConn(ctrl, "agent2", []string{"default-route=true"}))
+	backend3, _ := NewBackend(mockAgentConn(ctrl, "agent3", []string{"default-route=true"}))
 
 	p := NewDefaultRouteBackendManager()
 
-	p.AddBackend("agent1", header.DefaultRoute, backend1)
-	p.RemoveBackend("agent1", header.DefaultRoute, backend1)
+	p.AddBackend(backend1)
+	p.RemoveBackend(backend1)
 	expectedBackends := make(map[string][]Backend)
 	expectedAgentIDs := []string{}
 	expectedDefaultRouteAgentIDs := []string{}
@@ -191,18 +188,16 @@ func TestAddRemoveBackendsWithDefaultRouteStrategy(t *testing.T) {
 	}
 
 	p = NewDefaultRouteBackendManager()
-	p.AddBackend("agent1", header.DefaultRoute, backend1)
-	p.AddBackend("agent1", header.DefaultRoute, backend12)
+	p.AddBackend(backend1)
+	p.AddBackend(backend12)
 	// Adding the same connection again should be a no-op.
-	p.AddBackend("agent1", header.DefaultRoute, backend12)
-	p.AddBackend("agent2", header.DefaultRoute, backend2)
-	p.AddBackend("agent2", header.DefaultRoute, backend22)
-	p.AddBackend("agent3", header.DefaultRoute, backend3)
-	p.RemoveBackend("agent2", header.DefaultRoute, backend22)
-	p.RemoveBackend("agent2", header.DefaultRoute, backend2)
-	p.RemoveBackend("agent1", header.DefaultRoute, backend1)
-	// This is invalid. agent1 doesn't have backend3. This should be a no-op.
-	p.RemoveBackend("agent1", header.DefaultRoute, backend3)
+	p.AddBackend(backend12)
+	p.AddBackend(backend2)
+	p.AddBackend(backend22)
+	p.AddBackend(backend3)
+	p.RemoveBackend(backend22)
+	p.RemoveBackend(backend2)
+	p.RemoveBackend(backend1)
 
 	expectedBackends = map[string][]Backend{
 		"agent1": {backend12},
@@ -210,6 +205,216 @@ func TestAddRemoveBackendsWithDefaultRouteStrategy(t *testing.T) {
 	}
 	expectedAgentIDs = []string{"agent1", "agent3"}
 	expectedDefaultRouteAgentIDs = []string{"agent1", "agent3"}
+
+	if e, a := expectedBackends, p.backends; !reflect.DeepEqual(e, a) {
+		t.Errorf("expected %v, got %v", e, a)
+	}
+	if e, a := expectedAgentIDs, p.agentIDs; !reflect.DeepEqual(e, a) {
+		t.Errorf("expected %v, got %v", e, a)
+	}
+	if e, a := expectedDefaultRouteAgentIDs, p.defaultRouteAgentIDs; !reflect.DeepEqual(e, a) {
+		t.Errorf("expected %v, got %v", e, a)
+	}
+}
+
+func TestDestHostBackendManager_AddRemoveBackends(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+
+	backend1, _ := NewBackend(mockAgentConn(ctrl, "agent1", []string{"host=localhost&host=node1.mydomain.com&ipv4=1.2.3.4&ipv6=9878::7675:1292:9183:7562"}))
+	// backend2 has no desthost relevant identifiers
+	backend2, _ := NewBackend(mockAgentConn(ctrl, "agent2", []string{"default-route=true"}))
+	// TODO: if backend3 is given conflicting identifiers with backend1, the wrong thing happens in RemoveBackend.
+	backend3, _ := NewBackend(mockAgentConn(ctrl, "agent3", []string{"host=node2.mydomain.com&ipv4=5.6.7.8&ipv6=::"}))
+
+	p := NewDestHostBackendManager()
+
+	p.AddBackend(backend1)
+	p.RemoveBackend(backend1)
+	expectedBackends := make(map[string][]Backend)
+	expectedAgentIDs := []string{}
+	expectedDefaultRouteAgentIDs := []string(nil)
+	if e, a := expectedBackends, p.backends; !reflect.DeepEqual(e, a) {
+		t.Errorf("expected %v, got %v", e, a)
+	}
+	if e, a := expectedAgentIDs, p.agentIDs; !reflect.DeepEqual(e, a) {
+		t.Errorf("expected %v, got %v", e, a)
+	}
+	if e, a := expectedDefaultRouteAgentIDs, p.defaultRouteAgentIDs; !reflect.DeepEqual(e, a) {
+		t.Errorf("expected %v, got %v", e, a)
+	}
+
+	p = NewDestHostBackendManager()
+	p.AddBackend(backend1)
+
+	expectedBackends = map[string][]Backend{
+		"localhost":                 {backend1},
+		"1.2.3.4":                   {backend1},
+		"9878::7675:1292:9183:7562": {backend1},
+		"node1.mydomain.com":        {backend1},
+	}
+	expectedAgentIDs = []string{
+		"1.2.3.4",
+		"9878::7675:1292:9183:7562",
+		"localhost",
+		"node1.mydomain.com",
+	}
+
+	if e, a := expectedBackends, p.backends; !reflect.DeepEqual(e, a) {
+		t.Errorf("expected %v, got %v", e, a)
+	}
+	if e, a := expectedAgentIDs, p.agentIDs; !reflect.DeepEqual(e, a) {
+		t.Errorf("expected %v, got %v", e, a)
+	}
+	if e, a := expectedDefaultRouteAgentIDs, p.defaultRouteAgentIDs; !reflect.DeepEqual(e, a) {
+		t.Errorf("expected %v, got %v", e, a)
+	}
+
+	p.AddBackend(backend2)
+	p.AddBackend(backend3)
+
+	expectedBackends = map[string][]Backend{
+		"localhost":                 {backend1},
+		"node1.mydomain.com":        {backend1},
+		"node2.mydomain.com":        {backend3},
+		"1.2.3.4":                   {backend1},
+		"5.6.7.8":                   {backend3},
+		"9878::7675:1292:9183:7562": {backend1},
+		"::":                        {backend3},
+	}
+	expectedAgentIDs = []string{
+		"1.2.3.4",
+		"9878::7675:1292:9183:7562",
+		"localhost",
+		"node1.mydomain.com",
+		"5.6.7.8",
+		"::",
+		"node2.mydomain.com",
+	}
+	expectedDefaultRouteAgentIDs = []string(nil)
+
+	if e, a := expectedBackends, p.backends; !reflect.DeepEqual(e, a) {
+		t.Errorf("expected %v, got %v", e, a)
+	}
+	if e, a := expectedAgentIDs, p.agentIDs; !reflect.DeepEqual(e, a) {
+		t.Errorf("expected %v, got %v", e, a)
+	}
+	if e, a := expectedDefaultRouteAgentIDs, p.defaultRouteAgentIDs; !reflect.DeepEqual(e, a) {
+		t.Errorf("expected %v, got %v", e, a)
+	}
+
+	p.RemoveBackend(backend2)
+	p.RemoveBackend(backend1)
+
+	expectedBackends = map[string][]Backend{
+		"node2.mydomain.com": {backend3},
+		"5.6.7.8":            {backend3},
+		"::":                 {backend3},
+	}
+	expectedAgentIDs = []string{
+		"node2.mydomain.com",
+		"::",
+		"5.6.7.8",
+	}
+
+	if e, a := expectedBackends, p.backends; !reflect.DeepEqual(e, a) {
+		t.Errorf("expected %v, got %v", e, a)
+	}
+	if e, a := expectedAgentIDs, p.agentIDs; !reflect.DeepEqual(e, a) {
+		t.Errorf("expected %v, got %v", e, a)
+	}
+	if e, a := expectedDefaultRouteAgentIDs, p.defaultRouteAgentIDs; !reflect.DeepEqual(e, a) {
+		t.Errorf("expected %v, got %v", e, a)
+	}
+
+	p.RemoveBackend(backend3)
+	expectedBackends = map[string][]Backend{}
+	expectedAgentIDs = []string{}
+
+	if e, a := expectedBackends, p.backends; !reflect.DeepEqual(e, a) {
+		t.Errorf("expected %v, got %v", e, a)
+	}
+	if e, a := expectedAgentIDs, p.agentIDs; !reflect.DeepEqual(e, a) {
+		t.Errorf("expected %v, got %v", e, a)
+	}
+	if e, a := expectedDefaultRouteAgentIDs, p.defaultRouteAgentIDs; !reflect.DeepEqual(e, a) {
+		t.Errorf("expected %v, got %v", e, a)
+	}
+}
+
+func TestDestHostBackendManager_WithDuplicateIdents(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+
+	backend1, _ := NewBackend(mockAgentConn(ctrl, "agent1", []string{"host=localhost&host=node1.mydomain.com&ipv4=1.2.3.4&ipv6=9878::7675:1292:9183:7562"}))
+	backend2, _ := NewBackend(mockAgentConn(ctrl, "agent2", []string{"host=localhost&host=node1.mydomain.com&ipv4=1.2.3.4&ipv6=9878::7675:1292:9183:7562"}))
+	backend3, _ := NewBackend(mockAgentConn(ctrl, "agent3", []string{"host=localhost&host=node2.mydomain.com&ipv4=5.6.7.8&ipv6=::"}))
+
+	p := NewDestHostBackendManager()
+
+	p.AddBackend(backend1)
+	p.AddBackend(backend2)
+	p.AddBackend(backend3)
+
+	expectedBackends := map[string][]Backend{
+		"localhost":                 {backend1, backend2, backend3},
+		"1.2.3.4":                   {backend1, backend2},
+		"5.6.7.8":                   {backend3},
+		"9878::7675:1292:9183:7562": {backend1, backend2},
+		"::":                        {backend3},
+		"node1.mydomain.com":        {backend1, backend2},
+		"node2.mydomain.com":        {backend3},
+	}
+	expectedAgentIDs := []string{
+		"1.2.3.4",
+		"9878::7675:1292:9183:7562",
+		"localhost",
+		"node1.mydomain.com",
+		"5.6.7.8",
+		"::",
+		"node2.mydomain.com",
+	}
+	expectedDefaultRouteAgentIDs := []string(nil)
+
+	if e, a := expectedBackends, p.backends; !reflect.DeepEqual(e, a) {
+		t.Errorf("expected %v, got %v", e, a)
+	}
+	if e, a := expectedAgentIDs, p.agentIDs; !reflect.DeepEqual(e, a) {
+		t.Errorf("expected %v, got %v", e, a)
+	}
+	if e, a := expectedDefaultRouteAgentIDs, p.defaultRouteAgentIDs; !reflect.DeepEqual(e, a) {
+		t.Errorf("expected %v, got %v", e, a)
+	}
+
+	p.RemoveBackend(backend1)
+	p.RemoveBackend(backend3)
+
+	expectedBackends = map[string][]Backend{
+		"localhost":                 {backend2},
+		"1.2.3.4":                   {backend2},
+		"9878::7675:1292:9183:7562": {backend2},
+		"node1.mydomain.com":        {backend2},
+	}
+	expectedAgentIDs = []string{
+		"1.2.3.4",
+		"9878::7675:1292:9183:7562",
+		"localhost",
+		"node1.mydomain.com",
+	}
+
+	if e, a := expectedBackends, p.backends; !reflect.DeepEqual(e, a) {
+		t.Errorf("expected %v, got %v", e, a)
+	}
+	if e, a := expectedAgentIDs, p.agentIDs; !reflect.DeepEqual(e, a) {
+		t.Errorf("expected %v, got %v", e, a)
+	}
+	if e, a := expectedDefaultRouteAgentIDs, p.defaultRouteAgentIDs; !reflect.DeepEqual(e, a) {
+		t.Errorf("expected %v, got %v", e, a)
+	}
+
+	p.RemoveBackend(backend2)
+	expectedBackends = map[string][]Backend{}
+	expectedAgentIDs = []string{}
 
 	if e, a := expectedBackends, p.backends; !reflect.DeepEqual(e, a) {
 		t.Errorf("expected %v, got %v", e, a)
