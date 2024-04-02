@@ -208,6 +208,7 @@ func (a *externalAgent) waitForLiveness() error {
 }
 
 func agentOptions(t testing.TB, opts AgentOpts) (*agentopts.GrpcProxyAgentOptions, error) {
+	t.Helper()
 	o := agentopts.NewGrpcProxyAgentOptions()
 
 	host, port, err := net.SplitHostPort(opts.ServerAddr)

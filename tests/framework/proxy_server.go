@@ -136,6 +136,7 @@ func (ps *inProcessProxyServer) Metrics() metricstest.ServerTester {
 }
 
 func serverOptions(t testing.TB, opts ProxyServerOpts) (*serveropts.ProxyRunOptions, error) {
+	t.Helper()
 	o := serveropts.NewProxyRunOptions()
 
 	o.ServerCount = uint(opts.ServerCount)
