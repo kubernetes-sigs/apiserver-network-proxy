@@ -76,7 +76,7 @@ func newSizedServer(length, chunks int) *testServer {
 	}
 }
 
-func (s *testServer) ServeHTTP(w http.ResponseWriter, req *http.Request) {
+func (s *testServer) ServeHTTP(w http.ResponseWriter, _ *http.Request) {
 	for i := 0; i < s.chunks; i++ {
 		w.Write(s.echo)
 	}
@@ -94,7 +94,7 @@ func newWaitingServer() *waitingServer {
 	}
 }
 
-func (s *waitingServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+func (s *waitingServer) ServeHTTP(w http.ResponseWriter, _ *http.Request) {
 	close(s.requestReceivedCh)
 	<-s.respondCh // Wait for permission to respond.
 	w.Write([]byte("hello"))
@@ -114,7 +114,7 @@ func newDelayedServer() *delayedServer {
 
 var _ = newDelayedServer() // Suppress unused lint error.
 
-func (s *delayedServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+func (s *delayedServer) ServeHTTP(w http.ResponseWriter, _ *http.Request) {
 	delay := time.Duration(rand.Int63n(int64(s.maxWait-s.minWait))) + s.minWait /* #nosec G404 */
 	time.Sleep(delay)
 	w.Write([]byte("hello"))

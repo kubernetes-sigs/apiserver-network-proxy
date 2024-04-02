@@ -24,7 +24,7 @@ endif
 GOOS ?= $(shell go env GOOS)
 GOARCH ?= $(shell go env GOARCH)
 INSTALL_LOCATION:=$(shell go env GOPATH)/bin
-GOLANGCI_LINT_VERSION ?= 1.51.2
+GOLANGCI_LINT_VERSION ?= 1.54.0
 GOSEC_VERSION ?= 2.13.1
 
 REGISTRY ?= gcr.io/$(shell gcloud config get-value project)

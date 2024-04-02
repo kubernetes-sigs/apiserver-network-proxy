@@ -107,6 +107,7 @@ func (a *inProcessAgent) Ready() bool {
 }
 
 func agentOptions(t testing.TB, opts AgentOpts) (*agentopts.GrpcProxyAgentOptions, error) {
+	t.Helper()
 	o := agentopts.NewGrpcProxyAgentOptions()
 
 	host, port, err := net.SplitHostPort(opts.ServerAddr)
