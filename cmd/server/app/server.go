@@ -128,7 +128,7 @@ func (p *Proxy) Run(o *options.ProxyRunOptions, stopCh <-chan struct{}) error {
 		AuthenticationAudience: o.AuthenticationAudience,
 	}
 	klog.V(1).Infoln("Starting frontend server for client connections.")
-	ps, err := server.GenProxyStrategiesFromStr(o.ProxyStrategies)
+	ps, err := server.ParseProxyStrategies(o.ProxyStrategies)
 	if err != nil {
 		return err
 	}

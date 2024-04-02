@@ -19,7 +19,6 @@ package options
 import (
 	"fmt"
 	"os"
-	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -90,10 +89,10 @@ type ProxyRunOptions struct {
 
 	// Proxy strategies used by the server.
 	// NOTE the order of the strategies matters. e.g., for list
-	// "destHost,destCIDR", the server will try to find a backend associating
+	// "destHost,destCIDR,default", the server will try to find a backend associating
 	// to the destination host first, if not found, it will try to find a
 	// backend within the destCIDR. if it still can't find any backend,
-	// it will use the default backend manager to choose a random backend.
+	// it will choose a random backend.
 	ProxyStrategies string
 
 	// Cipher suites used by the server.
@@ -135,7 +134,7 @@ func (o *ProxyRunOptions) Flags() *pflag.FlagSet {
 	flags.Float32Var(&o.KubeconfigQPS, "kubeconfig-qps", o.KubeconfigQPS, "Maximum client QPS (proxy server uses this client to authenticate agent tokens).")
 	flags.IntVar(&o.KubeconfigBurst, "kubeconfig-burst", o.KubeconfigBurst, "Maximum client burst (proxy server uses this client to authenticate agent tokens).")
 	flags.StringVar(&o.AuthenticationAudience, "authentication-audience", o.AuthenticationAudience, "Expected agent's token authentication audience (used with agent-namespace, agent-service-account, kubeconfig).")
-	flags.StringVar(&o.ProxyStrategies, "proxy-strategies", o.ProxyStrategies, "The list of proxy strategies used by the server to pick a backend/tunnel, available strategies are: default, destHost.")
+	flags.StringVar(&o.ProxyStrategies, "proxy-strategies", o.ProxyStrategies, "The list of proxy strategies used by the server to pick an agent/tunnel, available strategies are: default, destHost, defaultRoute.")
 	flags.StringSliceVar(&o.CipherSuites, "cipher-suites", o.CipherSuites, "The comma separated list of allowed cipher suites. Has no effect on TLS1.3. Empty means allow default list.")
 
 	flags.Bool("warn-on-channel-limit", true, "This behavior is now thread safe and always on. This flag will be removed in a future release.")
@@ -292,17 +291,11 @@ func (o *ProxyRunOptions) Validate() error {
 	}
 
 	// validate the proxy strategies
-	if o.ProxyStrategies != "" {
-		pss := strings.Split(o.ProxyStrategies, ",")
-		for _, ps := range pss {
-			switch ps {
-			case string(server.ProxyStrategyDestHost):
-			case string(server.ProxyStrategyDefault):
-			case string(server.ProxyStrategyDefaultRoute):
-			default:
-				return fmt.Errorf("unknown proxy strategy: %s, available strategy are: default, destHost, defaultRoute", ps)
-			}
-		}
+	if len(o.ProxyStrategies) == 0 {
+		return fmt.Errorf("ProxyStrategies cannot be empty")
+	}
+	if _, err := server.ParseProxyStrategies(o.ProxyStrategies); err != nil {
+		return fmt.Errorf("invalid proxy strategies: %v", err)
 	}
 
 	// validate the cipher suites
