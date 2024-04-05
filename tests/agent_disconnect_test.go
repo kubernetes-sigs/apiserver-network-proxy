@@ -173,7 +173,7 @@ func clientRequest(c *http.Client, addr string) ([]byte, error) {
 	return data, nil
 }
 
-func createGrpcTunnelClient(ctx context.Context, proxyAddr, addr string) (*http.Client, error) {
+func createGrpcTunnelClient(ctx context.Context, proxyAddr, _ string) (*http.Client, error) {
 	tunnel, err := createSingleUseGrpcTunnel(ctx, proxyAddr)
 	if err != nil {
 		return nil, err
@@ -189,7 +189,7 @@ func createGrpcTunnelClient(ctx context.Context, proxyAddr, addr string) (*http.
 	return c, nil
 }
 
-func createHTTPConnectClient(ctx context.Context, proxyAddr, addr string) (*http.Client, error) {
+func createHTTPConnectClient(_ context.Context, proxyAddr, addr string) (*http.Client, error) {
 	conn, err := net.Dial("unix", proxyAddr)
 	if err != nil {
 		return nil, err

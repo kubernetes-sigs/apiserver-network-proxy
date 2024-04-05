@@ -37,7 +37,7 @@ type tcpLB struct {
 	backends []string
 }
 
-func copy(wc io.WriteCloser, r io.Reader) {
+func ioCopy(wc io.WriteCloser, r io.Reader) {
 	defer wc.Close()
 	io.Copy(wc, r)
 }
@@ -48,8 +48,8 @@ func (lb *tcpLB) handleConnection(in net.Conn, backend string) {
 		lb.t.Log(err)
 		return
 	}
-	go copy(out, in)
-	go copy(in, out)
+	go ioCopy(out, in)
+	go ioCopy(in, out)
 }
 
 func (lb *tcpLB) serve(stopCh chan struct{}) string {

@@ -21,6 +21,7 @@ import (
 	"fmt"
 	"io"
 	"math/rand"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -278,12 +279,7 @@ func NewDefaultBackendStorage(idTypes []header.IdentifierType) *DefaultBackendSt
 }
 
 func containIDType(idTypes []header.IdentifierType, idType header.IdentifierType) bool {
-	for _, it := range idTypes {
-		if it == idType {
-			return true
-		}
-	}
-	return false
+	return slices.Contains(idTypes, idType)
 }
 
 // addBackend adds a backend.
