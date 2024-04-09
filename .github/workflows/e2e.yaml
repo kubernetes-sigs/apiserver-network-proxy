@@ -36,9 +36,11 @@ jobs:
         mkdir _output
 
         make docker-build/proxy-agent-amd64 REGISTRY=gcr.io/k8s-staging-kas-network-proxy TAG=local BASEIMAGE=${{ env.BASEIMAGE }}
-        docker save gcr.io/k8s-staging-kas-network-proxy/proxy-agent-amd64:local > _output/konnectivity-agent.tar
+        docker tag gcr.io/k8s-staging-kas-network-proxy/proxy-agent-amd64:local gcr.io/k8s-staging-kas-network-proxy/proxy-agent:master
+        docker save gcr.io/k8s-staging-kas-network-proxy/proxy-agent:master > _output/konnectivity-agent.tar
         make docker-build/proxy-server-amd64 REGISTRY=gcr.io/k8s-staging-kas-network-proxy TAG=local BASEIMAGE=${{ env.BASEIMAGE }}
-        docker save gcr.io/k8s-staging-kas-network-proxy/proxy-server-amd64:local > _output/konnectivity-server.tar
+        docker tag gcr.io/k8s-staging-kas-network-proxy/proxy-server-amd64:local gcr.io/k8s-staging-kas-network-proxy/proxy-server:master
+        docker save gcr.io/k8s-staging-kas-network-proxy/proxy-server:master > _output/konnectivity-server.tar
 
     - uses: actions/upload-artifact@v4
       with:
@@ -153,8 +155,8 @@ jobs:
         # preload konnectivity images
         docker load --input konnectivity-server.tar
         docker load --input konnectivity-agent.tar
-        /usr/local/bin/kind load docker-image gcr.io/k8s-staging-kas-network-proxy/proxy-server-amd64:local --name ${{ env.KIND_CLUSTER_NAME}}
-        /usr/local/bin/kind load docker-image gcr.io/k8s-staging-kas-network-proxy/proxy-agent-amd64:local --name ${{ env.KIND_CLUSTER_NAME}}
+        /usr/local/bin/kind load docker-image gcr.io/k8s-staging-kas-network-proxy/proxy-server:master --name ${{ env.KIND_CLUSTER_NAME}}
+        /usr/local/bin/kind load docker-image gcr.io/k8s-staging-kas-network-proxy/proxy-agent:master --name ${{ env.KIND_CLUSTER_NAME}}
         kubectl apply -f examples/kind/konnectivity-server.yaml
         kubectl apply -f examples/kind/konnectivity-agent-ds.yaml
 
