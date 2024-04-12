@@ -77,17 +77,7 @@ func GenProxyStrategiesFromStr(proxyStrategies string) ([]ProxyStrategy, error) 
 // In the only currently supported case (gRPC), it wraps an
 // agent.AgentService_ConnectServer, provides synchronization and
 // emits common stream metrics.
-type Backend interface {
-	Send(p *client.Packet) error
-	Recv() (*client.Packet, error)
-	Context() context.Context
-	GetAgentID() string
-	GetAgentIdentifiers() header.Identifiers
-}
-
-var _ Backend = &backend{}
-
-type backend struct {
+type Backend struct {
 	sendLock sync.Mutex
 	recvLock sync.Mutex
 	conn     agent.AgentService_ConnectServer
@@ -97,7 +87,7 @@ type backend struct {
 	idents header.Identifiers
 }
 
-func (b *backend) Send(p *client.Packet) error {
+func (b *Backend) Send(p *client.Packet) error {
 	b.sendLock.Lock()
 	defer b.sendLock.Unlock()
 
@@ -110,7 +100,7 @@ func (b *backend) Send(p *client.Packet) error {
 	return err
 }
 
-func (b *backend) Recv() (*client.Packet, error) {
+func (b *Backend) Recv() (*client.Packet, error) {
 	b.recvLock.Lock()
 	defer b.recvLock.Unlock()
 
@@ -126,16 +116,16 @@ func (b *backend) Recv() (*client.Packet, error) {
 	return pkt, nil
 }
 
-func (b *backend) Context() context.Context {
+func (b *Backend) Context() context.Context {
 	// TODO: does Context require lock protection?
 	return b.conn.Context()
 }
 
-func (b *backend) GetAgentID() string {
+func (b *Backend) GetAgentID() string {
 	return b.id
 }
 
-func (b *backend) GetAgentIdentifiers() header.Identifiers {
+func (b *Backend) GetAgentIdentifiers() header.Identifiers {
 	return b.idents
 }
 
@@ -168,7 +158,7 @@ func getAgentIdentifiers(conn agent.AgentService_ConnectServer) (header.Identifi
 	return header.GenAgentIdentifiers(agentIdent[0])
 }
 
-func NewBackend(conn agent.AgentService_ConnectServer) (Backend, error) {
+func NewBackend(conn agent.AgentService_ConnectServer) (*Backend, error) {
 	agentID, err := getAgentID(conn)
 	if err != nil {
 		return nil, err
@@ -177,16 +167,16 @@ func NewBackend(conn agent.AgentService_ConnectServer) (Backend, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &backend{conn: conn, id: agentID, idents: agentIdentifiers}, nil
+	return &Backend{conn: conn, id: agentID, idents: agentIdentifiers}, nil
 }
 
 // BackendStorage is an interface to manage the storage of the backend
 // connections, i.e., get, add and remove
 type BackendStorage interface {
 	// addBackend adds a backend.
-	addBackend(identifier string, idType header.IdentifierType, backend Backend)
+	addBackend(identifier string, idType header.IdentifierType, backend *Backend)
 	// removeBackend removes a backend.
-	removeBackend(identifier string, idType header.IdentifierType, backend Backend)
+	removeBackend(identifier string, idType header.IdentifierType, backend *Backend)
 	// NumBackends returns the number of backends.
 	NumBackends() int
 }
@@ -199,11 +189,11 @@ type BackendManager interface {
 	// context instead of a request-scoped context, as the backend manager will
 	// pick a backend for every tunnel session and each tunnel session may
 	// contains multiple requests.
-	Backend(ctx context.Context) (Backend, error)
+	Backend(ctx context.Context) (*Backend, error)
 	// AddBackend adds a backend.
-	AddBackend(backend Backend)
+	AddBackend(backend *Backend)
 	// RemoveBackend adds a backend.
-	RemoveBackend(backend Backend)
+	RemoveBackend(backend *Backend)
 	BackendStorage
 	ReadinessManager
 }
@@ -215,18 +205,18 @@ type DefaultBackendManager struct {
 	*DefaultBackendStorage
 }
 
-func (dbm *DefaultBackendManager) Backend(_ context.Context) (Backend, error) {
+func (dbm *DefaultBackendManager) Backend(_ context.Context) (*Backend, error) {
 	klog.V(5).InfoS("Get a random backend through the DefaultBackendManager")
 	return dbm.DefaultBackendStorage.GetRandomBackend()
 }
 
-func (dbm *DefaultBackendManager) AddBackend(backend Backend) {
+func (dbm *DefaultBackendManager) AddBackend(backend *Backend) {
 	agentID := backend.GetAgentID()
 	klog.V(5).InfoS("Add the agent to DefaultBackendManager", "agentID", agentID)
 	dbm.addBackend(agentID, header.UID, backend)
 }
 
-func (dbm *DefaultBackendManager) RemoveBackend(backend Backend) {
+func (dbm *DefaultBackendManager) RemoveBackend(backend *Backend) {
 	agentID := backend.GetAgentID()
 	klog.V(5).InfoS("Remove the agent from the DefaultBackendManager", "agentID", agentID)
 	dbm.removeBackend(agentID, header.UID, backend)
@@ -242,7 +232,7 @@ type DefaultBackendStorage struct {
 	//
 	// TODO: fix documentation. This is not always agentID, e.g. in
 	// the case of DestHostBackendManager.
-	backends map[string][]Backend
+	backends map[string][]*Backend
 	// agentID is tracked in this slice to enable randomly picking an
 	// agentID in the Backend() method. There is no reliable way to
 	// randomly pick a key from a map (in this case, the backends) in
@@ -272,7 +262,7 @@ func NewDefaultBackendStorage(idTypes []header.IdentifierType) *DefaultBackendSt
 	// no agent ever successfully connects.
 	metrics.Metrics.SetBackendCount(0)
 	return &DefaultBackendStorage{
-		backends: make(map[string][]Backend),
+		backends: make(map[string][]*Backend),
 		random:   rand.New(rand.NewSource(time.Now().UnixNano())),
 		idTypes:  idTypes,
 	} /* #nosec G404 */
@@ -283,7 +273,7 @@ func containIDType(idTypes []header.IdentifierType, idType header.IdentifierType
 }
 
 // addBackend adds a backend.
-func (s *DefaultBackendStorage) addBackend(identifier string, idType header.IdentifierType, backend Backend) {
+func (s *DefaultBackendStorage) addBackend(identifier string, idType header.IdentifierType, backend *Backend) {
 	if !containIDType(s.idTypes, idType) {
 		klog.V(4).InfoS("fail to add backend", "backend", identifier, "error", &ErrWrongIDType{idType, s.idTypes})
 		return
@@ -302,7 +292,7 @@ func (s *DefaultBackendStorage) addBackend(identifier string, idType header.Iden
 		s.backends[identifier] = append(s.backends[identifier], backend)
 		return
 	}
-	s.backends[identifier] = []Backend{backend}
+	s.backends[identifier] = []*Backend{backend}
 	metrics.Metrics.SetBackendCount(len(s.backends))
 	s.agentIDs = append(s.agentIDs, identifier)
 	if idType == header.DefaultRoute {
@@ -311,7 +301,7 @@ func (s *DefaultBackendStorage) addBackend(identifier string, idType header.Iden
 }
 
 // removeBackend removes a backend.
-func (s *DefaultBackendStorage) removeBackend(identifier string, idType header.IdentifierType, backend Backend) {
+func (s *DefaultBackendStorage) removeBackend(identifier string, idType header.IdentifierType, backend *Backend) {
 	if !containIDType(s.idTypes, idType) {
 		klog.ErrorS(&ErrWrongIDType{idType, s.idTypes}, "fail to remove backend")
 		return
@@ -390,7 +380,7 @@ func ignoreNotFound(err error) error {
 }
 
 // GetRandomBackend returns a random backend connection from all connected agents.
-func (s *DefaultBackendStorage) GetRandomBackend() (Backend, error) {
+func (s *DefaultBackendStorage) GetRandomBackend() (*Backend, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if len(s.backends) == 0 {

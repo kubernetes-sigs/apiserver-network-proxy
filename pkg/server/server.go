@@ -102,7 +102,7 @@ type ProxyClientConnection struct {
 	connectID   int64
 	agentID     string
 	start       time.Time
-	backend     Backend
+	backend     *Backend
 	dialAddress string // cached for logging
 }
 
@@ -245,7 +245,7 @@ func genContext(proxyStrategies []ProxyStrategy, reqHost string) context.Context
 	return ctx
 }
 
-func (s *ProxyServer) getBackend(reqHost string) (Backend, error) {
+func (s *ProxyServer) getBackend(reqHost string) (*Backend, error) {
 	ctx := genContext(s.proxyStrategies, reqHost)
 	for _, bm := range s.BackendManagers {
 		be, err := bm.Backend(ctx)
@@ -261,14 +261,14 @@ func (s *ProxyServer) getBackend(reqHost string) (Backend, error) {
 	return nil, &ErrNotFound{}
 }
 
-func (s *ProxyServer) addBackend(backend Backend) {
+func (s *ProxyServer) addBackend(backend *Backend) {
 	// TODO: refactor BackendStorage to acquire lock once, not up to 3 times.
 	for _, bm := range s.BackendManagers {
 		bm.AddBackend(backend)
 	}
 }
 
-func (s *ProxyServer) removeBackend(backend Backend) {
+func (s *ProxyServer) removeBackend(backend *Backend) {
 	for _, bm := range s.BackendManagers {
 		bm.RemoveBackend(backend)
 	}
@@ -318,7 +318,7 @@ func (s *ProxyServer) getFrontend(agentID string, connID int64) (*ProxyClientCon
 	return conn, nil
 }
 
-func (s *ProxyServer) removeEstablishedForBackendConn(agentID string, backend Backend) ([]*ProxyClientConnection, error) {
+func (s *ProxyServer) removeEstablishedForBackendConn(agentID string, backend *Backend) ([]*ProxyClientConnection, error) {
 	var ret []*ProxyClientConnection
 	if backend == nil {
 		return ret, nil
@@ -492,7 +492,7 @@ func (s *ProxyServer) serveRecvFrontend(frontend *GrpcFrontend, recvCh <-chan *c
 	// backend from the BackendManger then.
 	// TODO: either add agentID to protocol (DATA, CLOSE_RSP, etc) or replace {agentID,
 	// connectionID} with a simpler key (#462).
-	var backend Backend
+	var backend *Backend
 	var err error
 
 	defer func() {
@@ -759,7 +759,7 @@ func (s *ProxyServer) Connect(stream agent.AgentService_ConnectServer) error {
 	return <-stopCh
 }
 
-func (s *ProxyServer) readBackendToChannel(backend Backend, recvCh chan *client.Packet, stopCh chan error) {
+func (s *ProxyServer) readBackendToChannel(backend *Backend, recvCh chan *client.Packet, stopCh chan error) {
 	agentID := backend.GetAgentID()
 	for {
 		in, err := backend.Recv()
@@ -792,7 +792,7 @@ func (s *ProxyServer) readBackendToChannel(backend Backend, recvCh chan *client.
 }
 
 // route the packet back to the correct client
-func (s *ProxyServer) serveRecvBackend(backend Backend, agentID string, recvCh <-chan *client.Packet) {
+func (s *ProxyServer) serveRecvBackend(backend *Backend, agentID string, recvCh <-chan *client.Packet) {
 	defer func() {
 		// Drain recvCh to ensure that readBackendToChannel is not blocked on a channel write.
 		// This should never happen, as termination of this function should only be initiated by closing recvCh.
@@ -948,7 +948,7 @@ func (s *ProxyServer) serveRecvBackend(backend Backend, agentID string, recvCh <
 	klog.V(5).InfoS("Close backend of agent", "agentID", agentID)
 }
 
-func (s *ProxyServer) sendBackendClose(backend Backend, connectID int64, random int64, reason string) {
+func (s *ProxyServer) sendBackendClose(backend *Backend, connectID int64, random int64, reason string) {
 	agentID := backend.GetAgentID()
 	pkt := &client.Packet{
 		Type: client.PacketType_CLOSE_REQ,
@@ -963,7 +963,7 @@ func (s *ProxyServer) sendBackendClose(backend Backend, connectID int64, random 
 	}
 }
 
-func (s *ProxyServer) sendBackendDialClose(backend Backend, random int64, reason string) {
+func (s *ProxyServer) sendBackendDialClose(backend *Backend, random int64, reason string) {
 	agentID := backend.GetAgentID()
 	pkt := &client.Packet{
 		Type: client.PacketType_DIAL_CLS,
