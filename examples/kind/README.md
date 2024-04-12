@@ -35,7 +35,7 @@ $ kubectl apply -f konnectivity-agent-ds.yaml
 serviceaccount/konnectivity-agent created
 ```
 
-To validate that it works, run a custom image and try to exec into the pod (it goes through the konnectivity proxy):
+To validate that it works, run a custom image and get pod logs (it goes through the konnectivity proxy):
 ```sh
 $ kubectl run test --image httpd:2
 pod/test created
@@ -45,7 +45,7 @@ test   0/1     ContainerCreating   0          4s
 $ kubectl get pods
 NAME   READY   STATUS    RESTARTS   AGE
 test   1/1     Running   0          6s
-$ kubectl exec -it test bash
-kubectl exec [POD] [COMMAND] is DEPRECATED and will be removed in a future version. Use kubectl exec [POD] -- [COMMAND] instead.
+$ kubectl logs test
+...
+[Tue Apr 09 20:58:36.756720 2024] [mpm_event:notice] [pid 1:tid 139788897408896] AH00489: Apache/2.4.59 (Unix) configured -- resuming normal operations
 ```
-

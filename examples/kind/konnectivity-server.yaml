@@ -55,17 +55,20 @@ spec:
       hostNetwork: true
       containers:
       - name: konnectivity-server-container
-        image: gcr.io/k8s-staging-kas-network-proxy/proxy-server-amd64:local
-        imagePullPolicy: Never
+        image: gcr.io/k8s-staging-kas-network-proxy/proxy-server:master
         resources:
           requests:
             cpu: 1m
+        securityContext:
+          allowPrivilegeEscalation: false
+          runAsUser: 0
         command: [ "/proxy-server"]
         args: [
           "--log-file=/var/log/konnectivity-server.log",
           "--logtostderr=true",
           "--log-file-max-size=0",
           "--uds-name=/etc/kubernetes/konnectivity-server/konnectivity-server.socket",
+          "--delete-existing-uds-file",
           "--cluster-cert=/etc/kubernetes/pki/apiserver.crt",
           "--cluster-key=/etc/kubernetes/pki/apiserver.key",
           "--server-port=0",
