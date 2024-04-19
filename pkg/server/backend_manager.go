@@ -248,9 +248,7 @@ type DefaultBackendStorage struct {
 	// randomly pick a key from a map (in this case, the backends) in
 	// Golang.
 	agentIDs []string
-	// defaultRouteAgentIDs tracks the agents that have claimed the default route.
-	defaultRouteAgentIDs []string
-	random               *rand.Rand
+	random   *rand.Rand
 	// idTypes contains the valid identifier types for this
 	// DefaultBackendStorage. The DefaultBackendStorage may only tolerate certain
 	// types of identifiers when associating to a specific BackendManager,
@@ -305,9 +303,6 @@ func (s *DefaultBackendStorage) addBackend(identifier string, idType header.Iden
 	s.backends[identifier] = []Backend{backend}
 	metrics.Metrics.SetBackendCount(len(s.backends))
 	s.agentIDs = append(s.agentIDs, identifier)
-	if idType == header.DefaultRoute {
-		s.defaultRouteAgentIDs = append(s.defaultRouteAgentIDs, identifier)
-	}
 }
 
 // removeBackend removes a backend.
@@ -341,14 +336,6 @@ func (s *DefaultBackendStorage) removeBackend(identifier string, idType header.I
 				s.agentIDs[i] = s.agentIDs[len(s.agentIDs)-1]
 				s.agentIDs = s.agentIDs[:len(s.agentIDs)-1]
 				break
-			}
-		}
-		if idType == header.DefaultRoute {
-			for i := range s.defaultRouteAgentIDs {
-				if s.defaultRouteAgentIDs[i] == identifier {
-					s.defaultRouteAgentIDs = append(s.defaultRouteAgentIDs[:i], s.defaultRouteAgentIDs[i+1:]...)
-					break
-				}
 			}
 		}
 	}
