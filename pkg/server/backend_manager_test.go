@@ -119,7 +119,7 @@ func TestDefaultBackendManager_AddRemoveBackends(t *testing.T) {
 
 	p.AddBackend(backend1)
 	p.RemoveBackend(backend1)
-	expectedBackends := make(map[string][]Backend)
+	expectedBackends := make(map[string][]*Backend)
 	expectedAgentIDs := []string{}
 	if e, a := expectedBackends, p.backends; !reflect.DeepEqual(e, a) {
 		t.Errorf("expected %v, got %v", e, a)
@@ -139,7 +139,7 @@ func TestDefaultBackendManager_AddRemoveBackends(t *testing.T) {
 	p.RemoveBackend(backend22)
 	p.RemoveBackend(backend2)
 	p.RemoveBackend(backend1)
-	expectedBackends = map[string][]Backend{
+	expectedBackends = map[string][]*Backend{
 		"agent1": {backend12},
 		"agent3": {backend3},
 	}
@@ -166,7 +166,7 @@ func TestDefaultRouteBackendManager_AddRemoveBackends(t *testing.T) {
 
 	p.AddBackend(backend1)
 	p.RemoveBackend(backend1)
-	expectedBackends := make(map[string][]Backend)
+	expectedBackends := make(map[string][]*Backend)
 	expectedAgentIDs := []string{}
 	if e, a := expectedBackends, p.backends; !reflect.DeepEqual(e, a) {
 		t.Errorf("expected %v, got %v", e, a)
@@ -187,7 +187,7 @@ func TestDefaultRouteBackendManager_AddRemoveBackends(t *testing.T) {
 	p.RemoveBackend(backend2)
 	p.RemoveBackend(backend1)
 
-	expectedBackends = map[string][]Backend{
+	expectedBackends = map[string][]*Backend{
 		"agent1": {backend12},
 		"agent3": {backend3},
 	}
@@ -215,7 +215,7 @@ func TestDestHostBackendManager_AddRemoveBackends(t *testing.T) {
 
 	p.AddBackend(backend1)
 	p.RemoveBackend(backend1)
-	expectedBackends := make(map[string][]Backend)
+	expectedBackends := make(map[string][]*Backend)
 	expectedAgentIDs := []string{}
 	if e, a := expectedBackends, p.backends; !reflect.DeepEqual(e, a) {
 		t.Errorf("expected %v, got %v", e, a)
@@ -227,7 +227,7 @@ func TestDestHostBackendManager_AddRemoveBackends(t *testing.T) {
 	p = NewDestHostBackendManager()
 	p.AddBackend(backend1)
 
-	expectedBackends = map[string][]Backend{
+	expectedBackends = map[string][]*Backend{
 		"localhost":                 {backend1},
 		"1.2.3.4":                   {backend1},
 		"9878::7675:1292:9183:7562": {backend1},
@@ -250,7 +250,7 @@ func TestDestHostBackendManager_AddRemoveBackends(t *testing.T) {
 	p.AddBackend(backend2)
 	p.AddBackend(backend3)
 
-	expectedBackends = map[string][]Backend{
+	expectedBackends = map[string][]*Backend{
 		"localhost":                 {backend1},
 		"node1.mydomain.com":        {backend1},
 		"node2.mydomain.com":        {backend3},
@@ -279,7 +279,7 @@ func TestDestHostBackendManager_AddRemoveBackends(t *testing.T) {
 	p.RemoveBackend(backend2)
 	p.RemoveBackend(backend1)
 
-	expectedBackends = map[string][]Backend{
+	expectedBackends = map[string][]*Backend{
 		"node2.mydomain.com": {backend3},
 		"5.6.7.8":            {backend3},
 		"::":                 {backend3},
@@ -298,7 +298,7 @@ func TestDestHostBackendManager_AddRemoveBackends(t *testing.T) {
 	}
 
 	p.RemoveBackend(backend3)
-	expectedBackends = map[string][]Backend{}
+	expectedBackends = map[string][]*Backend{}
 	expectedAgentIDs = []string{}
 
 	if e, a := expectedBackends, p.backends; !reflect.DeepEqual(e, a) {
@@ -323,7 +323,7 @@ func TestDestHostBackendManager_WithDuplicateIdents(t *testing.T) {
 	p.AddBackend(backend2)
 	p.AddBackend(backend3)
 
-	expectedBackends := map[string][]Backend{
+	expectedBackends := map[string][]*Backend{
 		"localhost":                 {backend1, backend2, backend3},
 		"1.2.3.4":                   {backend1, backend2},
 		"5.6.7.8":                   {backend3},
@@ -352,7 +352,7 @@ func TestDestHostBackendManager_WithDuplicateIdents(t *testing.T) {
 	p.RemoveBackend(backend1)
 	p.RemoveBackend(backend3)
 
-	expectedBackends = map[string][]Backend{
+	expectedBackends = map[string][]*Backend{
 		"localhost":                 {backend2},
 		"1.2.3.4":                   {backend2},
 		"9878::7675:1292:9183:7562": {backend2},
@@ -373,7 +373,7 @@ func TestDestHostBackendManager_WithDuplicateIdents(t *testing.T) {
 	}
 
 	p.RemoveBackend(backend2)
-	expectedBackends = map[string][]Backend{}
+	expectedBackends = map[string][]*Backend{}
 	expectedAgentIDs = []string{}
 
 	if e, a := expectedBackends, p.backends; !reflect.DeepEqual(e, a) {

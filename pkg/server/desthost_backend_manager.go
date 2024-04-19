@@ -35,7 +35,7 @@ func NewDestHostBackendManager() *DestHostBackendManager {
 			[]header.IdentifierType{header.IPv4, header.IPv6, header.Host})}
 }
 
-func (dibm *DestHostBackendManager) AddBackend(backend Backend) {
+func (dibm *DestHostBackendManager) AddBackend(backend *Backend) {
 	agentIdentifiers := backend.GetAgentIdentifiers()
 	for _, ipv4 := range agentIdentifiers.IPv4 {
 		klog.V(5).InfoS("Add the agent to DestHostBackendManager", "agent address", ipv4)
@@ -51,7 +51,7 @@ func (dibm *DestHostBackendManager) AddBackend(backend Backend) {
 	}
 }
 
-func (dibm *DestHostBackendManager) RemoveBackend(backend Backend) {
+func (dibm *DestHostBackendManager) RemoveBackend(backend *Backend) {
 	agentIdentifiers := backend.GetAgentIdentifiers()
 	for _, ipv4 := range agentIdentifiers.IPv4 {
 		klog.V(5).InfoS("Remove the agent from the DestHostBackendManager", "agentHost", ipv4)
@@ -68,7 +68,7 @@ func (dibm *DestHostBackendManager) RemoveBackend(backend Backend) {
 }
 
 // Backend tries to get a backend associating to the request destination host.
-func (dibm *DestHostBackendManager) Backend(ctx context.Context) (Backend, error) {
+func (dibm *DestHostBackendManager) Backend(ctx context.Context) (*Backend, error) {
 	dibm.mu.RLock()
 	defer dibm.mu.RUnlock()
 	if len(dibm.backends) == 0 {

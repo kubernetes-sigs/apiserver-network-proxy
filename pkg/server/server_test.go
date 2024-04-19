@@ -540,9 +540,9 @@ func TestEstablishedConnsMetric(t *testing.T) {
 }
 
 func TestRemoveEstablishedForBackendConn(t *testing.T) {
-	backend1 := &backend{}
-	backend2 := &backend{}
-	backend3 := &backend{}
+	backend1 := &Backend{}
+	backend2 := &Backend{}
+	backend3 := &Backend{}
 	agent1ConnID1 := &ProxyClientConnection{backend: backend1}
 	agent1ConnID2 := &ProxyClientConnection{backend: backend1}
 	agent2ConnID1 := &ProxyClientConnection{backend: backend2}
@@ -571,9 +571,9 @@ func TestRemoveEstablishedForBackendConn(t *testing.T) {
 
 func TestRemoveEstablishedForStream(t *testing.T) {
 	streamUID := "target-uuid"
-	backend1 := &backend{}
-	backend2 := &backend{}
-	backend3 := &backend{}
+	backend1 := &Backend{}
+	backend2 := &Backend{}
+	backend3 := &Backend{}
 	agent1ConnID1 := &ProxyClientConnection{backend: backend1, frontend: &GrpcFrontend{streamUID: streamUID}}
 	agent1ConnID2 := &ProxyClientConnection{backend: backend1}
 	agent2ConnID1 := &ProxyClientConnection{backend: backend2, frontend: &GrpcFrontend{streamUID: streamUID}}
@@ -613,7 +613,7 @@ func prepareFrontendConn(ctrl *gomock.Controller) *agentmock.MockAgentService_Co
 	return frontendConn
 }
 
-func prepareAgentConnMD(t testing.TB, ctrl *gomock.Controller, proxyServer *ProxyServer) (*agentmock.MockAgentService_ConnectServer, Backend) {
+func prepareAgentConnMD(t testing.TB, ctrl *gomock.Controller, proxyServer *ProxyServer) (*agentmock.MockAgentService_ConnectServer, *Backend) {
 	t.Helper()
 	// prepare the the connection to agent of proxy-server
 	agentConn := agentmock.NewMockAgentService_ConnectServer(ctrl)

@@ -36,11 +36,11 @@ func NewDefaultRouteBackendManager() *DefaultRouteBackendManager {
 }
 
 // Backend tries to get a backend that advertises default route, with random selection.
-func (dibm *DefaultRouteBackendManager) Backend(_ context.Context) (Backend, error) {
+func (dibm *DefaultRouteBackendManager) Backend(_ context.Context) (*Backend, error) {
 	return dibm.GetRandomBackend()
 }
 
-func (dibm *DefaultRouteBackendManager) AddBackend(backend Backend) {
+func (dibm *DefaultRouteBackendManager) AddBackend(backend *Backend) {
 	agentID := backend.GetAgentID()
 	agentIdentifiers := backend.GetAgentIdentifiers()
 	if agentIdentifiers.DefaultRoute {
@@ -49,7 +49,7 @@ func (dibm *DefaultRouteBackendManager) AddBackend(backend Backend) {
 	}
 }
 
-func (dibm *DefaultRouteBackendManager) RemoveBackend(backend Backend) {
+func (dibm *DefaultRouteBackendManager) RemoveBackend(backend *Backend) {
 	agentID := backend.GetAgentID()
 	agentIdentifiers := backend.GetAgentIdentifiers()
 	if agentIdentifiers.DefaultRoute {
