@@ -36,7 +36,7 @@ func NewDefaultRouteBackendManager() *DefaultRouteBackendManager {
 }
 
 // Backend tries to get a backend associating to the request destination host.
-func (dibm *DefaultRouteBackendManager) Backend(ctx context.Context) (Backend, error) {
+func (dibm *DefaultRouteBackendManager) Backend(_ context.Context) (Backend, error) {
 	dibm.mu.RLock()
 	defer dibm.mu.RUnlock()
 	if len(dibm.backends) == 0 {
