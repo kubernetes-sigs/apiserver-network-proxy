@@ -91,7 +91,7 @@ bin/proxy-server: bin $(SOURCE)
 .PHONY: lint
 lint:
 	curl -sSfL https://raw.githubusercontent.com/golangci/golangci-lint/master/install.sh | sh -s -- -b $(INSTALL_LOCATION) v$(GOLANGCI_LINT_VERSION)
-	$(INSTALL_LOCATION)/golangci-lint run --no-config --disable-all --enable=gofmt,revive,gosec,govet,unused --fix --verbose --timeout 3m
+	$(INSTALL_LOCATION)/golangci-lint run --verbose
 
 ## --------------------------------------
 ## Go
