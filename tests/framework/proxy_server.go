@@ -130,6 +130,7 @@ func (ps *inProcessProxyServer) Ready() bool {
 }
 
 func serverOptions(t testing.TB, opts ProxyServerOpts) (*serveropts.ProxyRunOptions, error) {
+	t.Helper()
 	o := serveropts.NewProxyRunOptions()
 
 	o.ServerCount = uint(opts.ServerCount)

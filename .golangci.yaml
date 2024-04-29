@@ -1,0 +1,22 @@
+run:
+  timeout: 3m
+  skip-dirs:
+  - vendor
+linters:
+  disable-all: true
+  enable:
+  - gofmt
+  - revive
+  - gosec
+  - govet
+  - unused
+issues:
+  fix: true
+  exclude-rules:
+    # Don't run security checks on test files
+    - path: _test\.go
+      linters:
+        - gosec
+    - path: ^tests/
+      linters:
+        - gosec

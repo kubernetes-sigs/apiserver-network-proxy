@@ -393,7 +393,7 @@ func (p *Proxy) runAgentServer(o *options.ProxyRunOptions, server *server.ProxyS
 	return nil
 }
 
-func (p *Proxy) runAdminServer(o *options.ProxyRunOptions, server *server.ProxyServer) error {
+func (p *Proxy) runAdminServer(o *options.ProxyRunOptions, _ *server.ProxyServer) error {
 	muxHandler := http.NewServeMux()
 	muxHandler.Handle("/metrics", promhttp.Handler())
 	if o.EnableProfiling {
