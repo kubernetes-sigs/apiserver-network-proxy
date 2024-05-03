@@ -12,7 +12,6 @@ on:
 
 env:
   GO_TOOLCHAIN: "golang"
-  GO_VERSION: "1.21.6"
   # TODO: match BASEIMAGE with Makefile default (nonroot variant)
   BASEIMAGE: "gcr.io/distroless/static-debian11"
   KIND_CLUSTER_NAME: "kind"
@@ -22,15 +21,13 @@ jobs:
     name: build
     runs-on: ubuntu-20.04
     steps:
+    - name: Check out code
+      uses: actions/checkout@v4
     - name: Set up Go
       uses: actions/setup-go@v5
       with:
-        go-version: ${{ env.GO_VERSION }}
+        go-version-file: go.mod
       id: go
-
-    - name: Check out code
-      uses: actions/checkout@v4
-
     - name: Build
       run: |
         mkdir _output
