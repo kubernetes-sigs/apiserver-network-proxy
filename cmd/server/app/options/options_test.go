@@ -145,6 +145,16 @@ func TestValidate(t *testing.T) {
 			value:    "TLS_AES_256_GCM_SHA384,TLS_ECDHE_RSA_WITH_AES_128_CBC_SHA",
 			expected: nil,
 		},
+		"Empty proxy strategies": {
+			field:    "ProxyStrategies",
+			value:    "",
+			expected: fmt.Errorf("ProxyStrategies cannot be empty"),
+		},
+		"Invalid proxy strategies": {
+			field:    "ProxyStrategies",
+			value:    "invalid",
+			expected: fmt.Errorf("invalid proxy strategies: unknown proxy strategy: invalid"),
+		},
 	} {
 		t.Run(desc, func(t *testing.T) {
 			testServerOptions := NewProxyRunOptions()
