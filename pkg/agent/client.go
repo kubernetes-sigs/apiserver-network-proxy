@@ -43,7 +43,8 @@ import (
 )
 
 const dialTimeout = 5 * time.Second
-const xfrChannelSize = 150
+
+//const xfrChannelSize = 150
 
 // endpointConn tracks a connection from agent to node network.
 type endpointConn struct {
@@ -68,7 +69,7 @@ func (e *endpointConn) send(msg []byte) {
 			klog.InfoS("Recovered from attempt to write to closed channel")
 		}
 	}()
-	if e.warnChLim && len(e.dataCh) >= xfrChannelSize {
+	if e.warnChLim && len(e.dataCh) >= cap(e.dataCh) {
 		klog.V(2).InfoS("Data channel on agent is full", "connectionID", e.connID)
 	}
 
@@ -377,7 +378,7 @@ func (a *Client) Serve() {
 			dialResp.GetDialResponse().Random = dialReq.Random
 
 			connID := atomic.AddInt64(&a.nextConnID, 1)
-			dataCh := make(chan []byte, xfrChannelSize)
+			dataCh := make(chan []byte, a.cs.xfrChannelSize)
 			dialDone := make(chan struct{})
 			eConn := &endpointConn{
 				dataCh:    dataCh,
