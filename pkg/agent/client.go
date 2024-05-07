@@ -44,8 +44,6 @@ import (
 
 const dialTimeout = 5 * time.Second
 
-//const xfrChannelSize = 150
-
 // endpointConn tracks a connection from agent to node network.
 type endpointConn struct {
 	conn      net.Conn
