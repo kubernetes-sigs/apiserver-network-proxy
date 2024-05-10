@@ -18,10 +18,11 @@ package options
 
 import (
 	"fmt"
-	"github.com/stretchr/testify/assert"
 	"reflect"
 	"testing"
 	"time"
+
+	"github.com/stretchr/testify/assert"
 )
 
 /*
@@ -49,6 +50,7 @@ func TestDefaultServerOptions(t *testing.T) {
 	assertDefaultValue(t, "ServiceAccountTokenPath", defaultAgentOptions.ServiceAccountTokenPath, "")
 	assertDefaultValue(t, "WarnOnChannelLimit", defaultAgentOptions.WarnOnChannelLimit, false)
 	assertDefaultValue(t, "SyncForever", defaultAgentOptions.SyncForever, false)
+	assertDefaultValue(t, "XfrChannelSize", defaultAgentOptions.XfrChannelSize, uint(150))
 }
 
 func assertDefaultValue(t *testing.T, fieldName string, actual, expected interface{}) {
@@ -145,6 +147,10 @@ func TestValidate(t *testing.T) {
 			},
 			expected: fmt.Errorf("if --enable-contention-profiling is set, --enable-profiling must also be set"),
 		},
+		"ZeroXfrChannelSize": {
+			fieldMap: map[string]interface{}{"XfrChannelSize": uint(0)},
+			expected: fmt.Errorf("channel size 0 must be greater than 0"),
+		},
 	} {
 		t.Run(desc, func(t *testing.T) {
 			testAgentOptions := NewGrpcProxyAgentOptions()
@@ -162,6 +168,9 @@ func TestValidate(t *testing.T) {
 				case reflect.Bool:
 					bvalue := value.(bool)
 					fv.SetBool(bvalue)
+				case reflect.Uint:
+					uvalue := value.(uint)
+					fv.SetUint(uint64(uvalue))
 				}
 			}
 			actual := testAgentOptions.Validate()

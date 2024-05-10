@@ -132,7 +132,7 @@ func (p *Proxy) Run(o *options.ProxyRunOptions, stopCh <-chan struct{}) error {
 	if err != nil {
 		return err
 	}
-	p.server = server.NewProxyServer(o.ServerID, ps, int(o.ServerCount), authOpt, o.XrfChannelSize)
+	p.server = server.NewProxyServer(o.ServerID, ps, int(o.ServerCount), authOpt, o.XfrChannelSize)
 
 	frontendStop, err := p.runFrontendServer(ctx, o, p.server)
 	if err != nil {

@@ -61,7 +61,7 @@ type ClientSet struct {
 	// by the server when choosing agent
 
 	warnOnChannelLimit bool
-	xfrChannelSize     int
+	xfrChannelSize     uint
 
 	syncForever bool // Continue syncing (support dynamic server count).
 }
@@ -142,7 +142,7 @@ type ClientSetConfig struct {
 	ServiceAccountTokenPath string
 	WarnOnChannelLimit      bool
 	SyncForever             bool
-	XrfChannelSize          int
+	XfrChannelSize          uint
 }
 
 func (cc *ClientSetConfig) NewAgentClientSet(drainCh, stopCh <-chan struct{}) *ClientSet {
@@ -160,6 +160,7 @@ func (cc *ClientSetConfig) NewAgentClientSet(drainCh, stopCh <-chan struct{}) *C
 		syncForever:             cc.SyncForever,
 		drainCh:                 drainCh,
 		xfrChannelSize:          cc.XrfChannelSize,
+		xfrChannelSize:          cc.XfrChannelSize,
 		stopCh:                  stopCh,
 	}
 }

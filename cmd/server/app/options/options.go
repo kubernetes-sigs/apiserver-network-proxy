@@ -101,7 +101,7 @@ type ProxyRunOptions struct {
 	// NOTE that cipher suites are not configurable for TLS1.3,
 	// see: https://pkg.go.dev/crypto/tls#Config, so in that case, this option won't have any effect.
 	CipherSuites   []string
-	XrfChannelSize int
+	XfrChannelSize uint
 }
 
 func (o *ProxyRunOptions) Flags() *pflag.FlagSet {
@@ -137,7 +137,7 @@ func (o *ProxyRunOptions) Flags() *pflag.FlagSet {
 	flags.StringVar(&o.AuthenticationAudience, "authentication-audience", o.AuthenticationAudience, "Expected agent's token authentication audience (used with agent-namespace, agent-service-account, kubeconfig).")
 	flags.StringVar(&o.ProxyStrategies, "proxy-strategies", o.ProxyStrategies, "The list of proxy strategies used by the server to pick an agent/tunnel, available strategies are: default, destHost, defaultRoute.")
 	flags.StringSliceVar(&o.CipherSuites, "cipher-suites", o.CipherSuites, "The comma separated list of allowed cipher suites. Has no effect on TLS1.3. Empty means allow default list.")
-	flags.IntVar(&o.XrfChannelSize, "xfr-channel-size", o.XrfChannelSize, "The size of the channel for transferring data between the proxy server and the agent.")
+	flags.UintVar(&o.XfrChannelSize, "xfr-channel-size", o.XfrChannelSize, "The size of the channel for transferring data between the proxy server and the agent.")
 
 	flags.Bool("warn-on-channel-limit", true, "This behavior is now thread safe and always on. This flag will be removed in a future release.")
 	flags.MarkDeprecated("warn-on-channel-limit", "This behavior is now thread safe and always on. This flag will be removed in a future release.")
@@ -177,7 +177,7 @@ func (o *ProxyRunOptions) Print() {
 	klog.V(1).Infof("KubeconfigBurst set to %d.\n", o.KubeconfigBurst)
 	klog.V(1).Infof("ProxyStrategies set to %q.\n", o.ProxyStrategies)
 	klog.V(1).Infof("CipherSuites set to %q.\n", o.CipherSuites)
-	klog.V(1).Infof("XrfChannelSize set to %d.\n", o.XrfChannelSize)
+	klog.V(1).Infof("XfrChannelSize set to %d.\n", o.XfrChannelSize)
 }
 
 func (o *ProxyRunOptions) Validate() error {
@@ -300,8 +300,8 @@ func (o *ProxyRunOptions) Validate() error {
 	if _, err := server.ParseProxyStrategies(o.ProxyStrategies); err != nil {
 		return fmt.Errorf("invalid proxy strategies: %v", err)
 	}
-	if o.XrfChannelSize <= 0 {
-		return fmt.Errorf("channel size %d must be greater than 0", o.XrfChannelSize)
+	if o.XfrChannelSize <= 0 {
+		return fmt.Errorf("channel size %d must be greater than 0", o.XfrChannelSize)
 	}
 	// validate the cipher suites
 	if len(o.CipherSuites) != 0 {
@@ -350,7 +350,7 @@ func NewProxyRunOptions() *ProxyRunOptions {
 		AuthenticationAudience:    "",
 		ProxyStrategies:           "default",
 		CipherSuites:              make([]string, 0),
-		XrfChannelSize:            10,
+		XfrChannelSize:            10,
 	}
 	return &o
 }
