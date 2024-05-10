@@ -47,8 +47,6 @@ import (
 	"sigs.k8s.io/apiserver-network-proxy/proto/header"
 )
 
-type key int
-
 type GrpcFrontend struct {
 	stream    client.ProxyService_ProxyServer
 	streamUID string
@@ -103,10 +101,6 @@ type ProxyClientConnection struct {
 	backend     *Backend
 	dialAddress string // cached for logging
 }
-
-const (
-	destHostKey key = iota
-)
 
 func (c *ProxyClientConnection) send(pkt *client.Packet) error {
 	defer func(start time.Time) { metrics.Metrics.ObserveFrontendWriteLatency(time.Since(start)) }(time.Now())
@@ -191,8 +185,7 @@ func (pm *PendingDialManager) removeForStream(streamUID string) []*ProxyClientCo
 
 // ProxyServer
 type ProxyServer struct {
-	// BackendManagers contains a list of BackendManagers
-	BackendManagers []BackendManager
+	BackendManager BackendManager
 
 	// Readiness reports if the proxy server is ready, i.e., if the proxy
 	// server has connections to proxy agents (backends). Note that the
@@ -214,8 +207,6 @@ type ProxyServer struct {
 	// agent authentication
 	AgentAuthenticationOptions *AgentTokenAuthenticationOptions
 
-	// TODO: move strategies into BackendStorage
-	proxyStrategies []ProxyStrategy
 	xfrChannelSize  int
 }
 
@@ -232,45 +223,17 @@ var _ agent.AgentServiceServer = &ProxyServer{}
 
 var _ client.ProxyServiceServer = &ProxyServer{}
 
-func genContext(proxyStrategies []ProxyStrategy, reqHost string) context.Context {
-	ctx := context.Background()
-	for _, ps := range proxyStrategies {
-		switch ps {
-		case ProxyStrategyDestHost:
-			addr := util.RemovePortFromHost(reqHost)
-			ctx = context.WithValue(ctx, destHostKey, addr)
-		}
-	}
-	return ctx
-}
-
 func (s *ProxyServer) getBackend(reqHost string) (*Backend, error) {
-	ctx := genContext(s.proxyStrategies, reqHost)
-	for _, bm := range s.BackendManagers {
-		be, err := bm.Backend(ctx)
-		if err == nil {
-			return be, nil
-		}
-		if ignoreNotFound(err) != nil {
-			// if can't find a backend through current BackendManager, move on
-			// to the next one
-			return nil, err
-		}
-	}
-	return nil, &ErrNotFound{}
+	addr := util.RemovePortFromHost(reqHost)
+	return s.BackendManager.Backend(addr)
 }
 
 func (s *ProxyServer) addBackend(backend *Backend) {
-	// TODO: refactor BackendStorage to acquire lock once, not up to 3 times.
-	for _, bm := range s.BackendManagers {
-		bm.AddBackend(backend)
-	}
+	s.BackendManager.AddBackend(backend)
 }
 
 func (s *ProxyServer) removeBackend(backend *Backend) {
-	for _, bm := range s.BackendManagers {
-		bm.RemoveBackend(backend)
-	}
+	s.BackendManager.RemoveBackend(backend)
 }
 
 func (s *ProxyServer) addEstablished(agentID string, connID int64, p *ProxyClientConnection) {
@@ -376,30 +339,16 @@ func (s *ProxyServer) removeEstablishedForStream(streamUID string) []*ProxyClien
 
 // NewProxyServer creates a new ProxyServer instance
 func NewProxyServer(serverID string, proxyStrategies []ProxyStrategy, serverCount int, agentAuthenticationOptions *AgentTokenAuthenticationOptions, channelSize int) *ProxyServer {
-	var bms []BackendManager
-	for _, ps := range proxyStrategies {
-		switch ps {
-		case ProxyStrategyDestHost:
-			bms = append(bms, NewDestHostBackendManager())
-		case ProxyStrategyDefault:
-			bms = append(bms, NewDefaultBackendManager())
-		case ProxyStrategyDefaultRoute:
-			bms = append(bms, NewDefaultRouteBackendManager())
-		default:
-			klog.ErrorS(nil, "Unknown proxy strategy", "strategy", ps)
-		}
-	}
+	bm := NewDefaultBackendManager(proxyStrategies)
 
 	return &ProxyServer{
 		established:                make(map[string](map[int64]*ProxyClientConnection)),
 		PendingDial:                NewPendingDialManager(),
 		serverID:                   serverID,
 		serverCount:                serverCount,
-		BackendManagers:            bms,
+		BackendManager:             bm,
 		AgentAuthenticationOptions: agentAuthenticationOptions,
-		// use the first backend-manager as the Readiness Manager
-		Readiness:       bms[0],
-		proxyStrategies: proxyStrategies,
+		Readiness:                  bm,
 		xfrChannelSize:  channelSize,
 	}
 }

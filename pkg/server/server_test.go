@@ -255,129 +255,7 @@ func TestAddRemoveFrontends(t *testing.T) {
 	}
 }
 
-func TestAddRemoveBackends_DefaultStrategy(t *testing.T) {
-	ctrl := gomock.NewController(t)
-	defer ctrl.Finish()
-
-	backend1, _ := NewBackend(mockAgentConn(ctrl, "agent1", []string{}))
-	backend2, _ := NewBackend(mockAgentConn(ctrl, "agent2", []string{}))
-	backend3, _ := NewBackend(mockAgentConn(ctrl, "agent3", []string{}))
-
-	p := NewProxyServer("", []ProxyStrategy{ProxyStrategyDefault}, 1, nil, xfrChannelSize)
-
-	p.addBackend(backend1)
-
-	if got, _ := p.getBackend("127.0.0.1"); got != backend1 {
-		t.Errorf("expected %v, got %v", backend1, got)
-	}
-
-	p.addBackend(backend2)
-	p.addBackend(backend3)
-	p.removeBackend(backend1)
-	p.removeBackend(backend2)
-
-	if got, _ := p.getBackend("127.0.0.1"); got != backend3 {
-		t.Errorf("expected %v, got %v", backend3, got)
-	}
-
-	p.removeBackend(backend3)
-
-	if got, _ := p.getBackend("127.0.0.1"); got != nil {
-		t.Errorf("expected nil, got %v", got)
-	}
-}
-
-func TestAddRemoveBackends_DefaultRouteStrategy(t *testing.T) {
-	ctrl := gomock.NewController(t)
-	defer ctrl.Finish()
-
-	backend1, _ := NewBackend(mockAgentConn(ctrl, "agent1", []string{}))
-	backend2, _ := NewBackend(mockAgentConn(ctrl, "agent2", []string{"default-route=false"}))
-	backend3, _ := NewBackend(mockAgentConn(ctrl, "agent3", []string{"default-route=true"}))
-
-	p := NewProxyServer("", []ProxyStrategy{ProxyStrategyDefaultRoute}, 1, nil, xfrChannelSize)
-
-	p.addBackend(backend1)
-
-	if got, _ := p.getBackend("127.0.0.1"); got != nil {
-		t.Errorf("expected nil, got %v", got)
-	}
-
-	p.addBackend(backend2)
-
-	if got, _ := p.getBackend("127.0.0.1"); got != nil {
-		t.Errorf("expected nil, got %v", got)
-	}
-
-	p.addBackend(backend3)
-
-	if got, _ := p.getBackend("127.0.0.1"); got != backend3 {
-		t.Errorf("expected %v, got %v", backend3, got)
-	}
-
-	p.removeBackend(backend1)
-	p.removeBackend(backend2)
-
-	if got, _ := p.getBackend("127.0.0.1"); got != backend3 {
-		t.Errorf("expected %v, got %v", backend3, got)
-	}
-
-	p.removeBackend(backend3)
-
-	if got, _ := p.getBackend("127.0.0.1"); got != nil {
-		t.Errorf("expected nil, got %v", got)
-	}
-}
-
-func TestAddRemoveBackends_DestHostStrategy(t *testing.T) {
-	ctrl := gomock.NewController(t)
-	defer ctrl.Finish()
-
-	backend1, _ := NewBackend(mockAgentConn(ctrl, "agent1", []string{"host=localhost&host=node1.mydomain.com&ipv4=1.2.3.4&ipv6=9878::7675:1292:9183:7562"}))
-	backend2, _ := NewBackend(mockAgentConn(ctrl, "agent2", []string{"default-route=true"}))
-	backend3, _ := NewBackend(mockAgentConn(ctrl, "agent3", []string{"host=node2.mydomain.com&ipv4=5.6.7.8&ipv6=::"}))
-
-	p := NewProxyServer("", []ProxyStrategy{ProxyStrategyDestHost}, 1, nil, xfrChannelSize)
-
-	p.addBackend(backend1)
-	p.addBackend(backend2)
-	p.addBackend(backend3)
-
-	if got, _ := p.getBackend("127.0.0.1"); got != nil {
-		t.Errorf("expected nil, got %v", got)
-	}
-	if got, _ := p.getBackend("localhost"); got != backend1 {
-		t.Errorf("expected %v, got %v", backend1, got)
-	}
-	if got, _ := p.getBackend("node1.mydomain.com"); got != backend1 {
-		t.Errorf("expected %v, got %v", backend1, got)
-	}
-	if got, _ := p.getBackend("1.2.3.4"); got != backend1 {
-		t.Errorf("expected %v, got %v", backend1, got)
-	}
-	if got, _ := p.getBackend("9878::7675:1292:9183:7562"); got != backend1 {
-		t.Errorf("expected %v, got %v", backend1, got)
-	}
-	if got, _ := p.getBackend("node2.mydomain.com"); got != backend3 {
-		t.Errorf("expected %v, got %v", backend3, got)
-	}
-	if got, _ := p.getBackend("5.6.7.8"); got != backend3 {
-		t.Errorf("expected %v, got %v", backend3, got)
-	}
-	if got, _ := p.getBackend("::"); got != backend3 {
-		t.Errorf("expected %v, got %v", backend3, got)
-	}
-
-	p.removeBackend(backend1)
-	p.removeBackend(backend2)
-	p.removeBackend(backend3)
-
-	if got, _ := p.getBackend("127.0.0.1"); got != nil {
-		t.Errorf("expected nil, got %v", got)
-	}
-}
-
-func TestAddRemoveBackends_DestHostSanitizeRequest(t *testing.T) {
+func TestAddRemoveBackends_SanitizeRequest(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	defer ctrl.Finish()
 
@@ -392,120 +270,45 @@ func TestAddRemoveBackends_DestHostSanitizeRequest(t *testing.T) {
 	if got, _ := p.getBackend("127.0.0.1:443"); got != nil {
 		t.Errorf("expected nil, got %v", got)
 	}
+	if got, _ := p.getBackend("5.6.7.8:443"); got != backend2 {
+		t.Errorf("expected %v, got %v", backend2, got)
+	}
 	if got, _ := p.getBackend("node1.mydomain.com:443"); got != backend1 {
 		t.Errorf("expected %v, got %v", backend1, got)
 	}
 	if got, _ := p.getBackend("node2.mydomain.com:443"); got != backend2 {
 		t.Errorf("expected %v, got %v", backend2, got)
 	}
+	if got, _ := p.getBackend("[9878::7675:1292:9183:7562]:443"); got != backend1 {
+		t.Errorf("expected %v, got %v", backend1, got)
+	}
+	if got, _ := p.getBackend("[::]:443"); got != backend2 {
+		t.Errorf("expected %v, got %v", backend2, got)
+	}
 }
 
-func TestAddRemoveBackends_DestHostWithDefault(t *testing.T) {
+func TestAddRemoveBackends_Readiness(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	defer ctrl.Finish()
 
 	backend1, _ := NewBackend(mockAgentConn(ctrl, "agent1", []string{"host=localhost&host=node1.mydomain.com&ipv4=1.2.3.4&ipv6=9878::7675:1292:9183:7562"}))
-	backend2, _ := NewBackend(mockAgentConn(ctrl, "agent2", []string{"default-route=false"}))
-	backend3, _ := NewBackend(mockAgentConn(ctrl, "agent3", []string{"host=node2.mydomain.com&ipv4=5.6.7.8&ipv6=::"}))
 
-	p := NewProxyServer("", []ProxyStrategy{ProxyStrategyDestHost, ProxyStrategyDefault}, 1, nil, xfrChannelSize)
+	p := NewProxyServer("", []ProxyStrategy{ProxyStrategyDestHost}, 1, nil, xfrChannelSize)
+
+	if got, _ := p.Readiness.Ready(); got != false {
+		t.Errorf("Ready() = got %t, want false", got)
+	}
 
 	p.addBackend(backend1)
-	p.addBackend(backend2)
-	p.addBackend(backend3)
 
-	if got, _ := p.getBackend("127.0.0.1"); got == nil {
-		t.Errorf("expected random fallback, got nil")
-	}
-	if got, _ := p.getBackend("localhost"); got != backend1 {
-		t.Errorf("expected %v, got %v", backend1, got)
-	}
-	if got, _ := p.getBackend("node1.mydomain.com"); got != backend1 {
-		t.Errorf("expected %v, got %v", backend1, got)
-	}
-	if got, _ := p.getBackend("1.2.3.4"); got != backend1 {
-		t.Errorf("expected %v, got %v", backend1, got)
-	}
-	if got, _ := p.getBackend("9878::7675:1292:9183:7562"); got != backend1 {
-		t.Errorf("expected %v, got %v", backend1, got)
-	}
-	if got, _ := p.getBackend("node2.mydomain.com"); got != backend3 {
-		t.Errorf("expected %v, got %v", backend3, got)
-	}
-	if got, _ := p.getBackend("5.6.7.8"); got != backend3 {
-		t.Errorf("expected %v, got %v", backend3, got)
-	}
-	if got, _ := p.getBackend("::"); got != backend3 {
-		t.Errorf("expected %v, got %v", backend3, got)
+	if got, _ := p.Readiness.Ready(); got != true {
+		t.Errorf("Ready() = got %t, want true", got)
 	}
 
 	p.removeBackend(backend1)
-	p.removeBackend(backend2)
 
-	if got, _ := p.getBackend("127.0.0.1"); got != backend3 {
-		t.Errorf("expected %v, got %v", backend3, got)
-	}
-
-	p.removeBackend(backend3)
-
-	if got, _ := p.getBackend("127.0.0.1"); got != nil {
-		t.Errorf("expected nil, got %v", got)
-	}
-}
-
-func TestAddRemoveBackends_DestHostWithDuplicateIdents(t *testing.T) {
-	ctrl := gomock.NewController(t)
-	defer ctrl.Finish()
-
-	backend1, _ := NewBackend(mockAgentConn(ctrl, "agent1", []string{"host=localhost&host=node1.mydomain.com&ipv4=1.2.3.4&ipv6=9878::7675:1292:9183:7562"}))
-	backend2, _ := NewBackend(mockAgentConn(ctrl, "agent2", []string{"host=localhost&host=node1.mydomain.com&ipv4=1.2.3.4&ipv6=9878::7675:1292:9183:7562"}))
-	backend3, _ := NewBackend(mockAgentConn(ctrl, "agent3", []string{"host=localhost&host=node2.mydomain.com&ipv4=5.6.7.8&ipv6=::"}))
-
-	p := NewProxyServer("", []ProxyStrategy{ProxyStrategyDestHost, ProxyStrategyDefault}, 1, nil, xfrChannelSize)
-
-	p.addBackend(backend1)
-	p.addBackend(backend2)
-	p.addBackend(backend3)
-
-	if got, _ := p.getBackend("127.0.0.1"); got == nil {
-		t.Errorf("expected random fallback, got nil")
-	}
-	if got, _ := p.getBackend("localhost"); got == nil {
-		t.Errorf("expected any backend, got nil")
-	}
-
-	p.removeBackend(backend1)
-	p.removeBackend(backend3)
-
-	if got, _ := p.getBackend("127.0.0.1"); got != backend2 {
-		t.Errorf("expected %v, got %v", backend2, got)
-	}
-	if got, _ := p.getBackend("localhost"); got != backend2 {
-		t.Errorf("expected %v, got %v", backend2, got)
-	}
-	if got, _ := p.getBackend("node1.mydomain.com"); got != backend2 {
-		t.Errorf("expected %v, got %v", backend2, got)
-	}
-	if got, _ := p.getBackend("1.2.3.4"); got != backend2 {
-		t.Errorf("expected %v, got %v", backend2, got)
-	}
-	if got, _ := p.getBackend("9878::7675:1292:9183:7562"); got != backend2 {
-		t.Errorf("expected %v, got %v", backend2, got)
-	}
-	if got, _ := p.getBackend("node2.mydomain.com"); got != backend2 {
-		t.Errorf("expected %v, got %v", backend2, got)
-	}
-	if got, _ := p.getBackend("5.6.7.8"); got != backend2 {
-		t.Errorf("expected %v, got %v", backend2, got)
-	}
-	if got, _ := p.getBackend("::"); got != backend2 {
-		t.Errorf("expected %v, got %v", backend2, got)
-	}
-
-	p.removeBackend(backend2)
-
-	if got, _ := p.getBackend("127.0.0.1"); got != nil {
-		t.Errorf("expected nil, got %v", got)
+	if got, _ := p.Readiness.Ready(); got != false {
+		t.Errorf("Ready() = got %t, want false", got)
 	}
 }
 

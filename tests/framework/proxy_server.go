@@ -46,7 +46,7 @@ type ProxyServerRunner interface {
 }
 
 type ProxyServer interface {
-	ConnectedBackends() (int, error)
+	ConnectedBackends() int
 	AgentAddr() string
 	FrontAddr() string
 	Ready() bool
@@ -119,12 +119,8 @@ func (ps *inProcessProxyServer) FrontAddr() string {
 	return ps.frontAddr
 }
 
-func (ps *inProcessProxyServer) ConnectedBackends() (int, error) {
-	numBackends := 0
-	for _, bm := range ps.proxyServer.BackendManagers {
-		numBackends += bm.NumBackends()
-	}
-	return numBackends, nil
+func (ps *inProcessProxyServer) ConnectedBackends() int {
+	return ps.proxyServer.BackendManager.NumBackends()
 }
 
 func (ps *inProcessProxyServer) Ready() bool {
