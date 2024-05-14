@@ -61,7 +61,7 @@ func TestDefaultServerOptions(t *testing.T) {
 	assertDefaultValue(t, "AuthenticationAudience", defaultServerOptions.AuthenticationAudience, "")
 	assertDefaultValue(t, "ProxyStrategies", defaultServerOptions.ProxyStrategies, "default")
 	assertDefaultValue(t, "CipherSuites", defaultServerOptions.CipherSuites, make([]string, 0))
-	assertDefaultValue(t, "XfrChannelSize", defaultServerOptions.XfrChannelSize, uint(10))
+	assertDefaultValue(t, "XfrChannelSize", defaultServerOptions.XfrChannelSize, 10)
 
 }
 
@@ -159,8 +159,13 @@ func TestValidate(t *testing.T) {
 		},
 		"ZeroXfrChannelSize": {
 			field:    "XfrChannelSize",
-			value:    uint(0),
+			value:    0,
 			expected: fmt.Errorf("channel size 0 must be greater than 0"),
+		},
+		"NegativeXfrChannelSize": {
+			field:    "XfrChannelSize",
+			value:    -10,
+			expected: fmt.Errorf("channel size -10 must be greater than 0"),
 		},
 	} {
 		t.Run(desc, func(t *testing.T) {
@@ -178,9 +183,6 @@ func TestValidate(t *testing.T) {
 				case reflect.Int:
 					ivalue := tc.value.(int)
 					fv.SetInt(int64(ivalue))
-				case reflect.Uint:
-					uvalue := tc.value.(uint)
-					fv.SetUint(uint64(uvalue))
 				}
 			}
 			actual := testServerOptions.Validate()

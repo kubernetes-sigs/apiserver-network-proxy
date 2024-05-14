@@ -216,7 +216,7 @@ type ProxyServer struct {
 
 	// TODO: move strategies into BackendStorage
 	proxyStrategies []ProxyStrategy
-	xfrChannelSize  uint
+	xfrChannelSize  int
 }
 
 // AgentTokenAuthenticationOptions contains list of parameters required for agent token based authentication
@@ -375,7 +375,7 @@ func (s *ProxyServer) removeEstablishedForStream(streamUID string) []*ProxyClien
 }
 
 // NewProxyServer creates a new ProxyServer instance
-func NewProxyServer(serverID string, proxyStrategies []ProxyStrategy, serverCount int, agentAuthenticationOptions *AgentTokenAuthenticationOptions, channelSize uint) *ProxyServer {
+func NewProxyServer(serverID string, proxyStrategies []ProxyStrategy, serverCount int, agentAuthenticationOptions *AgentTokenAuthenticationOptions, channelSize int) *ProxyServer {
 	var bms []BackendManager
 	for _, ps := range proxyStrategies {
 		switch ps {
@@ -417,7 +417,7 @@ func (s *ProxyServer) Proxy(stream client.ProxyService_ProxyServer) error {
 	streamUID := uuid.New().String()
 	klog.V(5).InfoS("Proxy request from client", "userAgent", userAgent, "serverID", s.serverID, "streamUID", streamUID)
 
-	recvCh := make(chan *client.Packet, int(s.xfrChannelSize))
+	recvCh := make(chan *client.Packet, s.xfrChannelSize)
 	stopCh := make(chan error, 1)
 
 	frontend := GrpcFrontend{
