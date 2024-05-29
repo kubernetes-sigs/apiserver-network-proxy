@@ -941,6 +941,8 @@ func (s *ProxyServer) serveRecvBackend(backend *Backend, agentID string, recvCh 
 				klog.V(5).InfoS("CLOSE_RSP sent to frontend", "connectionID", resp.ConnectID)
 			}
 
+		case client.PacketType_DRAIN:
+			klog.V(2).InfoS("agent is draining", "agentID", agentID)
 		default:
 			klog.V(5).InfoS("Ignoring unrecognized packet from backend", "packet", pkt, "agentID", agentID)
 		}

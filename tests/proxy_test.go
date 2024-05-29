@@ -789,6 +789,55 @@ func TestFailedDial_HTTPCONN(t *testing.T) {
 	resetAllMetrics() // For clean shutdown.
 }
 
+func TestProxyHandle_AfterDrain(t *testing.T) {
+	expectCleanShutdown(t)
+
+	server := httptest.NewServer(newEchoServer("hello"))
+	defer server.Close()
+
+	ps := runGRPCProxyServer(t)
+	defer ps.Stop()
+
+	a := runAgent(t, ps.AgentAddr())
+	defer a.Stop()
+	waitForConnectedServerCount(t, 1, a)
+
+	// Drain agent
+	a.Drain()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	tunnel, err := createSingleUseGrpcTunnel(ctx, ps.FrontAddr())
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	c := &http.Client{
+		Transport: &http.Transport{
+			DialContext: tunnel.DialContext,
+		},
+	}
+
+	req, err := http.NewRequest("GET", server.URL, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	r, err := c.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer r.Body.Close()
+
+	data, err := io.ReadAll(r.Body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(data) != "hello" {
+		t.Errorf("expect %v; got %v", "hello", string(data))
+	}
+}
+
 func runGRPCProxyServer(t testing.TB) framework.ProxyServer {
 	return runGRPCProxyServerWithServerCount(t, 1)
 }
