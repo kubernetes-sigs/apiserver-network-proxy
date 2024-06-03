@@ -159,7 +159,6 @@ func (cc *ClientSetConfig) NewAgentClientSet(drainCh, stopCh <-chan struct{}) *C
 		warnOnChannelLimit:      cc.WarnOnChannelLimit,
 		syncForever:             cc.SyncForever,
 		drainCh:                 drainCh,
-		xfrChannelSize:          cc.XrfChannelSize,
 		xfrChannelSize:          cc.XfrChannelSize,
 		stopCh:                  stopCh,
 	}
