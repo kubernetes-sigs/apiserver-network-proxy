@@ -55,6 +55,7 @@ For local builds these can be set to anything.
 For image builds these determine the location of your image.
 For GCE the registry should be gcr.io and PROJECT_ID should be the project you
 want to use the images in.
+Please ensure the go bin directory (usually `~/go/bin`) is in your `PATH`.
 
 ### Mockgen
 
@@ -70,11 +71,11 @@ Proto definitions are compiled with `protoc`. Please ensure you have protoc inst
 
 Currently, we are using protoc-gen-go@v1.27.1
 
-`go get google.golang.org/protobuf/cmd/protoc-gen-go@v1.27.1`
+`go install google.golang.org/protobuf/cmd/protoc-gen-go@v1.27.1`
 
 Currently, we are using protoc-gen-go-grpc@v1.2
 
-`go get google.golang.org/grpc/cmd/protoc-gen-go-grpc@v1.2`
+`go install google.golang.org/grpc/cmd/protoc-gen-go-grpc@v1.2`
 
 ### Local builds
 
