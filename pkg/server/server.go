@@ -37,9 +37,9 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/klog/v2"
-
 	commonmetrics "sigs.k8s.io/apiserver-network-proxy/konnectivity-client/pkg/common/metrics"
 	"sigs.k8s.io/apiserver-network-proxy/konnectivity-client/proto/client"
+	"sigs.k8s.io/apiserver-network-proxy/pkg/servercounter"
 
 	"sigs.k8s.io/apiserver-network-proxy/pkg/server/metrics"
 	"sigs.k8s.io/apiserver-network-proxy/pkg/util"
@@ -208,8 +208,8 @@ type ProxyServer struct {
 
 	PendingDial *PendingDialManager
 
-	serverID    string // unique ID of this server
-	serverCount int    // Number of proxy server instances, should be 1 unless it is a HA server.
+	serverID      string                      // unique ID of this server
+	serverCounter servercounter.ServerCounter // provides number of proxy servers
 
 	// agent authentication
 	AgentAuthenticationOptions *AgentTokenAuthenticationOptions
@@ -394,7 +394,7 @@ func NewProxyServer(serverID string, proxyStrategies []ProxyStrategy, serverCoun
 		established:                make(map[string](map[int64]*ProxyClientConnection)),
 		PendingDial:                NewPendingDialManager(),
 		serverID:                   serverID,
-		serverCount:                serverCount,
+		serverCounter:              servercounter.StaticServerCounter(serverCount),
 		BackendManagers:            bms,
 		AgentAuthenticationOptions: agentAuthenticationOptions,
 		// use the first backend-manager as the Readiness Manager
@@ -441,7 +441,7 @@ func (s *ProxyServer) Proxy(stream client.ProxyService_ProxyServer) error {
 	}()
 
 	labels := runpprof.Labels(
-		"serverCount", strconv.Itoa(s.serverCount),
+		"serverCount", strconv.Itoa(s.serverCounter.CountServers()),
 		"userAgent", strings.Join(userAgent, ", "),
 	)
 	// Start goroutine to receive packets from frontend and push to recvCh
@@ -722,7 +722,7 @@ func (s *ProxyServer) Connect(stream agent.AgentService_ConnectServer) error {
 
 	klog.V(5).InfoS("Connect request from agent", "agentID", agentID, "serverID", s.serverID)
 	labels := runpprof.Labels(
-		"serverCount", strconv.Itoa(s.serverCount),
+		"serverCount", strconv.Itoa(s.serverCounter.CountServers()),
 		"agentID", agentID,
 	)
 	ctx := runpprof.WithLabels(context.Background(), labels)
@@ -735,7 +735,7 @@ func (s *ProxyServer) Connect(stream agent.AgentService_ConnectServer) error {
 		}
 	}
 
-	h := metadata.Pairs(header.ServerID, s.serverID, header.ServerCount, strconv.Itoa(s.serverCount))
+	h := metadata.Pairs(header.ServerID, s.serverID, header.ServerCount, strconv.Itoa(s.serverCounter.CountServers()))
 	if err := stream.SendHeader(h); err != nil {
 		klog.ErrorS(err, "Failed to send server count back to agent", "agentID", agentID)
 		return err
