@@ -8,20 +8,6 @@ performs the following operations:
 3. Changes `kubectl` context to point to the new `kind` cluster.
 4. Deploys `konnectivity` proxy servers and agents to the KCP and worker nodes.
 
-To validate that it works, run a custom image and get pod logs (it goes through the konnectivity proxy):
-```sh
-$ kubectl run test --image httpd:2
-pod/test created
-$ kubectl get pods
-NAME   READY   STATUS              RESTARTS   AGE
-test   0/1     ContainerCreating   0          4s
-$ kubectl get pods
-NAME   READY   STATUS    RESTARTS   AGE
-test   1/1     Running   0          6s
-$ kubectl logs test
-...
-[Tue Apr 09 20:58:36.756720 2024] [mpm_event:notice] [pid 1:tid 139788897408896] AH00489: Apache/2.4.59 (Unix) configured -- resuming normal operations
-```
 
 ## `./quickstart-kind.sh` command-line flags
 - `--cluster-name <NAME>`: Name of the `kind` cluster to be created Default: `knp-test-cluster`
@@ -61,6 +47,8 @@ AGENT_IMAGE="$REGISTRY/proxy-agent-$TARGET_ARCH:$TAG"
 ./quickstart-kind.sh --cluster-name custom-knp-test --server-image "$SERVER_IMAGE" --agent-image "$AGENT_IMAGE" \
   --num-kcp-nodes 3 --num-worker-nodes 2 --sideload-images
 ```
+
+## Making sure the script worked
 
 Check that the `konnectivity` pods are up and running:
 ```shell
