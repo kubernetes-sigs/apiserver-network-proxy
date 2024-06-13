@@ -11,13 +11,6 @@ NUM_KCP_NODES=2
 OVERWRITE_CLUSTER=false
 SIDELOAD_IMAGES=false
 
-# FUNCTION DEFINITIONS
-# For escaping sed replacement strings. Taken from https://stackoverflow.com/questions/29613304/is-it-possible-to-escape-regex-metacharacters-reliably-with-sed.
-quoteSubst() {
-  IFS= read -d '' -r < <(sed -e ':a' -e '$!{N;ba' -e '}' -e 's/[&/\]/\\&/g; s/\n/\\&/g' <<<"$1")
-  printf %s "${REPLY%$'\n'}"
-}
-
 # Provide usage info
 usage() {
   printf "USAGE:\n./quickstart-kind.sh\n\t[--cluster-name <NAME>]\n\t[--server-image <IMAGE_NAME>[:<IMAGE_TAG>]]\n\t[--agent-image <IMAGE_NAME>[:<IMAGE_TAG>]]\n\t[--num-worker-nodes <NUM>]\n\t[--num-kcp-nodes <NUM>]\n\t[--overwrite-cluster]\n"
@@ -76,18 +69,18 @@ if [ ! -d rendered ]; then
 fi
 echo "Adding $NUM_KCP_NODES control plane nodes and $NUM_WORKER_NODES worker nodes to kind.config..."
 cp templates/kind/kind.config rendered/kind.config
-for i in $(seq 0 "$NUM_KCP_NODES")
+for i in $(seq 1 "$NUM_KCP_NODES")
 do
  cat templates/kind/control-plane.config >> rendered/kind.config
 done
-for i in $(seq 0 "$NUM_WORKER_NODES")
+for i in $(seq 1 "$NUM_WORKER_NODES")
 do
  cat templates/kind/worker.config >> rendered/kind.config
 done
 
 echo "Setting server image to $SERVER_IMAGE and agent image to $AGENT_IMAGE"
-sed "s/image: .*/image: $(quoteSubst "$AGENT_IMAGE")/" <templates/k8s/konnectivity-agent-ds.yaml >rendered/konnectivity-agent-ds.yaml
-sed "s/image: .*/image: $(quoteSubst "$SERVER_IMAGE")/" <templates/k8s/konnectivity-server.yaml >rendered/konnectivity-server.yaml
+sed "s|image: .*|image: $AGENT_IMAGE|" <templates/k8s/konnectivity-agent-ds.yaml >rendered/konnectivity-agent-ds.yaml
+sed "s|image: .*|image: $SERVER_IMAGE|" <templates/k8s/konnectivity-server.yaml >rendered/konnectivity-server.yaml
 
 
 # CLUSTER CREATION

@@ -7,7 +7,7 @@ egressSelections:
     transport:
       uds:
         udsName: /etc/kubernetes/konnectivity-server/konnectivity-server.socket
-- name: master
+- name: controlplane
   connection:
     proxyProtocol: Direct
 - name: etcd

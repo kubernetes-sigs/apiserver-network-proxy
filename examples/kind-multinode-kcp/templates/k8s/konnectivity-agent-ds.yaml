@@ -53,7 +53,7 @@ spec:
           "--sync-forever",
           "--probe-interval=5s",
           "--service-account-token-path=/var/run/secrets/tokens/konnectivity-agent-token",
-          "--agent-identifiers=ipv4=$(HOST_IP)"
+          "--agent-identifiers=ipv4=${HOST_IP}"
           ]
         env:
           - name: POD_NAME
