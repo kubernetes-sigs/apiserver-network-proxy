@@ -186,6 +186,9 @@ func (cs *ClientSet) sync() {
 				klog.V(4).InfoS("duplicate server", "serverID", dse.ServerID, "serverCount", cs.serverCount, "clientsCount", cs.ClientsCount())
 				if cs.serverCount != 0 && cs.ClientsCount() >= cs.serverCount {
 					duration = backoff.Step()
+				} else if cs.ClientsCount() < cs.serverCount {
+					backoff = cs.resetBackoff()
+					duration = wait.Jitter(backoff.Duration, backoff.Jitter)
 				}
 			} else {
 				klog.ErrorS(err, "cannot connect once")
