@@ -10,6 +10,7 @@ NUM_WORKER_NODES=1
 NUM_KCP_NODES=2
 OVERWRITE_CLUSTER=false
 SIDELOAD_IMAGES=false
+SERVER_COUNT_OVERRIDE=-1
 
 # Provide usage info
 usage() {
@@ -17,7 +18,7 @@ usage() {
 }
 
 # ARG PARSING
-VALID_ARGS=$(getopt --options "h" --longoptions "sideload-images,cluster-name:,agent-image:,server-image:,num-worker-nodes:,num-kcp-nodes:,help,overwrite-cluster" --name "$0" -- "$@") || exit 2
+VALID_ARGS=$(getopt --options "h" --longoptions "sideload-images,cluster-name:,agent-image:,server-image:,num-worker-nodes:,num-kcp-nodes:,help,overwrite-cluster,server-count-override:" --name "$0" -- "$@") || exit 2
 
 eval set -- "$VALID_ARGS"
 while true; do
@@ -50,6 +51,10 @@ while true; do
       SIDELOAD_IMAGES=true
       shift 1
       ;;
+    --server-count-override)
+      SERVER_COUNT_OVERRIDE=$2
+      shift 2
+      ;;
     --)
       shift
       break
@@ -78,9 +83,16 @@ do
  cat templates/kind/worker.config >> rendered/kind.config
 done
 
-echo "Setting server image to $SERVER_IMAGE and agent image to $AGENT_IMAGE"
-sed "s|image: .*|image: $AGENT_IMAGE|" <templates/k8s/konnectivity-agent-ds.yaml >rendered/konnectivity-agent-ds.yaml
-sed "s|image: .*|image: $SERVER_IMAGE|" <templates/k8s/konnectivity-server.yaml >rendered/konnectivity-server.yaml
+SERVER_COUNT=$NUM_KCP_NODES
+if [ "$SERVER_COUNT_OVERRIDE" -ge 0 ]; then
+  echo "Overriding default server count from $NUM_KCP_NODES to $SERVER_COUNT_OVERRIDE"
+  SERVER_COUNT=$SERVER_COUNT_OVERRIDE
+fi
+
+echo "Setting server image to $SERVER_IMAGE, agent image to $AGENT_IMAGE, and --server-count flag on server to $SERVER_COUNT"
+sed -e "s|image: .*|image: $AGENT_IMAGE|" <templates/k8s/konnectivity-agent-ds.yaml >rendered/konnectivity-agent-ds.yaml
+sed -e "s|image: .*|image: $SERVER_IMAGE|" -e "s/--server-count=[0-9]\+/--server-count=$SERVER_COUNT/" <templates/k8s/konnectivity-server.yaml >rendered/konnectivity-server.yaml
+
 
 
 # CLUSTER CREATION

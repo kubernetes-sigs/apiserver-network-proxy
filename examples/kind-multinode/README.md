@@ -16,6 +16,7 @@ performs the following operations:
 - `--agent-image <IMAGE_NAME>[:<IMAGE_TAG>]`: Proxy server image to deploy. Default: `gcr.io/k8s-staging-kas-network-proxy/proxy-agent:master`
 - `--num-kcp-nodes <NUM>`: Number of control plane nodes to spin up. Default: 2.
 - `--num-worker-nodes <NUM>`: Number of worker nodes to spin up. Default: 1.
+- `--server-count-override <NUM>`: If this flag is >= 0, override the `--serverCount` flag in the proxy server's configuration to the provided number. Default: set `--serverCount` to equal the number of KCP nodes.
 - `--sideload-images`: Use `kind load ...` to sideload custom proxy server and agent images with the names set by `--server-image` and `--agent-image` into the kind cluster. Default: do not sideload.
   - Use this if you don't want to publish your custom KNP images to a public registry.
   - NOTE: You MUST specify an image tag (i.e. `my-image-name:my-image-tag` and not just `my-image-name`) and the image tag MUST NOT be `:latest` for this to work! See [`kind` docs](https://kind.sigs.k8s.io/docs/user/quick-start/#loading-an-image-into-your-cluster) for why this is necessary.
@@ -33,7 +34,7 @@ make docker-build
 Verify that the new images are available in the local docker registry with `docker images`. Then, bring up the cluster:
 
 ```shell
-cd examples/kind-multinode-kcp
+cd examples/kind-multinode
 
 # These are the default values of the registry, image name, and tag used by the Makefile.
 # Edit them if necessary.
