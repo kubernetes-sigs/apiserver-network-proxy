@@ -195,6 +195,13 @@ curl -v -p --proxy-key certs/frontend/private/proxy-client.key --proxy-cert cert
 ### Running on kubernetes
 See following [README.md](examples/kubernetes/README.md)
 
+### Running on a local kubernetes cluster with `kind`
+See this [README.md](examples/kind/README.md) for an example that creates a local kubernetes cluster using` kind` and
+deploys the proxy agent on a worker node and the proxy server on a control plane node.
+
+See this [README.md](examples/kind-multinode/README.md) for a similar example that creates a `kind` cluster with a 
+user-configurable number of control plane and worker nodes and optionally sideloads custom proxy agent and server images.
+
 ### Clients
 
 `apiserver-network-proxy` components are intended to run as standalone binaries and should not be imported as a library. Clients communicating with the network proxy can import the `konnectivity-client` module.
