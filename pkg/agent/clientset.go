@@ -28,6 +28,7 @@ import (
 	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/klog/v2"
 	"sigs.k8s.io/apiserver-network-proxy/pkg/agent/metrics"
+	"sigs.k8s.io/apiserver-network-proxy/pkg/servercounter"
 )
 
 // ClientSet consists of clients connected to each instance of an HA proxy server.
@@ -36,9 +37,9 @@ type ClientSet struct {
 	clients map[string]*Client // map between serverID and the client
 	// connects to this server.
 
-	agentID     string // ID of this agent
-	address     string // proxy server address. Assuming HA proxy server
-	serverCount int    // number of proxy server instances, should be 1
+	agentID       string                      // ID of this agent
+	address       string                      // proxy server address. Assuming HA proxy server
+	serverCounter servercounter.ServerCounter // counts number of proxy servers
 	// unless it is an HA server. Initialized when the ClientSet creates
 	// the first client. When syncForever is set, it will be the most recently seen.
 	syncInterval time.Duration // The interval by which the agent
@@ -63,6 +64,8 @@ type ClientSet struct {
 	warnOnChannelLimit bool
 
 	syncForever bool // Continue syncing (support dynamic server count).
+
+	respectReceivedServerCount bool // Respect server count received from proxy server rather than relying on the agent's own server counter
 }
 
 func (cs *ClientSet) ClientsCount() int {
@@ -145,19 +148,20 @@ type ClientSetConfig struct {
 
 func (cc *ClientSetConfig) NewAgentClientSet(drainCh, stopCh <-chan struct{}) *ClientSet {
 	return &ClientSet{
-		clients:                 make(map[string]*Client),
-		agentID:                 cc.AgentID,
-		agentIdentifiers:        cc.AgentIdentifiers,
-		address:                 cc.Address,
-		syncInterval:            cc.SyncInterval,
-		probeInterval:           cc.ProbeInterval,
-		syncIntervalCap:         cc.SyncIntervalCap,
-		dialOptions:             cc.DialOptions,
-		serviceAccountTokenPath: cc.ServiceAccountTokenPath,
-		warnOnChannelLimit:      cc.WarnOnChannelLimit,
-		syncForever:             cc.SyncForever,
-		drainCh:                 drainCh,
-		stopCh:                  stopCh,
+		clients:                    make(map[string]*Client),
+		agentID:                    cc.AgentID,
+		agentIdentifiers:           cc.AgentIdentifiers,
+		address:                    cc.Address,
+		syncInterval:               cc.SyncInterval,
+		probeInterval:              cc.ProbeInterval,
+		syncIntervalCap:            cc.SyncIntervalCap,
+		dialOptions:                cc.DialOptions,
+		serviceAccountTokenPath:    cc.ServiceAccountTokenPath,
+		warnOnChannelLimit:         cc.WarnOnChannelLimit,
+		syncForever:                cc.SyncForever,
+		drainCh:                    drainCh,
+		stopCh:                     stopCh,
+		respectReceivedServerCount: true,
 	}
 }
 
@@ -184,8 +188,9 @@ func (cs *ClientSet) sync() {
 		if err := cs.connectOnce(); err != nil {
 			if dse, ok := err.(*DuplicateServerError); ok {
 				clientsCount := cs.ClientsCount()
-				klog.V(4).InfoS("duplicate server", "serverID", dse.ServerID, "serverCount", cs.serverCount, "clientsCount", clientsCount)
-				if cs.serverCount != 0 && clientsCount >= cs.serverCount {
+				serverCount := cs.serverCounter.CountServers()
+				klog.V(4).InfoS("duplicate server", "serverID", dse.ServerID, "serverCount", serverCount, "clientsCount", clientsCount)
+				if serverCount != 0 && clientsCount >= serverCount {
 					duration = backoff.Step()
 				} else {
 					backoff = cs.resetBackoff()
@@ -209,19 +214,24 @@ func (cs *ClientSet) sync() {
 }
 
 func (cs *ClientSet) connectOnce() error {
-	if !cs.syncForever && cs.serverCount != 0 && cs.ClientsCount() >= cs.serverCount {
+	agentServerCount := cs.serverCounter.CountServers()
+	if !cs.syncForever && agentServerCount != 0 && cs.ClientsCount() >= agentServerCount {
 		return nil
 	}
-	c, serverCount, err := cs.newAgentClient()
+	c, newServerCount, err := cs.newAgentClient()
 	if err != nil {
 		return err
 	}
-	if cs.serverCount != 0 && cs.serverCount != serverCount {
+	if agentServerCount != 0 && agentServerCount != newServerCount {
 		klog.V(2).InfoS("Server count change suggestion by server",
-			"current", cs.serverCount, "serverID", c.serverID, "actual", serverCount)
-
+			"current", agentServerCount, "serverID", c.serverID, "actual", newServerCount)
+		if cs.respectReceivedServerCount {
+			cs.serverCounter = servercounter.StaticServerCounter(newServerCount)
+			klog.V(2).Infof("respecting server count change suggestion, new count: %v", newServerCount)
+		} else {
+			klog.V(2).Infof("ignoring server count change suggestion")
+		}
 	}
-	cs.serverCount = serverCount
 	if err := cs.AddClient(c.serverID, c); err != nil {
 		c.Close()
 		return err
