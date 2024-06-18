@@ -162,6 +162,7 @@ func (cc *ClientSetConfig) NewAgentClientSet(drainCh, stopCh <-chan struct{}) *C
 		drainCh:                    drainCh,
 		stopCh:                     stopCh,
 		respectReceivedServerCount: true,
+		serverCounter:              servercounter.StaticServerCounter(0),
 	}
 }
 
