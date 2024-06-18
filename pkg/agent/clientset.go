@@ -165,6 +165,7 @@ func (cc *ClientSetConfig) NewAgentClientSet(drainCh, stopCh <-chan struct{}) *C
 		xfrChannelSize:             cc.XfrChannelSize,
 		stopCh:                     stopCh,
 		respectReceivedServerCount: true,
+		serverCounter:              servercounter.StaticServerCounter(0),
 	}
 }
 
