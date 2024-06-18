@@ -187,7 +187,7 @@ func (cs *ClientSet) sync() {
 				klog.V(4).InfoS("duplicate server", "serverID", dse.ServerID, "serverCount", cs.serverCount, "clientsCount", clientsCount)
 				if cs.serverCount != 0 && clientsCount >= cs.serverCount {
 					duration = backoff.Step()
-				} else if clientsCount < cs.serverCount {
+				} else {
 					backoff = cs.resetBackoff()
 					duration = wait.Jitter(backoff.Duration, backoff.Jitter)
 				}
