@@ -183,10 +183,11 @@ func (cs *ClientSet) sync() {
 	for {
 		if err := cs.connectOnce(); err != nil {
 			if dse, ok := err.(*DuplicateServerError); ok {
-				klog.V(4).InfoS("duplicate server", "serverID", dse.ServerID, "serverCount", cs.serverCount, "clientsCount", cs.ClientsCount())
-				if cs.serverCount != 0 && cs.ClientsCount() >= cs.serverCount {
+				clientsCount := cs.ClientsCount()
+				klog.V(4).InfoS("duplicate server", "serverID", dse.ServerID, "serverCount", cs.serverCount, "clientsCount", clientsCount)
+				if cs.serverCount != 0 && clientsCount >= cs.serverCount {
 					duration = backoff.Step()
-				} else if cs.ClientsCount() < cs.serverCount {
+				} else if clientsCount < cs.serverCount {
 					backoff = cs.resetBackoff()
 					duration = wait.Jitter(backoff.Duration, backoff.Jitter)
 				}
