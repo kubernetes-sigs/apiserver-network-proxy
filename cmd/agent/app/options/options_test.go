@@ -18,10 +18,11 @@ package options
 
 import (
 	"fmt"
-	"github.com/stretchr/testify/assert"
 	"reflect"
 	"testing"
 	"time"
+
+	"github.com/stretchr/testify/assert"
 )
 
 /*
@@ -49,6 +50,7 @@ func TestDefaultServerOptions(t *testing.T) {
 	assertDefaultValue(t, "ServiceAccountTokenPath", defaultAgentOptions.ServiceAccountTokenPath, "")
 	assertDefaultValue(t, "WarnOnChannelLimit", defaultAgentOptions.WarnOnChannelLimit, false)
 	assertDefaultValue(t, "SyncForever", defaultAgentOptions.SyncForever, false)
+	assertDefaultValue(t, "XfrChannelSize", defaultAgentOptions.XfrChannelSize, 150)
 }
 
 func assertDefaultValue(t *testing.T, fieldName string, actual, expected interface{}) {
@@ -144,6 +146,14 @@ func TestValidate(t *testing.T) {
 				"EnableProfiling":           false,
 			},
 			expected: fmt.Errorf("if --enable-contention-profiling is set, --enable-profiling must also be set"),
+		},
+		"ZeroXfrChannelSize": {
+			fieldMap: map[string]interface{}{"XfrChannelSize": 0},
+			expected: fmt.Errorf("channel size 0 must be greater than 0"),
+		},
+		"NegativeXfrChannelSize": {
+			fieldMap: map[string]interface{}{"XfrChannelSize": -10},
+			expected: fmt.Errorf("channel size -10 must be greater than 0"),
 		},
 	} {
 		t.Run(desc, func(t *testing.T) {

@@ -47,8 +47,6 @@ import (
 	"sigs.k8s.io/apiserver-network-proxy/proto/header"
 )
 
-const xfrChannelSize = 10
-
 type key int
 
 type GrpcFrontend struct {
@@ -218,6 +216,7 @@ type ProxyServer struct {
 
 	// TODO: move strategies into BackendStorage
 	proxyStrategies []ProxyStrategy
+	xfrChannelSize  int
 }
 
 // AgentTokenAuthenticationOptions contains list of parameters required for agent token based authentication
@@ -376,7 +375,7 @@ func (s *ProxyServer) removeEstablishedForStream(streamUID string) []*ProxyClien
 }
 
 // NewProxyServer creates a new ProxyServer instance
-func NewProxyServer(serverID string, proxyStrategies []ProxyStrategy, serverCount int, agentAuthenticationOptions *AgentTokenAuthenticationOptions) *ProxyServer {
+func NewProxyServer(serverID string, proxyStrategies []ProxyStrategy, serverCount int, agentAuthenticationOptions *AgentTokenAuthenticationOptions, channelSize int) *ProxyServer {
 	var bms []BackendManager
 	for _, ps := range proxyStrategies {
 		switch ps {
@@ -401,6 +400,7 @@ func NewProxyServer(serverID string, proxyStrategies []ProxyStrategy, serverCoun
 		// use the first backend-manager as the Readiness Manager
 		Readiness:       bms[0],
 		proxyStrategies: proxyStrategies,
+		xfrChannelSize:  channelSize,
 	}
 }
 
@@ -417,7 +417,7 @@ func (s *ProxyServer) Proxy(stream client.ProxyService_ProxyServer) error {
 	streamUID := uuid.New().String()
 	klog.V(5).InfoS("Proxy request from client", "userAgent", userAgent, "serverID", s.serverID, "streamUID", streamUID)
 
-	recvCh := make(chan *client.Packet, xfrChannelSize)
+	recvCh := make(chan *client.Packet, s.xfrChannelSize)
 	stopCh := make(chan error, 1)
 
 	frontend := GrpcFrontend{
@@ -745,7 +745,7 @@ func (s *ProxyServer) Connect(stream agent.AgentService_ConnectServer) error {
 	s.addBackend(backend)
 	defer s.removeBackend(backend)
 
-	recvCh := make(chan *client.Packet, xfrChannelSize)
+	recvCh := make(chan *client.Packet, s.xfrChannelSize)
 
 	go runpprof.Do(context.Background(), labels, func(context.Context) { s.serveRecvBackend(backend, agentID, recvCh) })
 

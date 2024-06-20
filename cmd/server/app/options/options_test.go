@@ -61,6 +61,8 @@ func TestDefaultServerOptions(t *testing.T) {
 	assertDefaultValue(t, "AuthenticationAudience", defaultServerOptions.AuthenticationAudience, "")
 	assertDefaultValue(t, "ProxyStrategies", defaultServerOptions.ProxyStrategies, "default")
 	assertDefaultValue(t, "CipherSuites", defaultServerOptions.CipherSuites, make([]string, 0))
+	assertDefaultValue(t, "XfrChannelSize", defaultServerOptions.XfrChannelSize, 10)
+
 }
 
 func assertDefaultValue(t *testing.T, fieldName string, actual, expected interface{}) {
@@ -154,6 +156,16 @@ func TestValidate(t *testing.T) {
 			field:    "ProxyStrategies",
 			value:    "invalid",
 			expected: fmt.Errorf("invalid proxy strategies: unknown proxy strategy: invalid"),
+		},
+		"ZeroXfrChannelSize": {
+			field:    "XfrChannelSize",
+			value:    0,
+			expected: fmt.Errorf("channel size 0 must be greater than 0"),
+		},
+		"NegativeXfrChannelSize": {
+			field:    "XfrChannelSize",
+			value:    -10,
+			expected: fmt.Errorf("channel size -10 must be greater than 0"),
 		},
 	} {
 		t.Run(desc, func(t *testing.T) {
