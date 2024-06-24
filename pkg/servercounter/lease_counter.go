@@ -44,7 +44,16 @@ func (lc *ServerLeaseCounter) CountServers() int {
 		}
 	}
 
-	lc.fallbackCount = count
+	if count == 0 {
+		klog.Infof("no valid leases found, using fallback count (%v)", lc.fallbackCount)
+		return lc.fallbackCount
+	}
+
+	if count != lc.fallbackCount {
+		klog.Infof("found %v valid leases, updating fallback count", count)
+		lc.fallbackCount = count
+	}
+
 	return count
 }
 

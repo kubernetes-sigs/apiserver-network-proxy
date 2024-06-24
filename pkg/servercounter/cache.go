@@ -24,6 +24,7 @@ func (csc *CachedServerCounter) CountServers() int {
 		newCount := csc.inner.CountServers()
 		if newCount != csc.cachedCount {
 			klog.Infof("updated cached server count from %v to %v", csc.cachedCount, newCount)
+			csc.cachedCount = newCount
 		}
 		csc.lastRefresh = time.Now()
 	}
