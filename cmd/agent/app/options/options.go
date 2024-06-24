@@ -27,6 +27,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/spf13/pflag"
 	"google.golang.org/grpc"
+	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/klog/v2"
 
 	"sigs.k8s.io/apiserver-network-proxy/pkg/agent"
@@ -80,6 +81,16 @@ type GrpcProxyAgentOptions struct {
 
 	SyncForever    bool
 	XfrChannelSize int
+
+	// Providing a label selector enables updating the server count by counting the
+	// number of valid leases matching the selector.
+	ServerCountLeaseSelector string
+	// Initial fallback server count to use if proxy server lease listing fails.
+	FallbackServerCount uint
+	// Time in seconds for which the cached server count is valid.
+	ServerCountCacheValiditySecs uint
+	// Path to kubeconfig (used by kubernetes client for lease listing)
+	KubeconfigPath string
 }
 
 func (o *GrpcProxyAgentOptions) ClientSetConfig(dialOptions ...grpc.DialOption) *agent.ClientSetConfig {
@@ -122,6 +133,10 @@ func (o *GrpcProxyAgentOptions) Flags() *pflag.FlagSet {
 	flags.BoolVar(&o.WarnOnChannelLimit, "warn-on-channel-limit", o.WarnOnChannelLimit, "Turns on a warning if the system is going to push to a full channel. The check involves an unsafe read.")
 	flags.BoolVar(&o.SyncForever, "sync-forever", o.SyncForever, "If true, the agent continues syncing, in order to support server count changes.")
 	flags.IntVar(&o.XfrChannelSize, "xfr-channel-size", 150, "Set the size of the channel for transferring data between the agent and the proxy server.")
+	flags.UintVar(&o.FallbackServerCount, "fallback-server-count", o.FallbackServerCount, "Initial fallback server count to use if proxy server lease listing fails.")
+	flags.StringVar(&o.ServerCountLeaseSelector, "server-count-lease-selector", o.ServerCountLeaseSelector, "Providing a label selector enables updating the server count by counting the number of valid leases matching the selector.")
+	flags.UintVar(&o.ServerCountCacheValiditySecs, "server-count-cache-validity-secs", o.ServerCountCacheValiditySecs, "Time in seconds for which the cached server count is valid.")
+	flags.StringVar(&o.KubeconfigPath, "kubeconfig", o.KubeconfigPath, "absolute path to the kubeconfig file (used with agent-namespace, agent-service-account, authentication-audience).")
 	return flags
 }
 
@@ -198,6 +213,17 @@ func (o *GrpcProxyAgentOptions) Validate() error {
 	if err := validateAgentIdentifiers(o.AgentIdentifiers); err != nil {
 		return fmt.Errorf("agent address is invalid: %v", err)
 	}
+	if o.ServerCountLeaseSelector != "" {
+		if _, err := labels.Parse(o.ServerCountLeaseSelector); err != nil {
+			return fmt.Errorf("invalid server count lease selector: %w", err)
+		}
+	}
+	if o.KubeconfigPath != "" {
+		if _, err := os.Stat(o.KubeconfigPath); os.IsNotExist(err) {
+			return fmt.Errorf("error checking KubeconfigPath %q, got %v", o.KubeconfigPath, err)
+		}
+	}
+
 	return nil
 }
 
@@ -222,27 +248,31 @@ func validateAgentIdentifiers(agentIdentifiers string) error {
 
 func NewGrpcProxyAgentOptions() *GrpcProxyAgentOptions {
 	o := GrpcProxyAgentOptions{
-		AgentCert:                 "",
-		AgentKey:                  "",
-		CaCert:                    "",
-		ProxyServerHost:           "127.0.0.1",
-		ProxyServerPort:           8091,
-		HealthServerHost:          "",
-		HealthServerPort:          8093,
-		AdminBindAddress:          "127.0.0.1",
-		AdminServerPort:           8094,
-		EnableProfiling:           false,
-		EnableContentionProfiling: false,
-		AgentID:                   defaultAgentID(),
-		AgentIdentifiers:          "",
-		SyncInterval:              1 * time.Second,
-		ProbeInterval:             1 * time.Second,
-		SyncIntervalCap:           10 * time.Second,
-		KeepaliveTime:             1 * time.Hour,
-		ServiceAccountTokenPath:   "",
-		WarnOnChannelLimit:        false,
-		SyncForever:               false,
-		XfrChannelSize:            150,
+		AgentCert:                    "",
+		AgentKey:                     "",
+		CaCert:                       "",
+		ProxyServerHost:              "127.0.0.1",
+		ProxyServerPort:              8091,
+		HealthServerHost:             "",
+		HealthServerPort:             8093,
+		AdminBindAddress:             "127.0.0.1",
+		AdminServerPort:              8094,
+		EnableProfiling:              false,
+		EnableContentionProfiling:    false,
+		AgentID:                      defaultAgentID(),
+		AgentIdentifiers:             "",
+		SyncInterval:                 1 * time.Second,
+		ProbeInterval:                1 * time.Second,
+		SyncIntervalCap:              10 * time.Second,
+		KeepaliveTime:                1 * time.Hour,
+		ServiceAccountTokenPath:      "",
+		WarnOnChannelLimit:           false,
+		SyncForever:                  false,
+		XfrChannelSize:               150,
+		FallbackServerCount:          1,
+		ServerCountLeaseSelector:     "",
+		ServerCountCacheValiditySecs: 10,
+		KubeconfigPath:               "",
 	}
 	return &o
 }

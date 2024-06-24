@@ -39,9 +39,11 @@ import (
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials"
 	"google.golang.org/grpc/keepalive"
+	"k8s.io/client-go/informers"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/tools/clientcmd"
 	"k8s.io/klog/v2"
+	"sigs.k8s.io/apiserver-network-proxy/pkg/servercounter"
 
 	"sigs.k8s.io/apiserver-network-proxy/cmd/server/app/options"
 	"sigs.k8s.io/apiserver-network-proxy/konnectivity-client/proto/client"
@@ -132,7 +134,24 @@ func (p *Proxy) Run(o *options.ProxyRunOptions, stopCh <-chan struct{}) error {
 	if err != nil {
 		return err
 	}
-	p.server = server.NewProxyServer(o.ServerID, ps, int(o.ServerCount), authOpt, o.XfrChannelSize)
+
+	var serverCounter servercounter.ServerCounter
+	if o.ServerCountLeaseSelector != "" {
+		sharedInformerFactory := informers.NewSharedInformerFactory(k8sClient, time.Second*time.Duration(o.ServerCountCacheValiditySecs))
+		serverLeaseCounter, err := servercounter.NewServerLeaseCounter(
+			sharedInformerFactory.Coordination().V1().Leases().Lister(),
+			o.ServerCountLeaseSelector,
+			int(o.ServerCount),
+		)
+		if err != nil {
+			return fmt.Errorf("failed to create server lease counter: %w", err)
+		}
+		serverCounter = servercounter.NewCachedServerCounter(serverLeaseCounter, time.Second*time.Duration(o.ServerCountCacheValiditySecs))
+	} else {
+		serverCounter = servercounter.StaticServerCounter(o.ServerCount)
+	}
+
+	p.server = server.NewProxyServer(o.ServerID, ps, serverCounter, authOpt, o.XfrChannelSize)
 
 	frontendStop, err := p.runFrontendServer(ctx, o, p.server)
 	if err != nil {

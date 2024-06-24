@@ -23,6 +23,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/spf13/pflag"
+	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/klog/v2"
 
 	"sigs.k8s.io/apiserver-network-proxy/pkg/server"
@@ -73,7 +74,13 @@ type ProxyRunOptions struct {
 	// ID of this proxy server.
 	ServerID string
 	// Number of proxy server instances, should be 1 unless it is a HA proxy server.
+	// Serves as an initial fallback count when server counts are performed using leases.
 	ServerCount uint
+	// Providing a label selector enables updating the server count by counting the
+	// number of valid leases matching the selector.
+	ServerCountLeaseSelector string
+	// Time in seconds for which the cached server count is valid.
+	ServerCountCacheValiditySecs uint
 	// Agent pod's namespace for token-based agent authentication
 	AgentNamespace string
 	// Agent pod's service account for token-based agent authentication
@@ -128,7 +135,9 @@ func (o *ProxyRunOptions) Flags() *pflag.FlagSet {
 	flags.BoolVar(&o.EnableProfiling, "enable-profiling", o.EnableProfiling, "enable pprof at host:admin-port/debug/pprof")
 	flags.BoolVar(&o.EnableContentionProfiling, "enable-contention-profiling", o.EnableContentionProfiling, "enable contention profiling at host:admin-port/debug/pprof/block. \"--enable-profiling\" must also be set.")
 	flags.StringVar(&o.ServerID, "server-id", o.ServerID, "The unique ID of this server. Can also be set by the 'PROXY_SERVER_ID' environment variable.")
-	flags.UintVar(&o.ServerCount, "server-count", o.ServerCount, "The number of proxy server instances, should be 1 unless it is an HA server.")
+	flags.UintVar(&o.ServerCount, "server-count", o.ServerCount, "The number of proxy server instances, should be 1 unless it is an HA server. Used as an initial fallback count when lease-based server counting is enabled.")
+	flags.StringVar(&o.ServerCountLeaseSelector, "server-count-lease-selector", o.ServerCountLeaseSelector, "Providing a label selector enables updating the server count by counting the number of valid leases matching the selector.")
+	flags.UintVar(&o.ServerCountCacheValiditySecs, "server-count-cache-validity-secs", o.ServerCountCacheValiditySecs, "Time in seconds for which the cached server count is valid.")
 	flags.StringVar(&o.AgentNamespace, "agent-namespace", o.AgentNamespace, "Expected agent's namespace during agent authentication (used with agent-service-account, authentication-audience, kubeconfig).")
 	flags.StringVar(&o.AgentServiceAccount, "agent-service-account", o.AgentServiceAccount, "Expected agent's service account during agent authentication (used with agent-namespace, authentication-audience, kubeconfig).")
 	flags.StringVar(&o.KubeconfigPath, "kubeconfig", o.KubeconfigPath, "absolute path to the kubeconfig file (used with agent-namespace, agent-service-account, authentication-audience).")
@@ -314,43 +323,52 @@ func (o *ProxyRunOptions) Validate() error {
 		}
 	}
 
+	// validate server count lease selector
+	if o.ServerCountLeaseSelector != "" {
+		if _, err := labels.Parse(o.ServerCountLeaseSelector); err != nil {
+			return fmt.Errorf("invalid server count lease selector: %w", err)
+		}
+	}
+
 	return nil
 }
 
 func NewProxyRunOptions() *ProxyRunOptions {
 	o := ProxyRunOptions{
-		ServerCert:                "",
-		ServerKey:                 "",
-		ServerCaCert:              "",
-		ClusterCert:               "",
-		ClusterKey:                "",
-		ClusterCaCert:             "",
-		Mode:                      "grpc",
-		UdsName:                   "",
-		DeleteUDSFile:             true,
-		ServerPort:                8090,
-		ServerBindAddress:         "",
-		AgentPort:                 8091,
-		AgentBindAddress:          "",
-		HealthPort:                8092,
-		HealthBindAddress:         "",
-		AdminPort:                 8095,
-		AdminBindAddress:          "127.0.0.1",
-		KeepaliveTime:             1 * time.Hour,
-		FrontendKeepaliveTime:     1 * time.Hour,
-		EnableProfiling:           false,
-		EnableContentionProfiling: false,
-		ServerID:                  defaultServerID(),
-		ServerCount:               1,
-		AgentNamespace:            "",
-		AgentServiceAccount:       "",
-		KubeconfigPath:            "",
-		KubeconfigQPS:             0,
-		KubeconfigBurst:           0,
-		AuthenticationAudience:    "",
-		ProxyStrategies:           "default",
-		CipherSuites:              make([]string, 0),
-		XfrChannelSize:            10,
+		ServerCert:                   "",
+		ServerKey:                    "",
+		ServerCaCert:                 "",
+		ClusterCert:                  "",
+		ClusterKey:                   "",
+		ClusterCaCert:                "",
+		Mode:                         "grpc",
+		UdsName:                      "",
+		DeleteUDSFile:                true,
+		ServerPort:                   8090,
+		ServerBindAddress:            "",
+		AgentPort:                    8091,
+		AgentBindAddress:             "",
+		HealthPort:                   8092,
+		HealthBindAddress:            "",
+		AdminPort:                    8095,
+		AdminBindAddress:             "127.0.0.1",
+		KeepaliveTime:                1 * time.Hour,
+		FrontendKeepaliveTime:        1 * time.Hour,
+		EnableProfiling:              false,
+		EnableContentionProfiling:    false,
+		ServerID:                     defaultServerID(),
+		ServerCount:                  1,
+		ServerCountLeaseSelector:     "",
+		ServerCountCacheValiditySecs: 10,
+		AgentNamespace:               "",
+		AgentServiceAccount:          "",
+		KubeconfigPath:               "",
+		KubeconfigQPS:                0,
+		KubeconfigBurst:              0,
+		AuthenticationAudience:       "",
+		ProxyStrategies:              "default",
+		CipherSuites:                 make([]string, 0),
+		XfrChannelSize:               10,
 	}
 	return &o
 }

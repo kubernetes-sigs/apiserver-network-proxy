@@ -148,7 +148,7 @@ type ClientSetConfig struct {
 	XfrChannelSize          int
 }
 
-func (cc *ClientSetConfig) NewAgentClientSet(drainCh, stopCh <-chan struct{}) *ClientSet {
+func (cc *ClientSetConfig) NewAgentClientSet(drainCh, stopCh <-chan struct{}, serverCounter servercounter.ServerCounter) *ClientSet {
 	return &ClientSet{
 		clients:                    make(map[string]*Client),
 		agentID:                    cc.AgentID,
@@ -164,8 +164,8 @@ func (cc *ClientSetConfig) NewAgentClientSet(drainCh, stopCh <-chan struct{}) *C
 		drainCh:                    drainCh,
 		xfrChannelSize:             cc.XfrChannelSize,
 		stopCh:                     stopCh,
-		respectReceivedServerCount: true,
-		serverCounter:              servercounter.StaticServerCounter(0),
+		respectReceivedServerCount: false,
+		serverCounter:              serverCounter,
 	}
 }
 
@@ -233,7 +233,7 @@ func (cs *ClientSet) connectOnce() error {
 			cs.serverCounter = servercounter.StaticServerCounter(newServerCount)
 			klog.V(2).Infof("respecting server count change suggestion, new count: %v", newServerCount)
 		} else {
-			klog.V(2).Infof("ignoring server count change suggestion")
+			klog.V(2).Infof("ignoring server count change suggestion of %v", newServerCount)
 		}
 	}
 	if err := cs.AddClient(c.serverID, c); err != nil {
