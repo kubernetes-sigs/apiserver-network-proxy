@@ -20,7 +20,7 @@ require (
 	k8s.io/apimachinery v0.30.2
 	k8s.io/client-go v0.30.2
 	k8s.io/component-base v0.30.2
-	k8s.io/klog/v2 v2.130.0
+	k8s.io/klog/v2 v2.130.1
 	sigs.k8s.io/apiserver-network-proxy/konnectivity-client v0.0.0
 )
 
