@@ -146,7 +146,7 @@ func (p *Proxy) Run(o *options.ProxyRunOptions, stopCh <-chan struct{}) error {
 		if err != nil {
 			return fmt.Errorf("failed to create server lease counter: %w", err)
 		}
-		serverCounter = servercounter.NewCachedServerCounter(serverLeaseCounter, time.Second*time.Duration(o.ServerCountCacheValiditySecs))
+		serverCounter = serverLeaseCounter
 	} else {
 		serverCounter = servercounter.StaticServerCounter(o.ServerCount)
 	}
