@@ -158,7 +158,7 @@ func (a *Agent) runProxyConnection(o *options.GrpcProxyAgentOptions, drainCh, st
 		if err != nil {
 			return nil, fmt.Errorf("failed to create server lease counter: %w", err)
 		}
-		serverCounter = servercounter.NewCachedServerCounter(serverLeaseCounter, time.Second*time.Duration(o.ServerCountCacheValiditySecs))
+		serverCounter = serverLeaseCounter
 		sharedInformerFactory.Start(context.Background().Done())
 	} else {
 		serverCounter = servercounter.StaticServerCounter(o.FallbackServerCount)
