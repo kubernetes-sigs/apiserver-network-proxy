@@ -11,6 +11,8 @@ import (
 	coordinationv1listers "k8s.io/client-go/listers/coordination/v1"
 )
 
+var timeNow = time.Now()
+
 type leaseTemplate struct {
 	durationSecs     int32
 	timeSinceAcquire time.Duration
@@ -31,11 +33,11 @@ func newLeaseFromTemplate(template leaseTemplate) *coordinationv1.Lease {
 		lease.Spec.LeaseDurationSeconds = &template.durationSecs
 	}
 	if template.timeSinceAcquire != time.Duration(0) {
-		acquireTime := metav1.NewMicroTime(time.Now().Add(-template.timeSinceAcquire))
+		acquireTime := metav1.NewMicroTime(timeNow.Add(-template.timeSinceAcquire))
 		lease.Spec.AcquireTime = &acquireTime
 	}
 	if template.timeSinceRenew != time.Duration(0) {
-		renewTime := metav1.NewMicroTime(time.Now().Add(-template.timeSinceRenew))
+		renewTime := metav1.NewMicroTime(timeNow.Add(-template.timeSinceRenew))
 		lease.Spec.RenewTime = &renewTime
 	}
 
