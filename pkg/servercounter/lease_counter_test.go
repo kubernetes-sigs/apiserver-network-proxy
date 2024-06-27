@@ -249,3 +249,52 @@ func TestServerLeaseCounter(t *testing.T) {
 		})
 	}
 }
+
+func TestServerLeaseCounter_FallbackCount(t *testing.T) {
+	validLease := leaseTemplate{
+		durationSecs:     1000,
+		timeSinceAcquire: time.Second,
+		labels:           map[string]string{"label": "value"},
+	}
+	invalidLease := leaseTemplate{
+		durationSecs:     1000,
+		timeSinceAcquire: time.Second * 10000,
+		labels:           map[string]string{"label": "value"},
+	}
+
+	leases := []*coordinationv1.Lease{}
+	leases = append(leases, newLeaseFromTemplate(validLease), newLeaseFromTemplate(validLease), newLeaseFromTemplate(validLease), newLeaseFromTemplate(invalidLease))
+
+	lister := &fakeLeaseLister{
+		leases: leases,
+		err:    fmt.Errorf("dummy lister error"),
+	}
+
+	initialFallback := 999
+	counter, err := NewServerLeaseCounter(lister, "label=value", initialFallback)
+	if err != nil {
+		t.Fatalf("server counter creation failed: %v", err)
+	}
+
+	// First call should return fallback count of 999 because of lister error.
+	got := counter.CountServers()
+	if got != initialFallback {
+		t.Errorf("lease counter did not return fallback count on lister error (got: %v, want: %v)", got, initialFallback)
+	}
+
+	// Second call should return the actual count (3) upon lister success.
+	actualCount := 3
+	lister.err = nil
+	got = counter.CountServers()
+	if got != actualCount {
+		t.Errorf("lease counter did not return actual count on lister success (got: %v, want: %v)", got, actualCount)
+	}
+
+	// Third call should return updated fallback count (3) upon lister failure.
+	lister.err = fmt.Errorf("dummy lister error")
+	lister.leases = append(lister.leases, newLeaseFromTemplate(validLease)) // Change actual count just in case.
+	got = counter.CountServers()
+	if got != actualCount {
+		t.Errorf("lease counter did not update fallback count after lister success, returned incorrect count on subsequent lister error (got: %v, want: %v)", got, actualCount)
+	}
+}
