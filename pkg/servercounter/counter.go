@@ -1,3 +1,5 @@
+// Package servercounter provides utilities for getting the current count of
+// proxy servers.
 package servercounter
 
 // A ServerCounter counts the number of available proxy servers.

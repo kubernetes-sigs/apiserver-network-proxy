@@ -149,7 +149,7 @@ func (a *Agent) runProxyConnection(o *options.GrpcProxyAgentOptions, drainCh, st
 		if err != nil {
 			return nil, fmt.Errorf("failed to create kubernetes clientset: %v", err)
 		}
-		sharedInformerFactory := informers.NewSharedInformerFactory(k8sClient, time.Second*time.Duration(o.ServerCountCacheValiditySecs))
+		sharedInformerFactory := informers.NewSharedInformerFactory(k8sClient, o.InformerResync)
 		serverLeaseCounter, err := servercounter.NewServerLeaseCounter(
 			sharedInformerFactory.Coordination().V1().Leases().Lister(),
 			o.ServerCountLeaseSelector,
