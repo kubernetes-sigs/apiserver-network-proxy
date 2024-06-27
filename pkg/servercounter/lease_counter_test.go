@@ -129,7 +129,7 @@ func (lister *fakeLeaseLister) List(selector labels.Selector) ([]*coordinationv1
 		return nil, lister.err
 	}
 
-	res := make([]*coordinationv1.Lease, 0)
+	res := []*coordinationv1.Lease{}
 	for _, lease := range lister.leases {
 		if selector.Matches(labelMap(lease.Labels)) {
 			res = append(res, lease)
