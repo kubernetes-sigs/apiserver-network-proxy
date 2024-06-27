@@ -11,6 +11,8 @@ import (
 	coordinationv1listers "k8s.io/client-go/listers/coordination/v1"
 )
 
+var timeNow = time.Now
+
 // A ServerLeaseCounter counts leases in the k8s apiserver to determine the
 // current proxy server count.
 type ServerLeaseCounter struct {
@@ -86,5 +88,5 @@ func isLeaseValid(lease *coordinationv1api.Lease) bool {
 
 	duration := time.Duration(*lease.Spec.LeaseDurationSeconds) * time.Second
 
-	return lastRenewTime.Add(duration).After(time.Now()) // renewTime+duration > time.Now()
+	return lastRenewTime.Add(duration).After(timeNow()) // renewTime+duration > time.Now()
 }

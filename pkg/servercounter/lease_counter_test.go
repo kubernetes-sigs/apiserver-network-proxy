@@ -11,13 +11,23 @@ import (
 	coordinationv1listers "k8s.io/client-go/listers/coordination/v1"
 )
 
-var timeNow = time.Now()
-
 type leaseTemplate struct {
 	durationSecs     int32
 	timeSinceAcquire time.Duration
 	timeSinceRenew   time.Duration
 	labels           map[string]string
+}
+
+type controlledTime struct {
+	t time.Time
+}
+
+func (ct *controlledTime) Now() time.Time {
+	return ct.t
+}
+
+func (ct *controlledTime) Advance(d time.Duration) {
+	ct.t = ct.t.Add(d)
 }
 
 func newLeaseFromTemplate(template leaseTemplate) *coordinationv1.Lease {
@@ -33,11 +43,11 @@ func newLeaseFromTemplate(template leaseTemplate) *coordinationv1.Lease {
 		lease.Spec.LeaseDurationSeconds = &template.durationSecs
 	}
 	if template.timeSinceAcquire != time.Duration(0) {
-		acquireTime := metav1.NewMicroTime(timeNow.Add(-template.timeSinceAcquire))
+		acquireTime := metav1.NewMicroTime(timeNow().Add(-template.timeSinceAcquire))
 		lease.Spec.AcquireTime = &acquireTime
 	}
 	if template.timeSinceRenew != time.Duration(0) {
-		renewTime := metav1.NewMicroTime(timeNow.Add(-template.timeSinceRenew))
+		renewTime := metav1.NewMicroTime(timeNow().Add(-template.timeSinceRenew))
 		lease.Spec.RenewTime = &renewTime
 	}
 
@@ -228,6 +238,8 @@ func TestServerLeaseCounter(t *testing.T) {
 
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
+			ct := &controlledTime{t: time.Unix(10000000, 0)}
+			timeNow = ct.Now
 			leases := make([]*coordinationv1.Lease, len(tc.templates))
 			for i, template := range tc.templates {
 				leases[i] = newLeaseFromTemplate(template)
@@ -236,6 +248,7 @@ func TestServerLeaseCounter(t *testing.T) {
 				leases: leases,
 				err:    tc.leaseListerError,
 			}
+			ct.Advance(time.Millisecond)
 
 			counter, err := NewServerLeaseCounter(lister, tc.labelSelector, tc.fallbackCount)
 			if err != nil {
@@ -262,8 +275,11 @@ func TestServerLeaseCounter_FallbackCount(t *testing.T) {
 		labels:           map[string]string{"label": "value"},
 	}
 
+	ct := &controlledTime{t: time.Unix(1000, 0)}
+	timeNow = ct.Now
 	leases := []*coordinationv1.Lease{}
 	leases = append(leases, newLeaseFromTemplate(validLease), newLeaseFromTemplate(validLease), newLeaseFromTemplate(validLease), newLeaseFromTemplate(invalidLease))
+	ct.Advance(time.Millisecond)
 
 	lister := &fakeLeaseLister{
 		leases: leases,
