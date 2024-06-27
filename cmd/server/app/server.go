@@ -137,7 +137,7 @@ func (p *Proxy) Run(o *options.ProxyRunOptions, stopCh <-chan struct{}) error {
 
 	var serverCounter servercounter.ServerCounter
 	if o.ServerCountLeaseSelector != "" {
-		sharedInformerFactory := informers.NewSharedInformerFactory(k8sClient, time.Second*time.Duration(o.ServerCountCacheValiditySecs))
+		sharedInformerFactory := informers.NewSharedInformerFactory(k8sClient, o.InformerResync)
 		serverLeaseCounter, err := servercounter.NewServerLeaseCounter(
 			sharedInformerFactory.Coordination().V1().Leases().Lister(),
 			o.ServerCountLeaseSelector,

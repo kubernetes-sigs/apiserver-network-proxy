@@ -91,7 +91,7 @@ func TestIsLeaseValid(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			lease := newLeaseFromTemplate(tc.template)
 
-			got := IsLeaseValid(lease)
+			got := isLeaseValid(lease)
 			if got != tc.want {
 				t.Errorf("incorrect lease validity (got: %v, want: %v)", got, tc.want)
 			}
@@ -136,7 +136,7 @@ func (lister *fakeLeaseLister) List(selector labels.Selector) ([]*coordinationv1
 
 	return res, nil
 }
-func (lister *fakeLeaseLister) Leases(namespace string) coordinationv1listers.LeaseNamespaceLister {
+func (lister *fakeLeaseLister) Leases(_ string) coordinationv1listers.LeaseNamespaceLister {
 	panic("not implemented")
 }
 
@@ -153,13 +153,13 @@ func TestServerLeaseCounter(t *testing.T) {
 		want int
 	}{
 		{
-			name:          "returns 0 when no leases exist",
+			name:          "returns fallback count when no leases exist",
 			templates:     []leaseTemplate{},
 			labelSelector: "label=value",
 			fallbackCount: 999,
-			want:          0,
+			want:          999,
 		}, {
-			name: "returns 0 when no leases matching selector exist",
+			name: "returns fallback count when no leases matching selector exist",
 			templates: []leaseTemplate{
 				{
 					durationSecs:     1000,
@@ -174,9 +174,9 @@ func TestServerLeaseCounter(t *testing.T) {
 			},
 			labelSelector: "label=value",
 			fallbackCount: 999,
-			want:          0,
+			want:          999,
 		}, {
-			name: "returns 0 when no leases matching selector are still valid",
+			name: "returns fallback count when no leases matching selector are still valid",
 			templates: []leaseTemplate{
 				{
 					durationSecs:     1000,
@@ -191,7 +191,7 @@ func TestServerLeaseCounter(t *testing.T) {
 			},
 			labelSelector: "label=value",
 			fallbackCount: 999,
-			want:          0,
+			want:          999,
 		}, {
 			name:             "returns fallbackCount when LeaseLister returns an error",
 			templates:        []leaseTemplate{},

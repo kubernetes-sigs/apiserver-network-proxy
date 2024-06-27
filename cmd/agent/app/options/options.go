@@ -87,8 +87,8 @@ type GrpcProxyAgentOptions struct {
 	ServerCountLeaseSelector string
 	// Initial fallback server count to use if proxy server lease listing fails.
 	FallbackServerCount uint
-	// Time in seconds for which the cached server count is valid.
-	ServerCountCacheValiditySecs uint
+	// Lease informer resync period.
+	InformerResync time.Duration
 	// Path to kubeconfig (used by kubernetes client for lease listing)
 	KubeconfigPath string
 }
@@ -135,7 +135,7 @@ func (o *GrpcProxyAgentOptions) Flags() *pflag.FlagSet {
 	flags.IntVar(&o.XfrChannelSize, "xfr-channel-size", 150, "Set the size of the channel for transferring data between the agent and the proxy server.")
 	flags.UintVar(&o.FallbackServerCount, "fallback-server-count", o.FallbackServerCount, "Initial fallback server count to use if proxy server lease listing fails.")
 	flags.StringVar(&o.ServerCountLeaseSelector, "server-count-lease-selector", o.ServerCountLeaseSelector, "Providing a label selector enables updating the server count by counting the number of valid leases matching the selector.")
-	flags.UintVar(&o.ServerCountCacheValiditySecs, "server-count-cache-validity-secs", o.ServerCountCacheValiditySecs, "Time in seconds for which the cached server count is valid.")
+	flags.DurationVar(&o.InformerResync, "informer-resync", o.InformerResync, "Lease informer resync period")
 	flags.StringVar(&o.KubeconfigPath, "kubeconfig", o.KubeconfigPath, "absolute path to the kubeconfig file (used with agent-namespace, agent-service-account, authentication-audience).")
 	return flags
 }
@@ -248,31 +248,31 @@ func validateAgentIdentifiers(agentIdentifiers string) error {
 
 func NewGrpcProxyAgentOptions() *GrpcProxyAgentOptions {
 	o := GrpcProxyAgentOptions{
-		AgentCert:                    "",
-		AgentKey:                     "",
-		CaCert:                       "",
-		ProxyServerHost:              "127.0.0.1",
-		ProxyServerPort:              8091,
-		HealthServerHost:             "",
-		HealthServerPort:             8093,
-		AdminBindAddress:             "127.0.0.1",
-		AdminServerPort:              8094,
-		EnableProfiling:              false,
-		EnableContentionProfiling:    false,
-		AgentID:                      defaultAgentID(),
-		AgentIdentifiers:             "",
-		SyncInterval:                 1 * time.Second,
-		ProbeInterval:                1 * time.Second,
-		SyncIntervalCap:              10 * time.Second,
-		KeepaliveTime:                1 * time.Hour,
-		ServiceAccountTokenPath:      "",
-		WarnOnChannelLimit:           false,
-		SyncForever:                  false,
-		XfrChannelSize:               150,
-		FallbackServerCount:          1,
-		ServerCountLeaseSelector:     "",
-		ServerCountCacheValiditySecs: 10,
-		KubeconfigPath:               "",
+		AgentCert:                 "",
+		AgentKey:                  "",
+		CaCert:                    "",
+		ProxyServerHost:           "127.0.0.1",
+		ProxyServerPort:           8091,
+		HealthServerHost:          "",
+		HealthServerPort:          8093,
+		AdminBindAddress:          "127.0.0.1",
+		AdminServerPort:           8094,
+		EnableProfiling:           false,
+		EnableContentionProfiling: false,
+		AgentID:                   defaultAgentID(),
+		AgentIdentifiers:          "",
+		SyncInterval:              1 * time.Second,
+		ProbeInterval:             1 * time.Second,
+		SyncIntervalCap:           10 * time.Second,
+		KeepaliveTime:             1 * time.Hour,
+		ServiceAccountTokenPath:   "",
+		WarnOnChannelLimit:        false,
+		SyncForever:               false,
+		XfrChannelSize:            150,
+		FallbackServerCount:       1,
+		ServerCountLeaseSelector:  "",
+		InformerResync:            10 * time.Second,
+		KubeconfigPath:            "",
 	}
 	return &o
 }
