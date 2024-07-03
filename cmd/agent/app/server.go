@@ -153,7 +153,7 @@ func (a *Agent) runProxyConnection(o *options.GrpcProxyAgentOptions, drainCh, st
 		serverLeaseCounter, err := servercounter.NewServerLeaseCounter(
 			sharedInformerFactory.Coordination().V1().Leases().Lister(),
 			o.ServerCountLeaseSelector,
-			int(o.FallbackServerCount),
+			int(o.ServerCount),
 		)
 		if err != nil {
 			return nil, fmt.Errorf("failed to create server lease counter: %w", err)
@@ -161,7 +161,7 @@ func (a *Agent) runProxyConnection(o *options.GrpcProxyAgentOptions, drainCh, st
 		serverCounter = serverLeaseCounter
 		sharedInformerFactory.Start(context.Background().Done())
 	} else {
-		serverCounter = servercounter.StaticServerCounter(o.FallbackServerCount)
+		serverCounter = servercounter.StaticServerCounter(o.ServerCount)
 	}
 
 	cs := cc.NewAgentClientSet(drainCh, stopCh, serverCounter)

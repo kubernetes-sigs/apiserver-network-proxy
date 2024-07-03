@@ -86,7 +86,7 @@ type GrpcProxyAgentOptions struct {
 	// number of valid leases matching the selector.
 	ServerCountLeaseSelector string
 	// Initial fallback server count to use if proxy server lease listing fails.
-	FallbackServerCount uint
+	ServerCount uint
 	// Lease informer resync period.
 	InformerResync time.Duration
 	// Path to kubeconfig (used by kubernetes client for lease listing)
@@ -133,7 +133,7 @@ func (o *GrpcProxyAgentOptions) Flags() *pflag.FlagSet {
 	flags.BoolVar(&o.WarnOnChannelLimit, "warn-on-channel-limit", o.WarnOnChannelLimit, "Turns on a warning if the system is going to push to a full channel. The check involves an unsafe read.")
 	flags.BoolVar(&o.SyncForever, "sync-forever", o.SyncForever, "If true, the agent continues syncing, in order to support server count changes.")
 	flags.IntVar(&o.XfrChannelSize, "xfr-channel-size", 150, "Set the size of the channel for transferring data between the agent and the proxy server.")
-	flags.UintVar(&o.FallbackServerCount, "fallback-server-count", o.FallbackServerCount, "Initial fallback server count to use if proxy server lease listing fails.")
+	flags.UintVar(&o.ServerCount, "server-count", o.ServerCount, "Static server count, also used as fallback server count if proxy server lease listing fails.")
 	flags.StringVar(&o.ServerCountLeaseSelector, "server-count-lease-selector", o.ServerCountLeaseSelector, "Providing a label selector enables updating the server count by counting the number of valid leases matching the selector.")
 	flags.DurationVar(&o.InformerResync, "informer-resync", o.InformerResync, "Lease informer resync period")
 	flags.StringVar(&o.KubeconfigPath, "kubeconfig", o.KubeconfigPath, "absolute path to the kubeconfig file (used with agent-namespace, agent-service-account, authentication-audience).")
@@ -269,7 +269,7 @@ func NewGrpcProxyAgentOptions() *GrpcProxyAgentOptions {
 		WarnOnChannelLimit:        false,
 		SyncForever:               false,
 		XfrChannelSize:            150,
-		FallbackServerCount:       1,
+		ServerCount:               1,
 		ServerCountLeaseSelector:  "",
 		InformerResync:            10 * time.Second,
 		KubeconfigPath:            "",
