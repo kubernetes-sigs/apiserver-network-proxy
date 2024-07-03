@@ -24,7 +24,7 @@ ALL_ARCH ?= amd64 arm arm64 ppc64le s390x
 # The output type could either be docker (local), or registry.
 OUTPUT_TYPE ?= docker
 GO_TOOLCHAIN ?= golang
-GO_VERSION ?= 1.22.2
+GO_VERSION ?= 1.22.3
 BASEIMAGE ?= gcr.io/distroless/static-debian11:nonroot
 
 ifeq ($(GOPATH),)
@@ -79,6 +79,10 @@ test:
 .PHONY: test-integration
 test-integration: build
 	go test -mod=vendor -race ./tests -agent-path $(PWD)/bin/proxy-agent
+
+.PHONY: test-e2e
+test-e2e: docker-build
+	go test -mod=vendor ./e2e -agent-image ${AGENT_FULL_IMAGE}-$(TARGETARCH):${TAG} -server-image ${SERVER_FULL_IMAGE}-$(TARGETARCH):${TAG}
 
 ## --------------------------------------
 ## Binaries
