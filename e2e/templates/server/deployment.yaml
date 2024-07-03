@@ -23,7 +23,7 @@ spec:
         command: [ "/proxy-server"]
         args: [
           {{ range .Args }}
-          "--{{ .Key }}{{if .Value != ""}}={{ .Value }}{{ end }}",
+          "--{{ .Key }}{{if ne .Value ""}}={{ .Value }}{{ end }}",
           {{ end }}
           ]
         livenessProbe:

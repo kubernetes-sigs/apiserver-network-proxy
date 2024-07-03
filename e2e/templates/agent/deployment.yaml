@@ -1,34 +1,23 @@
----
 apiVersion: apps/v1
-kind: DaemonSet
+kind: Deployment
 metadata:
   labels:
     k8s-app: konnectivity-agent
   namespace: kube-system
   name: konnectivity-agent
 spec:
+  replicas: {{ .Replicas }}
   selector:
     matchLabels:
       k8s-app: konnectivity-agent
-  updateStrategy:
-    type: RollingUpdate
   template:
     metadata:
       labels:
         k8s-app: konnectivity-agent
     spec:
-      priorityClassName: system-cluster-critical
-      tolerations:
-        - key: "CriticalAddonsOnly"
-          operator: "Exists"
-        - operator: "Exists"
-          effect: "NoExecute"
-      nodeSelector:
-        kubernetes.io/os: linux
-      dnsPolicy: ClusterFirstWithHostNet
       containers:
       - name: konnectivity-agent-container
-        image: gcr.io/k8s-staging-kas-network-proxy/proxy-agent:master
+        image: {{ .Image }}
         resources:
           requests:
             cpu: 50m
@@ -36,17 +25,9 @@ spec:
             memory: 30Mi
         command: [ "/proxy-agent"]
         args: [
-          "--logtostderr=true",
-          "--ca-cert=/var/run/secrets/kubernetes.io/serviceaccount/ca.crt",
-          "--proxy-server-host=konnectivity-server.kube-system.svc.cluster.local",
-          "--proxy-server-port=8091",
-          "--sync-interval=5s",
-          "--sync-interval-cap=30s",
-          "--sync-forever",
-          "--probe-interval=5s",
-          "--service-account-token-path=/var/run/secrets/tokens/konnectivity-agent-token",
-          "--agent-identifiers=ipv4=${HOST_IP}",
-          "--server-count-lease-selector=apiserver.kubernetes.io/identity=kube-apiserver",
+          {{ range .Args }}
+          "--{{ .Key }}{{if ne .Value ""}}={{ .Value }}{{ end }}",
+          {{ end }}
           ]
         env:
           - name: POD_NAME
