@@ -1,0 +1,70 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  labels:
+    k8s-app: konnectivity-server
+  namespace: kube-system
+  name: konnectivity-server
+spec:
+  replicas: {{ .Replicas }}
+  selector:
+    matchLabels:
+      k8s-app: konnectivity-server
+  template:
+    metadata:
+      labels:
+        k8s-app: konnectivity-server
+      containers:
+      - name: konnectivity-server-container
+        image: {{ .Image }}
+        resources:
+          requests:
+            cpu: 1m
+        command: [ "/proxy-server"]
+        args: [
+          {{ range .Args }}
+          "--{{ .Key }}{{if .Value != ""}}={{ .Value }}{{ end }}",
+          {{ end }}
+          ]
+        livenessProbe:
+          httpGet:
+            scheme: HTTP
+            host: 127.0.0.1
+            port: 8092
+            path: /healthz
+          initialDelaySeconds: 10
+          timeoutSeconds: 60
+        ports:
+        - name: serverport
+          containerPort: 8090
+          hostPort: 8090
+        - name: agentport
+          containerPort: 8091
+          hostPort: 8091
+        - name: healthport
+          containerPort: 8092
+          hostPort: 8092
+        - name: adminport
+          containerPort: 8093
+          hostPort: 8093
+        volumeMounts:
+        - name: varlogkonnectivityserver
+          mountPath: /var/log/konnectivity-server.log
+          readOnly: false
+        - name: kubernetes
+          mountPath: /etc/kubernetes
+          readOnly: true
+        - name: konnectivity-home
+          mountPath: /etc/kubernetes/konnectivity-server
+      volumes:
+      - name: varlogkonnectivityserver
+        hostPath:
+          path: /var/log/konnectivity-server.log
+          type: FileOrCreate
+      - name: kubernetes
+        hostPath:
+          path: /etc/kubernetes
+      - name: konnectivity-home
+        hostPath:
+          path: /etc/kubernetes/konnectivity-server
+          type: DirectoryOrCreate

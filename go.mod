@@ -1,8 +1,8 @@
 module sigs.k8s.io/apiserver-network-proxy
 
-go 1.22.3
+go 1.22
 
-toolchain go1.22.4
+toolchain go1.22
 
 require (
 	github.com/google/uuid v1.6.0
@@ -23,6 +23,7 @@ require (
 	k8s.io/component-base v0.30.2
 	k8s.io/klog/v2 v2.130.0
 	sigs.k8s.io/apiserver-network-proxy/konnectivity-client v0.29.0
+	sigs.k8s.io/controller-runtime v0.18.2
 	sigs.k8s.io/e2e-framework v0.4.0
 )
 
@@ -57,6 +58,7 @@ require (
 	github.com/pkg/errors v0.9.1 // indirect
 	github.com/pmezard/go-difflib v1.0.0 // indirect
 	github.com/prometheus/procfs v0.12.0 // indirect
+	github.com/vladimirvivien/gexe v0.2.0 // indirect
 	golang.org/x/oauth2 v0.19.0 // indirect
 	golang.org/x/sys v0.21.0 // indirect
 	golang.org/x/term v0.21.0 // indirect
@@ -68,7 +70,6 @@ require (
 	gopkg.in/yaml.v3 v3.0.1 // indirect
 	k8s.io/kube-openapi v0.0.0-20240228011516-70dd3763d340 // indirect
 	k8s.io/utils v0.0.0-20230726121419-3b25d923346b // indirect
-	sigs.k8s.io/controller-runtime v0.18.2 // indirect
 	sigs.k8s.io/json v0.0.0-20221116044647-bc3834ca7abd // indirect
 	sigs.k8s.io/structured-merge-diff/v4 v4.4.1 // indirect
 	sigs.k8s.io/yaml v1.4.0 // indirect
