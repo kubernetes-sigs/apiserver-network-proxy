@@ -15,7 +15,7 @@ type KeyValue struct {
 	Value string
 }
 
-type DeploymentConfig struct {
+type StatefulSetConfig struct {
 	Replicas int
 	Image    string
 	Args     []KeyValue

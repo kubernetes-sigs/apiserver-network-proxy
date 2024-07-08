@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	io_prometheus_client "github.com/prometheus/client_model/go"
 	"github.com/prometheus/common/expfmt"
 	"sigs.k8s.io/e2e-framework/klient/wait"
 	"sigs.k8s.io/e2e-framework/klient/wait/conditions"
@@ -16,10 +17,11 @@ import (
 )
 
 func TestSingleServer_SingleAgent_StaticCount(t *testing.T) {
-	serviceHost := "konnectivity-server.kube-system.svc.cluster.local"
+	serverServiceHost := "konnectivity-server.kube-system.svc.cluster.local"
+	agentServiceHost := "konnectivity-agent.kube-system.svc.cluster.local"
 	adminPort := 8093
 
-	serverDeploymentCfg := DeploymentConfig{
+	serverStatefulSetCfg := StatefulSetConfig{
 		Replicas: 1,
 		Image:    *serverImage,
 		Args: []KeyValue{
@@ -43,18 +45,18 @@ func TestSingleServer_SingleAgent_StaticCount(t *testing.T) {
 			{Key: "server-count", Value: "1"},
 		},
 	}
-	serverDeployment, _, err := renderServerTemplate("deployment.yaml", serverDeploymentCfg)
+	serverStatefulSet, _, err := renderServerTemplate("statefulset.yaml", serverStatefulSetCfg)
 	if err != nil {
 		t.Fatalf("could not render server deployment: %v", err)
 	}
 
-	agentDeploymentCfg := DeploymentConfig{
+	agentStatefulSetConfig := StatefulSetConfig{
 		Replicas: 1,
 		Image:    *agentImage,
 		Args: []KeyValue{
 			{Key: "logtostderr", Value: "true"},
 			{Key: "ca-cert", Value: "/var/run/secrets/kubernetes.io/serviceaccount/ca.crt"},
-			{Key: "proxy-server-host", Value: serviceHost},
+			{Key: "proxy-server-host", Value: serverServiceHost},
 			{Key: "proxy-server-port", Value: "8091"},
 			{Key: "sync-interval", Value: "1s"},
 			{Key: "sync-interval-cap", Value: "10s"},
@@ -64,26 +66,26 @@ func TestSingleServer_SingleAgent_StaticCount(t *testing.T) {
 			{Key: "server-count", Value: "1"},
 		},
 	}
-	agentDeployment, _, err := renderAgentTemplate("deployment.yaml", agentDeploymentCfg)
+	agentStatefulSet, _, err := renderAgentTemplate("statefulset.yaml", agentStatefulSetConfig)
 	if err != nil {
 		t.Fatalf("could not render agent deployment: %v", err)
 	}
 
-	feature := features.New("konnectivity server and agent deployment with single replica for each")
+	feature := features.New("konnectivity server and agent stateful set with single replica for each")
 	feature.Setup(func(ctx context.Context, t *testing.T, cfg *envconf.Config) context.Context {
 		client := cfg.Client()
-		err := client.Resources().Create(ctx, serverDeployment)
+		err := client.Resources().Create(ctx, serverStatefulSet)
 		if err != nil {
 			t.Fatalf("could not create server deployment: %v", err)
 		}
 
-		err = client.Resources().Create(ctx, agentDeployment)
+		err = client.Resources().Create(ctx, agentStatefulSet)
 		if err != nil {
 			t.Fatalf("could not create agent deployment: %v", err)
 		}
 
 		err = wait.For(
-			conditions.New(client.Resources()).DeploymentAvailable(agentDeployment.GetName(), agentDeployment.GetNamespace()),
+			conditions.New(client.Resources()).DeploymentAvailable(agentStatefulSet.GetName(), agentStatefulSet.GetNamespace()),
 			wait.WithTimeout(1*time.Minute),
 			wait.WithInterval(10*time.Second),
 		)
@@ -92,7 +94,7 @@ func TestSingleServer_SingleAgent_StaticCount(t *testing.T) {
 		}
 
 		err = wait.For(
-			conditions.New(client.Resources()).DeploymentAvailable(serverDeployment.GetName(), serverDeployment.GetNamespace()),
+			conditions.New(client.Resources()).DeploymentAvailable(serverStatefulSet.GetName(), serverStatefulSet.GetNamespace()),
 			wait.WithTimeout(1*time.Minute),
 			wait.WithInterval(10*time.Second),
 		)
@@ -103,21 +105,13 @@ func TestSingleServer_SingleAgent_StaticCount(t *testing.T) {
 		return ctx
 	})
 	feature.Assess("konnectivity server has a connected client", func(ctx context.Context, t *testing.T, cfg *envconf.Config) context.Context {
-		resp, err := http.Get(fmt.Sprintf("%v:%v/metrics", serviceHost, adminPort))
+		metricsFamilies, err := getMetrics(fmt.Sprintf("%v:%v/metrics", serverServiceHost, adminPort))
 		if err != nil {
-			t.Fatalf("could not read server metrics: %v", err)
+			t.Fatalf("couldn't get server metrics")
 		}
-
-		metricsParser := &expfmt.TextParser{}
-		metricsFamilies, err := metricsParser.TextToMetricFamilies(resp.Body)
-		defer resp.Body.Close()
-		if err != nil {
-			t.Fatalf("could not parse server metrics: %v", err)
-		}
-
 		connectionsMetric, exists := metricsFamilies["konnectivity_network_proxy_server_ready_backend_connections"]
 		if !exists {
-			t.Fatalf("couldn't find number of ready backend connections in metrics: %v", metricsFamilies)
+			t.Fatalf("couldn't find number of ready backend connections in metrics")
 		}
 
 		numConnections := int(connectionsMetric.GetMetric()[0].GetGauge().GetValue())
@@ -127,4 +121,37 @@ func TestSingleServer_SingleAgent_StaticCount(t *testing.T) {
 
 		return ctx
 	})
+	feature.Assess("konnectivity agent is connected to a server", func(ctx context.Context, t *testing.T, cfg *envconf.Config) context.Context {
+		metricsFamilies, err := getMetrics(fmt.Sprintf("%v:%v/metrics", agentServiceHost, adminPort))
+		if err != nil {
+			t.Fatalf("couldn't get agent metrics")
+		}
+		connectionsMetric, exists := metricsFamilies["konnectivity_network_proxy_agent_open_server_connections"]
+		if !exists {
+			t.Fatalf("couldn't find number of open server connections in metrics")
+		}
+
+		numConnections := int(connectionsMetric.GetMetric()[0].GetGauge().GetValue())
+		if numConnections != 1 {
+			t.Errorf("incorrect number of connected agents (want: 1, got: %v)", numConnections)
+		}
+
+		return ctx
+	})
+}
+
+func getMetrics(url string) (map[string]*io_prometheus_client.MetricFamily, error) {
+	resp, err := http.Get(url)
+	if err != nil {
+		return nil, fmt.Errorf("could not get metrics: %w", err)
+	}
+
+	metricsParser := &expfmt.TextParser{}
+	metricsFamilies, err := metricsParser.TextToMetricFamilies(resp.Body)
+	defer resp.Body.Close()
+	if err != nil {
+		return nil, fmt.Errorf("could not parse metrics: %w", err)
+	}
+
+	return metricsFamilies, nil
 }
