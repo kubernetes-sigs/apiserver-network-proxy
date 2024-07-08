@@ -3,10 +3,14 @@ package e2e
 import (
 	"context"
 	"flag"
+	"fmt"
 	"log"
+	"net/http"
 	"os"
 	"testing"
 
+	io_prometheus_client "github.com/prometheus/client_model/go"
+	"github.com/prometheus/common/expfmt"
 	"k8s.io/client-go/kubernetes/scheme"
 	"sigs.k8s.io/e2e-framework/pkg/env"
 	"sigs.k8s.io/e2e-framework/pkg/envconf"
@@ -42,7 +46,7 @@ func TestMain(m *testing.M) {
 		func(ctx context.Context, cfg *envconf.Config) (context.Context, error) {
 			client := cfg.Client()
 
-			// Render agent RBAC templates.
+			// Render agent RBAC and Service templates.
 			agentServiceAccount, _, err := renderAgentTemplate("serviceaccount.yaml", struct{}{})
 			if err != nil {
 				return nil, err
@@ -52,6 +56,10 @@ func TestMain(m *testing.M) {
 				return nil, err
 			}
 			agentClusterRoleBinding, _, err := renderAgentTemplate("clusterrolebinding.yaml", struct{}{})
+			if err != nil {
+				return ctx, err
+			}
+			agentService, _, err := renderAgentTemplate("service.yaml", struct{}{})
 			if err != nil {
 				return ctx, err
 			}
@@ -66,6 +74,10 @@ func TestMain(m *testing.M) {
 				return ctx, err
 			}
 			err = client.Resources().Create(ctx, agentClusterRoleBinding)
+			if err != nil {
+				return ctx, err
+			}
+			err = client.Resources().Create(ctx, agentService)
 			if err != nil {
 				return ctx, err
 			}
@@ -99,6 +111,18 @@ func TestMain(m *testing.M) {
 	os.Exit(testenv.Run(m))
 }
 
-func TestSingleAgentAndServer(t *testing.T) {
+func getMetrics(url string) (map[string]*io_prometheus_client.MetricFamily, error) {
+	resp, err := http.Get(url)
+	if err != nil {
+		return nil, fmt.Errorf("could not get metrics: %w", err)
+	}
 
+	metricsParser := &expfmt.TextParser{}
+	metricsFamilies, err := metricsParser.TextToMetricFamilies(resp.Body)
+	defer resp.Body.Close()
+	if err != nil {
+		return nil, fmt.Errorf("could not parse metrics: %w", err)
+	}
+
+	return metricsFamilies, nil
 }
