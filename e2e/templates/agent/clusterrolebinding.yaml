@@ -1,0 +1,14 @@
+apiVersion: rbac.authorization.k8s.io/rbacv1
+kind: ClusterRoleBinding
+metadata:
+  name: system:konnectivity-agent
+  labels:
+    kubernetes.io/cluster-service: "true"
+subjects:
+- kind: ServiceAccount
+  name: konnectivity-agent
+  namespace:  kube-system
+roleRef:
+  kind: ClusterRole
+  name: system:konnectivity-agent
+  apiGroup: rbac.authorization.k8s.io
