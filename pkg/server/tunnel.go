@@ -53,13 +53,21 @@ func (t *Tunnel) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "hijacking not supported", http.StatusInternalServerError)
 		return
 	}
-	w.WriteHeader(http.StatusOK)
 
 	conn, bufrw, err := hijacker.Hijack()
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
+
+	// Send the HTTP 200 OK status after a successful hijack
+	_, err = conn.Write([]byte("HTTP/1.1 200 Connection Established\r\n\r\n"))
+	if err != nil {
+		klog.ErrorS(err, "failed to send 200 connection established")
+		conn.Close()
+		return
+	}
+
 	var closeOnce sync.Once
 	defer closeOnce.Do(func() { conn.Close() })
 
@@ -78,7 +86,9 @@ func (t *Tunnel) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	klog.V(4).Infof("Set pending(rand=%d) to %v", random, w)
 	backend, err := t.Server.getBackend(r.Host)
 	if err != nil {
-		http.Error(w, fmt.Sprintf("currently no tunnels available: %v", err), http.StatusInternalServerError)
+		klog.ErrorS(err, "no tunnels available")
+		conn.Write([]byte(fmt.Sprintf("HTTP/1.1 500 Internal Server Error\r\nContent-Type: text/plain\r\n\r\ncurrently no tunnels available: %v", err)))
+		conn.Close()
 		return
 	}
 	closed := make(chan struct{})
