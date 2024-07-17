@@ -82,7 +82,7 @@ test-integration: build
 
 .PHONY: test-e2e
 test-e2e: docker-build
-	go test -mod=vendor ./e2e -agent-image ${AGENT_FULL_IMAGE}-$(TARGETARCH):${TAG} -server-image ${SERVER_FULL_IMAGE}-$(TARGETARCH):${TAG}
+	go test -mod=vendor ./e2e -race -agent-image ${AGENT_FULL_IMAGE}-$(TARGETARCH):${TAG} -server-image ${SERVER_FULL_IMAGE}-$(TARGETARCH):${TAG}
 
 ## --------------------------------------
 ## Binaries

@@ -2,7 +2,6 @@ package e2e
 
 import (
 	"context"
-	"fmt"
 	"strconv"
 	"testing"
 	"time"
@@ -22,27 +21,27 @@ func TestSingleServer_SingleAgent_StaticCount(t *testing.T) {
 		Replicas: 1,
 		Image:    *serverImage,
 		Args: []KeyValue{
-			{Key: "log-file", Value: "/var/log/konnectivity-server.log"},
-			{Key: "logtostderr", Value: "true"},
-			{Key: "log-file-max-size", Value: "0"},
-			{Key: "uds-name", Value: "/etc/kubernetes/konnectivity-server/konnectivity-server.socket"},
+			{"log-file", "/var/log/konnectivity-server.log"},
+			{"logtostderr", "true"},
+			{"log-file-max-size", "0"},
+			{"uds-name", "/etc/kubernetes/konnectivity-server/konnectivity-server.socket"},
 			{Key: "delete-existing-uds-file"},
-			{Key: "cluster-cert", Value: "/etc/kubernetes/pki/apiserver.crt"},
-			{Key: "cluster-key", Value: "/etc/kubernetes/pki/apiserver.key"},
-			{Key: "server-port", Value: "8090"},
-			{Key: "agent-port", Value: "8091"},
-			{Key: "health-port", Value: "8092"},
-			{Key: "admin-port", Value: strconv.Itoa(adminPort)},
-			{Key: "keepalive-time", Value: "1h"},
-			{Key: "mode", Value: "grpc"},
-			{Key: "agent-namespace", Value: "kube-system"},
-			{Key: "agent-service-account", Value: "konnectivity-agent"},
-			{Key: "kubeconfig", Value: "/etc/kubernetes/admin.conf"},
-			{Key: "authentication-audience", Value: "system:konnectivity-server"},
-			{Key: "server-count", Value: "1"},
+			{"cluster-cert", "/etc/kubernetes/pki/apiserver.crt"},
+			{"cluster-key", "/etc/kubernetes/pki/apiserver.key"},
+			{"server-port", "8090"},
+			{"agent-port", "8091"},
+			{"health-port", "8092"},
+			{"admin-port", strconv.Itoa(adminPort)},
+			{"keepalive-time", "1h"},
+			{"mode", "grpc"},
+			{"agent-namespace", "kube-system"},
+			{"agent-service-account", "konnectivity-agent"},
+			{"kubeconfig", "/etc/kubernetes/admin.conf"},
+			{"authentication-audience", "system:konnectivity-server"},
+			{"server-count", "1"},
 		},
 	}
-	serverStatefulSet, _, err := renderServerTemplate("statefulset.yaml", serverStatefulSetCfg)
+	serverStatefulSet, _, err := renderTemplate("server/statefulset.yaml", serverStatefulSetCfg)
 	if err != nil {
 		t.Fatalf("could not render server deployment: %v", err)
 	}
@@ -51,19 +50,19 @@ func TestSingleServer_SingleAgent_StaticCount(t *testing.T) {
 		Replicas: 1,
 		Image:    *agentImage,
 		Args: []KeyValue{
-			{Key: "logtostderr", Value: "true"},
-			{Key: "ca-cert", Value: "/var/run/secrets/kubernetes.io/serviceaccount/ca.crt"},
-			{Key: "proxy-server-host", Value: serverServiceHost},
-			{Key: "proxy-server-port", Value: "8091"},
-			{Key: "sync-interval", Value: "1s"},
-			{Key: "sync-interval-cap", Value: "10s"},
+			{"logtostderr", "true"},
+			{"ca-cert", "/var/run/secrets/kubernetes.io/serviceaccount/ca.crt"},
+			{"proxy-server-host", serverServiceHost},
+			{"proxy-server-port", "8091"},
+			{"sync-interval", "1s"},
+			{"sync-interval-cap", "10s"},
 			{Key: "sync-forever"},
-			{Key: "probe-interval", Value: "1s"},
-			{Key: "service-account-token-path", Value: "/var/run/secrets/tokens/konnectivity-agent-token"},
-			{Key: "server-count", Value: "1"},
+			{"probe-interval", "1s"},
+			{"service-account-token-path", "/var/run/secrets/tokens/konnectivity-agent-token"},
+			{"server-count", "1"},
 		},
 	}
-	agentStatefulSet, _, err := renderAgentTemplate("statefulset.yaml", agentStatefulSetConfig)
+	agentStatefulSet, _, err := renderTemplate("agent/statefulset.yaml", agentStatefulSetConfig)
 	if err != nil {
 		t.Fatalf("could not render agent deployment: %v", err)
 	}
@@ -101,38 +100,6 @@ func TestSingleServer_SingleAgent_StaticCount(t *testing.T) {
 
 		return ctx
 	})
-	feature.Assess("konnectivity server has a connected client", func(ctx context.Context, t *testing.T, cfg *envconf.Config) context.Context {
-		metricsFamilies, err := getMetrics(fmt.Sprintf("%v:%v/metrics", serverServiceHost, adminPort))
-		if err != nil {
-			t.Fatalf("couldn't get server metrics")
-		}
-		connectionsMetric, exists := metricsFamilies["konnectivity_network_proxy_server_ready_backend_connections"]
-		if !exists {
-			t.Fatalf("couldn't find number of ready backend connections in metrics")
-		}
-
-		numConnections := int(connectionsMetric.GetMetric()[0].GetGauge().GetValue())
-		if numConnections != 1 {
-			t.Errorf("incorrect number of connected agents (want: 1, got: %v)", numConnections)
-		}
-
-		return ctx
-	})
-	feature.Assess("konnectivity agent is connected to a server", func(ctx context.Context, t *testing.T, cfg *envconf.Config) context.Context {
-		metricsFamilies, err := getMetrics(fmt.Sprintf("%v:%v/metrics", agentServiceHost, adminPort))
-		if err != nil {
-			t.Fatalf("couldn't get agent metrics")
-		}
-		connectionsMetric, exists := metricsFamilies["konnectivity_network_proxy_agent_open_server_connections"]
-		if !exists {
-			t.Fatalf("couldn't find number of open server connections in metrics")
-		}
-
-		numConnections := int(connectionsMetric.GetMetric()[0].GetGauge().GetValue())
-		if numConnections != 1 {
-			t.Errorf("incorrect number of connected agents (want: 1, got: %v)", numConnections)
-		}
-
-		return ctx
-	})
+	feature.Assess("konnectivity server has a connected client", assertServersAreConnected(1, serverServiceHost, adminPort))
+	feature.Assess("konnectivity agent is connected to a server", assertAgentsAreConnected(1, agentServiceHost, adminPort))
 }

@@ -2,13 +2,10 @@ package e2e
 
 import (
 	"context"
-	"fmt"
 	"strconv"
 	"testing"
 	"time"
 
-	corev1 "k8s.io/api/core/v1"
-	"sigs.k8s.io/e2e-framework/klient/k8s/resources"
 	"sigs.k8s.io/e2e-framework/klient/wait"
 	"sigs.k8s.io/e2e-framework/klient/wait/conditions"
 	"sigs.k8s.io/e2e-framework/pkg/envconf"
@@ -45,7 +42,7 @@ func TestMultiServer_MultiAgent_StaticCount(t *testing.T) {
 			{Key: "server-count", Value: "1"},
 		},
 	}
-	serverStatefulSet, _, err := renderServerTemplate("statefulset.yaml", serverStatefulSetCfg)
+	serverStatefulSet, _, err := renderTemplate("server/statefulset.yaml", serverStatefulSetCfg)
 	if err != nil {
 		t.Fatalf("could not render server deployment: %v", err)
 	}
@@ -66,7 +63,7 @@ func TestMultiServer_MultiAgent_StaticCount(t *testing.T) {
 			{Key: "server-count", Value: "3"},
 		},
 	}
-	agentStatefulSet, _, err := renderAgentTemplate("statefulset.yaml", agentStatefulSetConfig)
+	agentStatefulSet, _, err := renderTemplate("agent/statefulset.yaml", agentStatefulSetConfig)
 	if err != nil {
 		t.Fatalf("could not render agent deployment: %v", err)
 	}
@@ -104,60 +101,6 @@ func TestMultiServer_MultiAgent_StaticCount(t *testing.T) {
 
 		return ctx
 	})
-	feature.Assess("all servers connected to all clients", func(ctx context.Context, t *testing.T, cfg *envconf.Config) context.Context {
-		client := cfg.Client()
-
-		var serverPods *corev1.PodList
-		err := client.Resources().List(ctx, serverPods, resources.WithLabelSelector("k8s-app=konnectivity-server"))
-		if err != nil {
-			t.Fatalf("couldn't get server pods: %v", err)
-		}
-
-		for _, serverPod := range serverPods.Items {
-
-			metricsFamilies, err := getMetrics(fmt.Sprintf("%v-%v:%v/metrics", serverPod.Name, serverServiceHost, adminPort))
-			if err != nil {
-				t.Fatalf("couldn't get server metrics for pod %v", serverPod.Name)
-			}
-			connectionsMetric, exists := metricsFamilies["konnectivity_network_proxy_server_ready_backend_connections"]
-			if !exists {
-				t.Fatalf("couldn't find number of ready backend connections in metrics")
-			}
-
-			numConnections := int(connectionsMetric.GetMetric()[0].GetGauge().GetValue())
-			if numConnections != replicas {
-				t.Errorf("incorrect number of connected agents (want: %v, got: %v)", replicas, numConnections)
-			}
-		}
-
-		return ctx
-	})
-	feature.Assess("all agents connected to all servers", func(ctx context.Context, t *testing.T, cfg *envconf.Config) context.Context {
-		client := cfg.Client()
-
-		var agentPods *corev1.PodList
-		err := client.Resources().List(ctx, agentPods, resources.WithLabelSelector("k8s-app=konnectivity-agent"))
-		if err != nil {
-			t.Fatalf("couldn't get agent pods: %v", err)
-		}
-
-		for _, agentPod := range agentPods.Items {
-
-			metricsFamilies, err := getMetrics(fmt.Sprintf("%v-%v:%v/metrics", agentPod.Name, agentServiceHost, adminPort))
-			if err != nil {
-				t.Fatalf("couldn't get agent metrics for pod %v", agentPod.Name)
-			}
-			connectionsMetric, exists := metricsFamilies["konnectivity_network_proxy_agent_open_server_connections"]
-			if !exists {
-				t.Fatalf("couldn't find number of ready server connections in metrics")
-			}
-
-			numConnections := int(connectionsMetric.GetMetric()[0].GetGauge().GetValue())
-			if numConnections != replicas {
-				t.Errorf("incorrect number of connected servers (want: %v, got: %v)", replicas, numConnections)
-			}
-		}
-
-		return ctx
-	})
+	feature.Assess("all servers connected to all clients", assertServersAreConnected(replicas, serverServiceHost, adminPort))
+	feature.Assess("all agents connected to all servers", assertAgentsAreConnected(replicas, agentServiceHost, adminPort))
 }

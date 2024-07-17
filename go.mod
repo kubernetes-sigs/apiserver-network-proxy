@@ -1,6 +1,7 @@
 module sigs.k8s.io/apiserver-network-proxy
 
 go 1.22.3
+toolchain go1.22.4
 
 require (
 	github.com/google/uuid v1.6.0
