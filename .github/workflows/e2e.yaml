@@ -48,6 +48,25 @@ jobs:
       with:
         name: konnectivity-agent
         path: _output/konnectivity-agent.tar
+  kind-e2e:
+    name: kind-e2e
+    runs-on: ubuntu-20.04
+    timeout-minutes: 100
+    steps:
+    - name: Check out code
+      uses: actions/checkout@v4
+    - name: Set up Go
+      uses: actions/setup-go@v5
+      with:
+        go-version-file: go.mod
+      id: go
+    - name: Install kind
+      run: |
+        curl -Lo ./kind https://kind.sigs.k8s.io/dl/v0.23.0/kind-linux-amd64
+        chmod +x ./kind
+        sudo mv./kind /usr/local/bin/kind
+    - name: Run e2e tests
+      run: make test-e2e
   e2e:
     name: e2e
     runs-on: ubuntu-20.04
