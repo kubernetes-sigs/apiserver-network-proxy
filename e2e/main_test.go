@@ -24,6 +24,7 @@ var (
 	testenv     env.Environment
 	agentImage  = flag.String("agent-image", "", "The proxy agent's docker image.")
 	serverImage = flag.String("server-image", "", "The proxy server's docker image.")
+	kindImage   = flag.String("kind-image", "kindest/node", "Image to use for kind nodes.")
 )
 
 func TestMain(m *testing.M) {
@@ -39,7 +40,7 @@ func TestMain(m *testing.M) {
 
 	testenv = env.New()
 	kindClusterName := "kind-test"
-	kindCluster := kind.NewCluster(kindClusterName)
+	kindCluster := kind.NewCluster(kindClusterName).WithOpts(kind.WithImage(*kindImage))
 
 	testenv.Setup(
 		envfuncs.CreateCluster(kindCluster, kindClusterName),

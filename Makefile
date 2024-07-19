@@ -54,6 +54,8 @@ TAG ?= $(shell git rev-parse HEAD)
 DOCKER_CMD ?= docker
 DOCKER_CLI_EXPERIMENTAL ?= enabled
 PROXY_SERVER_IP ?= 127.0.0.1
+
+KIND_IMAGE ?= kindest/node
 ## --------------------------------------
 ## Testing
 ## --------------------------------------
@@ -82,7 +84,7 @@ test-integration: build
 
 .PHONY: test-e2e
 test-e2e: docker-build
-	go test -mod=vendor ./e2e -race -agent-image ${AGENT_FULL_IMAGE}-$(TARGETARCH):${TAG} -server-image ${SERVER_FULL_IMAGE}-$(TARGETARCH):${TAG}
+	go test -mod=vendor ./e2e -race -agent-image ${AGENT_FULL_IMAGE}-$(TARGETARCH):${TAG} -server-image ${SERVER_FULL_IMAGE}-$(TARGETARCH):${TAG} -kind-image ${KIND_IMAGE}
 
 ## --------------------------------------
 ## Binaries

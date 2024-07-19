@@ -52,6 +52,15 @@ jobs:
     name: kind-e2e
     runs-on: ubuntu-20.04
     timeout-minutes: 100
+    needs:
+    - build
+    env:
+      REGISTRY: gcr.io/k8s-staging-kas-network-proxy
+      KIND_IMAGE: kindest/node${{ matrix.k8s }}
+    strategy:
+      fail-fast: false
+      matrix:
+        k8s: [ v1.27.11, v1.28.7, v1.29.2 ]
     steps:
     - name: Check out code
       uses: actions/checkout@v4
@@ -66,7 +75,7 @@ jobs:
         chmod +x ./kind
         sudo mv ./kind /usr/local/bin/kind
     - name: Run e2e tests
-      run: REGISTRY=github-workflow make test-e2e
+      run: make test-e2e
   e2e:
     name: e2e
     runs-on: ubuntu-20.04
