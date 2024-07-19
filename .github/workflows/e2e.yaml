@@ -62,6 +62,11 @@ jobs:
       matrix:
         k8s: [ v1.27.11, v1.28.7, v1.29.2 ]
     steps:
+    - name: Install kind
+      run: |
+        curl -Lo ./kind https://kind.sigs.k8s.io/dl/v0.23.0/kind-linux-amd64
+        chmod +x ./kind
+        sudo mv ./kind /usr/local/bin/kind
     - name: Check out code
       uses: actions/checkout@v4
     - name: Set up Go
@@ -69,17 +74,18 @@ jobs:
       with:
         go-version-file: go.mod
       id: go
-    - uses: actions/download-artifact@v4
+    - name: Download prebuilt konnectivity-server image
+      uses: actions/download-artifact@v4
       with:
         name: konnectivity-server
-    - uses: actions/download-artifact@v4
+    - name: Download prebuilt konnectivity-agent image
+      uses: actions/download-artifact@v4
       with:
         name: konnectivity-agent
-    - name: Install kind
+    - name: Load prebuilt konnectivity images
       run: |
-        curl -Lo ./kind https://kind.sigs.k8s.io/dl/v0.23.0/kind-linux-amd64
-        chmod +x ./kind
-        sudo mv ./kind /usr/local/bin/kind
+        docker load --input konnectivity-server.tar
+        docker load --input konnectivity-agent.tar
     - name: Run e2e tests
       run: make test-e2e
   e2e:
