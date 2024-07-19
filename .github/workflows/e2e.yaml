@@ -66,7 +66,7 @@ jobs:
         chmod +x ./kind
         sudo mv ./kind /usr/local/bin/kind
     - name: Run e2e tests
-      run: make test-e2e
+      run: REGISTRY=github-workflow make test-e2e
   e2e:
     name: e2e
     runs-on: ubuntu-20.04
