@@ -87,6 +87,10 @@ jobs:
       run: |
         docker load --input konnectivity-server.tar
         docker load --input konnectivity-agent.tar
+    - name: Fix konnectivity docker image tags
+      run: |
+        docker tag gcr.io/k8s-staging-kas-network-proxy/proxy-server:master gcr.io/k8s-staging-kas-network-proxy/proxy-server-amd64:master
+        docker tag gcr.io/k8s-staging-kas-network-proxy/proxy-agent:master gcr.io/k8s-staging-kas-network-proxy/proxy-agent-amd64:master
     - name: Run e2e tests
       run: make test-e2e
   e2e:
