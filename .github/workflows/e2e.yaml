@@ -57,6 +57,7 @@ jobs:
     env:
       REGISTRY: gcr.io/k8s-staging-kas-network-proxy
       KIND_IMAGE: kindest/node${{ matrix.k8s }}
+      TAG: master
     strategy:
       fail-fast: false
       matrix:
