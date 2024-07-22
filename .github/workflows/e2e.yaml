@@ -58,10 +58,12 @@ jobs:
       REGISTRY: gcr.io/k8s-staging-kas-network-proxy
       KIND_IMAGE: kindest/node${{ matrix.k8s }}
       TAG: master
+      CONNECTION_MODE: ${{ matrix.connection-mode }}
     strategy:
       fail-fast: false
       matrix:
         k8s: [ v1.27.11, v1.28.7, v1.29.2 ]
+        connection-mode: [ grpc, http-connect ]
     steps:
     - name: Install kind
       run: |

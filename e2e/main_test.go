@@ -21,10 +21,11 @@ import (
 )
 
 var (
-	testenv     env.Environment
-	agentImage  = flag.String("agent-image", "", "The proxy agent's docker image.")
-	serverImage = flag.String("server-image", "", "The proxy server's docker image.")
-	kindImage   = flag.String("kind-image", "kindest/node", "Image to use for kind nodes.")
+	testenv        env.Environment
+	agentImage     = flag.String("agent-image", "", "The proxy agent's docker image.")
+	serverImage    = flag.String("server-image", "", "The proxy server's docker image.")
+	kindImage      = flag.String("kind-image", "kindest/node", "Image to use for kind nodes.")
+	connectionMode = flag.String("mode", "grpc", "Connection mode to use during e2e tests.")
 )
 
 func TestMain(m *testing.M) {
