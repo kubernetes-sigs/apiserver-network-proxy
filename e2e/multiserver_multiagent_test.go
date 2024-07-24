@@ -19,7 +19,7 @@ func TestMultiServer_MultiAgent_StaticCount(t *testing.T) {
 	replicas := 3
 
 	serverStatefulSetCfg := StatefulSetConfig{
-		Replicas: 3,
+		Replicas: replicas,
 		Image:    *serverImage,
 		Args: []KeyValue{
 			{"log-file", "/var/log/konnectivity-server.log"},
@@ -39,7 +39,7 @@ func TestMultiServer_MultiAgent_StaticCount(t *testing.T) {
 			{"agent-service-account", "konnectivity-agent"},
 			{"kubeconfig", "/etc/kubernetes/admin.conf"},
 			{"authentication-audience", "system:konnectivity-server"},
-			{"server-count", "1"},
+			{"server-count", strconv.Itoa(replicas)},
 		},
 	}
 	serverStatefulSet, _, err := renderTemplate("server/statefulset.yaml", serverStatefulSetCfg)
@@ -48,7 +48,7 @@ func TestMultiServer_MultiAgent_StaticCount(t *testing.T) {
 	}
 
 	agentStatefulSetConfig := StatefulSetConfig{
-		Replicas: 3,
+		Replicas: replicas,
 		Image:    *agentImage,
 		Args: []KeyValue{
 			{"logtostderr", "true"},
@@ -60,7 +60,7 @@ func TestMultiServer_MultiAgent_StaticCount(t *testing.T) {
 			{Key: "sync-forever"},
 			{"probe-interval", "1s"},
 			{"service-account-token-path", "/var/run/secrets/tokens/konnectivity-agent-token"},
-			{"server-count", "3"},
+			{"server-count", strconv.Itoa(replicas)},
 		},
 	}
 	agentStatefulSet, _, err := renderTemplate("agent/statefulset.yaml", agentStatefulSetConfig)
