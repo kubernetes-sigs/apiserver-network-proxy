@@ -37,9 +37,9 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/klog/v2"
+
 	commonmetrics "sigs.k8s.io/apiserver-network-proxy/konnectivity-client/pkg/common/metrics"
 	"sigs.k8s.io/apiserver-network-proxy/konnectivity-client/proto/client"
-	"sigs.k8s.io/apiserver-network-proxy/pkg/servercounter"
 
 	"sigs.k8s.io/apiserver-network-proxy/pkg/server/metrics"
 	"sigs.k8s.io/apiserver-network-proxy/pkg/util"
@@ -208,8 +208,8 @@ type ProxyServer struct {
 
 	PendingDial *PendingDialManager
 
-	serverID      string                      // unique ID of this server
-	serverCounter servercounter.ServerCounter // provides number of proxy servers
+	serverID    string // unique ID of this server
+	serverCount int    // Number of proxy server instances, should be 1 unless it is a HA server.
 
 	// agent authentication
 	AgentAuthenticationOptions *AgentTokenAuthenticationOptions
@@ -375,7 +375,7 @@ func (s *ProxyServer) removeEstablishedForStream(streamUID string) []*ProxyClien
 }
 
 // NewProxyServer creates a new ProxyServer instance
-func NewProxyServer(serverID string, proxyStrategies []ProxyStrategy, serverCounter servercounter.ServerCounter, agentAuthenticationOptions *AgentTokenAuthenticationOptions, channelSize int) *ProxyServer {
+func NewProxyServer(serverID string, proxyStrategies []ProxyStrategy, serverCount int, agentAuthenticationOptions *AgentTokenAuthenticationOptions, channelSize int) *ProxyServer {
 	var bms []BackendManager
 	for _, ps := range proxyStrategies {
 		switch ps {
@@ -394,7 +394,7 @@ func NewProxyServer(serverID string, proxyStrategies []ProxyStrategy, serverCoun
 		established:                make(map[string](map[int64]*ProxyClientConnection)),
 		PendingDial:                NewPendingDialManager(),
 		serverID:                   serverID,
-		serverCounter:              serverCounter,
+		serverCount:                serverCount,
 		BackendManagers:            bms,
 		AgentAuthenticationOptions: agentAuthenticationOptions,
 		// use the first backend-manager as the Readiness Manager
@@ -441,7 +441,7 @@ func (s *ProxyServer) Proxy(stream client.ProxyService_ProxyServer) error {
 	}()
 
 	labels := runpprof.Labels(
-		"serverCount", strconv.Itoa(s.serverCounter.CountServers()),
+		"serverCount", strconv.Itoa(s.serverCount),
 		"userAgent", strings.Join(userAgent, ", "),
 	)
 	// Start goroutine to receive packets from frontend and push to recvCh
@@ -722,7 +722,7 @@ func (s *ProxyServer) Connect(stream agent.AgentService_ConnectServer) error {
 
 	klog.V(5).InfoS("Connect request from agent", "agentID", agentID, "serverID", s.serverID)
 	labels := runpprof.Labels(
-		"serverCount", strconv.Itoa(s.serverCounter.CountServers()),
+		"serverCount", strconv.Itoa(s.serverCount),
 		"agentID", agentID,
 	)
 	ctx := runpprof.WithLabels(context.Background(), labels)
@@ -735,7 +735,7 @@ func (s *ProxyServer) Connect(stream agent.AgentService_ConnectServer) error {
 		}
 	}
 
-	h := metadata.Pairs(header.ServerID, s.serverID, header.ServerCount, strconv.Itoa(s.serverCounter.CountServers()))
+	h := metadata.Pairs(header.ServerID, s.serverID, header.ServerCount, strconv.Itoa(s.serverCount))
 	if err := stream.SendHeader(h); err != nil {
 		klog.ErrorS(err, "Failed to send server count back to agent", "agentID", agentID)
 		return err
