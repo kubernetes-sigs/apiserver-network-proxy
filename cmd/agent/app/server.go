@@ -137,7 +137,7 @@ func (a *Agent) runProxyConnection(o *options.GrpcProxyAgentOptions, drainCh, st
 	}
 	cc := o.ClientSetConfig(dialOptions...)
 
-	if o.ServerCountLeaseSelector != "" {
+	if o.ServerLeaseSelector != "" {
 		var k8sClient *kubernetes.Clientset
 		config, err := clientcmd.BuildConfigFromFlags("", o.KubeconfigPath)
 		if err != nil {
@@ -148,7 +148,7 @@ func (a *Agent) runProxyConnection(o *options.GrpcProxyAgentOptions, drainCh, st
 			return nil, fmt.Errorf("failed to create kubernetes clientset: %v", err)
 		}
 		sharedInformerFactory := informers.NewSharedInformerFactory(k8sClient, o.InformerResync)
-		serverLeaseSelector, err := labels.Parse(o.ServerCountLeaseSelector)
+		serverLeaseSelector, err := labels.Parse(o.ServerLeaseSelector)
 		if err != nil {
 			return nil, fmt.Errorf("invalid server count lease selector: %w", err)
 		}
