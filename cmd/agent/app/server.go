@@ -38,12 +38,11 @@ import (
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials"
 	"google.golang.org/grpc/keepalive"
+	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/client-go/informers"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/tools/clientcmd"
 	"k8s.io/klog/v2"
-	"sigs.k8s.io/apiserver-network-proxy/pkg/servercounter"
-
 	"sigs.k8s.io/apiserver-network-proxy/cmd/agent/app/options"
 	"sigs.k8s.io/apiserver-network-proxy/pkg/agent"
 	"sigs.k8s.io/apiserver-network-proxy/pkg/util"
@@ -138,7 +137,6 @@ func (a *Agent) runProxyConnection(o *options.GrpcProxyAgentOptions, drainCh, st
 	}
 	cc := o.ClientSetConfig(dialOptions...)
 
-	var serverCounter servercounter.ServerCounter
 	if o.ServerCountLeaseSelector != "" {
 		var k8sClient *kubernetes.Clientset
 		config, err := clientcmd.BuildConfigFromFlags("", o.KubeconfigPath)
@@ -150,21 +148,22 @@ func (a *Agent) runProxyConnection(o *options.GrpcProxyAgentOptions, drainCh, st
 			return nil, fmt.Errorf("failed to create kubernetes clientset: %v", err)
 		}
 		sharedInformerFactory := informers.NewSharedInformerFactory(k8sClient, o.InformerResync)
-		serverLeaseCounter, err := servercounter.NewServerLeaseCounter(
+		serverLeaseSelector, err := labels.Parse(o.ServerCountLeaseSelector)
+		if err != nil {
+			return nil, fmt.Errorf("invalid server count lease selector: %w", err)
+		}
+		serverLeaseCounter := agent.NewServerLeaseCounter(
 			sharedInformerFactory.Coordination().V1().Leases().Lister(),
-			o.ServerCountLeaseSelector,
-			int(o.ServerCount),
+			serverLeaseSelector,
 		)
 		if err != nil {
 			return nil, fmt.Errorf("failed to create server lease counter: %w", err)
 		}
-		serverCounter = serverLeaseCounter
+		cc.ServerLeaseCounter = serverLeaseCounter
 		sharedInformerFactory.Start(context.Background().Done())
-	} else {
-		serverCounter = servercounter.StaticServerCounter(o.ServerCount)
 	}
 
-	cs := cc.NewAgentClientSet(drainCh, stopCh, serverCounter)
+	cs := cc.NewAgentClientSet(drainCh, stopCh)
 	cs.Serve()
 
 	return cs, nil

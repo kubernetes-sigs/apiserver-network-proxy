@@ -1,7 +1,6 @@
-package servercounter
+package agent
 
 import (
-	"fmt"
 	"time"
 
 	"k8s.io/apimachinery/pkg/labels"
@@ -22,26 +21,22 @@ type ServerLeaseCounter struct {
 }
 
 // NewServerLeaseCounter creates a server counter that counts valid leases that match the label
-// selector and provides the fallback count if this fails.
-func NewServerLeaseCounter(lister coordinationv1listers.LeaseLister, labelSelector string, fallbackCount int) (*ServerLeaseCounter, error) {
-	selector, err := labels.Parse(labelSelector)
-	if err != nil {
-		return nil, fmt.Errorf("could not parse label selector %v: %w", labelSelector, err)
-	}
+// selector and provides the fallback count (initially 0) if this fails.
+func NewServerLeaseCounter(lister coordinationv1listers.LeaseLister, labelSelector labels.Selector) *ServerLeaseCounter {
 	return &ServerLeaseCounter{
 		lister:        lister,
-		selector:      selector,
-		fallbackCount: fallbackCount,
-	}, nil
+		selector:      labelSelector,
+		fallbackCount: 0,
+	}
 }
 
-// CountServers counts the number of leases in the apiserver matching the provided
+// Count counts the number of leases in the apiserver matching the provided
 // label selector.
 //
 // In the event that no valid leases are found or lease listing fails, the
 // fallback count is returned. This fallback count is updated upon successful
 // discovery of valid leases.
-func (lc *ServerLeaseCounter) CountServers() int {
+func (lc *ServerLeaseCounter) Count() int {
 	// Since the number of proxy servers is generally small (1-10), we opted against
 	// using a LIST and WATCH pattern and instead list all leases in the informer.
 	// The informer still uses LIST and WATCH under the hood, so this doesn't result

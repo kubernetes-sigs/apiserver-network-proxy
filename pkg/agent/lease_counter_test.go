@@ -1,4 +1,4 @@
-package servercounter
+package agent
 
 import (
 	"fmt"
@@ -160,18 +160,16 @@ func TestServerLeaseCounter(t *testing.T) {
 		leaseListerError error
 
 		labelSelector string
-		fallbackCount int
 
 		want int
 	}{
 		{
-			name:          "returns fallback count when no leases exist",
+			name:          "returns fallback count (0) when no leases exist",
 			templates:     []leaseTemplate{},
 			labelSelector: "label=value",
-			fallbackCount: 999,
-			want:          999,
+			want:          0,
 		}, {
-			name: "returns fallback count when no leases matching selector exist",
+			name: "returns fallback count (0) when no leases matching selector exist",
 			templates: []leaseTemplate{
 				{
 					durationSecs:     1000,
@@ -185,10 +183,9 @@ func TestServerLeaseCounter(t *testing.T) {
 				},
 			},
 			labelSelector: "label=value",
-			fallbackCount: 999,
-			want:          999,
+			want:          0,
 		}, {
-			name: "returns fallback count when no leases matching selector are still valid",
+			name: "returns fallback count (0) when no leases matching selector are still valid",
 			templates: []leaseTemplate{
 				{
 					durationSecs:     1000,
@@ -202,15 +199,13 @@ func TestServerLeaseCounter(t *testing.T) {
 				},
 			},
 			labelSelector: "label=value",
-			fallbackCount: 999,
-			want:          999,
+			want:          0,
 		}, {
-			name:             "returns fallbackCount when LeaseLister returns an error",
+			name:             "returns fallback count (0) when LeaseLister returns an error",
 			templates:        []leaseTemplate{},
 			labelSelector:    "label=value",
-			fallbackCount:    999,
 			leaseListerError: fmt.Errorf("test error"),
-			want:             999,
+			want:             0,
 		}, {
 			name: "counts only valid leases matching label selector",
 			templates: []leaseTemplate{
@@ -231,7 +226,6 @@ func TestServerLeaseCounter(t *testing.T) {
 				},
 			},
 			labelSelector: "label=value",
-			fallbackCount: 999,
 			want:          2,
 		},
 	}
@@ -250,12 +244,10 @@ func TestServerLeaseCounter(t *testing.T) {
 			}
 			ct.Advance(time.Millisecond)
 
-			counter, err := NewServerLeaseCounter(lister, tc.labelSelector, tc.fallbackCount)
-			if err != nil {
-				t.Fatalf("server counter creation failed: %v", err)
-			}
+			selector, _ := labels.Parse(tc.labelSelector)
+			counter := NewServerLeaseCounter(lister, selector)
 
-			got := counter.CountServers()
+			got := counter.Count()
 			if tc.want != got {
 				t.Errorf("incorrect server count (got: %v, want: %v)", got, tc.want)
 			}
@@ -286,22 +278,19 @@ func TestServerLeaseCounter_FallbackCount(t *testing.T) {
 		err:    fmt.Errorf("dummy lister error"),
 	}
 
-	initialFallback := 999
-	counter, err := NewServerLeaseCounter(lister, "label=value", initialFallback)
-	if err != nil {
-		t.Fatalf("server counter creation failed: %v", err)
-	}
+	selector, _ := labels.Parse("label=value")
+	counter := NewServerLeaseCounter(lister, selector)
 
-	// First call should return fallback count of 999 because of lister error.
-	got := counter.CountServers()
-	if got != initialFallback {
-		t.Errorf("lease counter did not return fallback count on lister error (got: %v, want: %v)", got, initialFallback)
+	// First call should return fallback count of 0 because of lister error.
+	got := counter.Count()
+	if got != 0 {
+		t.Errorf("lease counter did not return fallback count on lister error (got: %v, want: 0", got)
 	}
 
 	// Second call should return the actual count (3) upon lister success.
 	actualCount := 3
 	lister.err = nil
-	got = counter.CountServers()
+	got = counter.Count()
 	if got != actualCount {
 		t.Errorf("lease counter did not return actual count on lister success (got: %v, want: %v)", got, actualCount)
 	}
@@ -309,7 +298,7 @@ func TestServerLeaseCounter_FallbackCount(t *testing.T) {
 	// Third call should return updated fallback count (3) upon lister failure.
 	lister.err = fmt.Errorf("dummy lister error")
 	lister.leases = append(lister.leases, newLeaseFromTemplate(validLease)) // Change actual count just in case.
-	got = counter.CountServers()
+	got = counter.Count()
 	if got != actualCount {
 		t.Errorf("lease counter did not update fallback count after lister success, returned incorrect count on subsequent lister error (got: %v, want: %v)", got, actualCount)
 	}

@@ -53,6 +53,7 @@ type AgentMetrics struct {
 	serverFailures      *prometheus.CounterVec
 	dialFailures        *prometheus.CounterVec
 	serverConnections   *prometheus.GaugeVec
+	serverCount         *prometheus.GaugeVec
 	endpointConnections *prometheus.GaugeVec
 	streamPackets       *prometheus.CounterVec
 	streamErrors        *prometheus.CounterVec
@@ -97,6 +98,15 @@ func newAgentMetrics() *AgentMetrics {
 		},
 		[]string{},
 	)
+	serverCount := prometheus.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Namespace: Namespace,
+			Subsystem: Subsystem,
+			Name:      "known_server_count",
+			Help:      "Current number of servers agent is trying to connect to.",
+		},
+		[]string{},
+	)
 	endpointConnections := prometheus.NewGaugeVec(
 		prometheus.GaugeOpts{
 			Namespace: Namespace,
@@ -115,6 +125,7 @@ func newAgentMetrics() *AgentMetrics {
 	prometheus.MustRegister(endpointConnections)
 	prometheus.MustRegister(streamPackets)
 	prometheus.MustRegister(streamErrors)
+	prometheus.MustRegister(serverCount)
 	return &AgentMetrics{
 		dialLatencies:       dialLatencies,
 		serverFailures:      serverFailures,
@@ -123,6 +134,7 @@ func newAgentMetrics() *AgentMetrics {
 		endpointConnections: endpointConnections,
 		streamPackets:       streamPackets,
 		streamErrors:        streamErrors,
+		serverCount:         serverCount,
 	}
 
 }
@@ -163,6 +175,10 @@ func (a *AgentMetrics) ObserveDialFailure(reason DialFailureReason) {
 
 func (a *AgentMetrics) SetServerConnectionsCount(count int) {
 	a.serverConnections.WithLabelValues().Set(float64(count))
+}
+
+func (a *AgentMetrics) SetServerCount(count int) {
+	a.serverCount.WithLabelValues().Set(float64(count))
 }
 
 // EndpointConnectionInc increments a new endpoint connection.
