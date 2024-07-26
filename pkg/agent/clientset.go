@@ -67,8 +67,6 @@ type ClientSet struct {
 	xfrChannelSize     int
 
 	syncForever bool // Continue syncing (support dynamic server count).
-
-	respectReceivedServerCount bool // Respect server count received from proxy server rather than relying on the agent's own server counter
 }
 
 func (cs *ClientSet) ClientsCount() int {
