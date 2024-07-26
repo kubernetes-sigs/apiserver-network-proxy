@@ -83,3 +83,28 @@ func assertServersAreConnected(expectedConnections int, serviceHost string, admi
 		return ctx
 	}
 }
+
+func assertAgentKnownServerCount(expectedServerCount int, serviceHost string, adminPort int) func(context.Context, *testing.T, *envconf.Config) context.Context {
+	return func(ctx context.Context, t *testing.T, cfg *envconf.Config) context.Context {
+		client := cfg.Client()
+
+		var agentPods *corev1.PodList
+		err := client.Resources().List(ctx, agentPods, resources.WithLabelSelector("k8s-app=konnectivity-agent"))
+		if err != nil {
+			t.Fatalf("couldn't get server pods: %v", err)
+		}
+
+		for _, agentPod := range agentPods.Items {
+			knownServerCount, err := getMetricsGaugeValue(fmt.Sprintf("%v-%v:%v/metrics", agentPod.Name, serviceHost, adminPort), "konnectivity_network_proxy_agent_known_server_count")
+			if err != nil {
+				t.Fatalf("couldn't get agent metric 'konnectivity_network_proxy_agent_known_server_count' for pod %v", agentPod.Name)
+			}
+
+			if knownServerCount != expectedServerCount {
+				t.Errorf("incorrect known server count (want: %v, got: %v)", knownServerCount, expectedServerCount)
+			}
+		}
+
+		return ctx
+	}
+}

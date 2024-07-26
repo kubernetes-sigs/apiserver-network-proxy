@@ -10,10 +10,13 @@ import (
 	"path"
 	"testing"
 	"text/template"
+	"time"
 
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/client-go/kubernetes/scheme"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/e2e-framework/klient/wait"
+	"sigs.k8s.io/e2e-framework/klient/wait/conditions"
 	"sigs.k8s.io/e2e-framework/pkg/env"
 	"sigs.k8s.io/e2e-framework/pkg/envconf"
 	"sigs.k8s.io/e2e-framework/pkg/envfuncs"
@@ -151,4 +154,25 @@ func renderAndApplyManifests(ctx context.Context, cfg *envconf.Config) (context.
 	}
 
 	return ctx, nil
+}
+
+func deployAndWaitForStatefulSet(statefulSet client.Object) func(context.Context, *testing.T, *envconf.Config) context.Context {
+	return func(ctx context.Context, t *testing.T, cfg *envconf.Config) context.Context {
+		client := cfg.Client()
+		err := client.Resources().Create(ctx, statefulSet)
+		if err != nil {
+			t.Fatalf("could not create StatefulSet: %v", err)
+		}
+
+		err = wait.For(
+			conditions.New(client.Resources()).DeploymentAvailable(statefulSet.GetName(), statefulSet.GetNamespace()),
+			wait.WithTimeout(1*time.Minute),
+			wait.WithInterval(10*time.Second),
+		)
+		if err != nil {
+			t.Fatalf("waiting for StatefulSet deployment failed: %v", err)
+		}
+
+		return ctx
+	}
 }
