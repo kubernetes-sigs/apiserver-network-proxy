@@ -152,9 +152,6 @@ type ClientSetConfig struct {
 }
 
 func (cc *ClientSetConfig) NewAgentClientSet(drainCh, stopCh <-chan struct{}) *ClientSet {
-	if cc.SyncForever && cc.ServerLeaseCounter != nil {
-		klog.Warning("sync forever was enabled even though a server lease counter was provided; this may result in unnecessary connection requests")
-	}
 	return &ClientSet{
 		clients:                 make(map[string]*Client),
 		agentID:                 cc.AgentID,
