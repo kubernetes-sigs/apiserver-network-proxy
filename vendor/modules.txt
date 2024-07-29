@@ -625,7 +625,7 @@ k8s.io/utils/internal/third_party/forked/golang/net
 k8s.io/utils/net
 k8s.io/utils/ptr
 k8s.io/utils/strings/slices
-# sigs.k8s.io/apiserver-network-proxy/konnectivity-client v0.29.0 => ./konnectivity-client
+# sigs.k8s.io/apiserver-network-proxy/konnectivity-client v0.0.0 => ./konnectivity-client
 ## explicit; go 1.21
 sigs.k8s.io/apiserver-network-proxy/konnectivity-client/pkg/client
 sigs.k8s.io/apiserver-network-proxy/konnectivity-client/pkg/client/metrics

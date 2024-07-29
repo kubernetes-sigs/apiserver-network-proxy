@@ -1,7 +1,6 @@
 module sigs.k8s.io/apiserver-network-proxy
 
 go 1.22.5
-toolchain go1.22.4
 
 require (
 	github.com/google/uuid v1.6.0
@@ -21,7 +20,7 @@ require (
 	k8s.io/client-go v0.30.2
 	k8s.io/component-base v0.30.2
 	k8s.io/klog/v2 v2.130.0
-	sigs.k8s.io/apiserver-network-proxy/konnectivity-client v0.29.0
+	sigs.k8s.io/apiserver-network-proxy/konnectivity-client v0.0.0
 	sigs.k8s.io/controller-runtime v0.18.2
 	sigs.k8s.io/e2e-framework v0.4.0
 )
