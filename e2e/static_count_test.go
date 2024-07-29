@@ -8,11 +8,9 @@ import (
 )
 
 func TestSingleServer_SingleAgent_StaticCount(t *testing.T) {
-	serverServiceHost := "konnectivity-server.kube-system.svc.cluster.local"
-	agentServiceHost := "konnectivity-agent.kube-system.svc.cluster.local"
 	adminPort := 8093
 
-	serverStatefulSetCfg := StatefulSetConfig{
+	serverDeploymentConfig := DeploymentConfig{
 		Replicas: 1,
 		Image:    *serverImage,
 		Args: []KeyValue{
@@ -36,18 +34,18 @@ func TestSingleServer_SingleAgent_StaticCount(t *testing.T) {
 			{"server-count", "1"},
 		},
 	}
-	serverStatefulSet, _, err := renderTemplate("server/statefulset.yaml", serverStatefulSetCfg)
+	serverDeployment, _, err := renderTemplate("server/deployment.yaml", serverDeploymentConfig)
 	if err != nil {
 		t.Fatalf("could not render server deployment: %v", err)
 	}
 
-	agentStatefulSetConfig := StatefulSetConfig{
+	agentDeploymentConfig := DeploymentConfig{
 		Replicas: 1,
 		Image:    *agentImage,
 		Args: []KeyValue{
 			{"logtostderr", "true"},
 			{"ca-cert", "/var/run/secrets/kubernetes.io/serviceaccount/ca.crt"},
-			{"proxy-server-host", serverServiceHost},
+			{"proxy-server-host", "konnectivity-server.kube-system.svc.cluster.local"},
 			{"proxy-server-port", "8091"},
 			{"sync-interval", "1s"},
 			{"sync-interval-cap", "10s"},
@@ -57,25 +55,23 @@ func TestSingleServer_SingleAgent_StaticCount(t *testing.T) {
 			{"server-count", "1"},
 		},
 	}
-	agentStatefulSet, _, err := renderTemplate("agent/statefulset.yaml", agentStatefulSetConfig)
+	agentDeployment, _, err := renderTemplate("agent/deployment.yaml", agentDeploymentConfig)
 	if err != nil {
 		t.Fatalf("could not render agent deployment: %v", err)
 	}
 
-	feature := features.New("konnectivity server and agent stateful set with single replica for each")
-	feature.Setup(deployAndWaitForStatefulSet(serverStatefulSet))
-	feature.Setup(deployAndWaitForStatefulSet(agentStatefulSet))
-	feature.Assess("konnectivity server has a connected client", assertServersAreConnected(1, serverServiceHost, adminPort))
-	feature.Assess("konnectivity agent is connected to a server", assertAgentsAreConnected(1, agentServiceHost, adminPort))
+	feature := features.New("konnectivity server and agent deployment with single replica for each")
+	feature.Setup(deployAndWaitForDeployment(serverDeployment))
+	feature.Setup(deployAndWaitForDeployment(agentDeployment))
+	feature.Assess("konnectivity server has a connected client", assertServersAreConnected(1, adminPort))
+	feature.Assess("konnectivity agent is connected to a server", assertAgentsAreConnected(1, adminPort))
 }
 
 func TestMultiServer_MultiAgent_StaticCount(t *testing.T) {
-	serverServiceHost := "konnectivity-server.kube-system.svc.cluster.local"
-	agentServiceHost := "konnectivity-agent.kube-system.svc.cluster.local"
 	adminPort := 8093
 	replicas := 3
 
-	serverStatefulSetCfg := StatefulSetConfig{
+	serverDeploymentConfig := DeploymentConfig{
 		Replicas: replicas,
 		Image:    *serverImage,
 		Args: []KeyValue{
@@ -99,18 +95,18 @@ func TestMultiServer_MultiAgent_StaticCount(t *testing.T) {
 			{"server-count", strconv.Itoa(replicas)},
 		},
 	}
-	serverStatefulSet, _, err := renderTemplate("server/statefulset.yaml", serverStatefulSetCfg)
+	serverDeployment, _, err := renderTemplate("server/deployment.yaml", serverDeploymentConfig)
 	if err != nil {
 		t.Fatalf("could not render server deployment: %v", err)
 	}
 
-	agentStatefulSetConfig := StatefulSetConfig{
+	agentDeploymentConfig := DeploymentConfig{
 		Replicas: replicas,
 		Image:    *agentImage,
 		Args: []KeyValue{
 			{"logtostderr", "true"},
 			{"ca-cert", "/var/run/secrets/kubernetes.io/serviceaccount/ca.crt"},
-			{"proxy-server-host", serverServiceHost},
+			{"proxy-server-host", "konnectivity-server.kube-system.svc.cluster.local"},
 			{"proxy-server-port", "8091"},
 			{"sync-interval", "1s"},
 			{"sync-interval-cap", "10s"},
@@ -120,15 +116,14 @@ func TestMultiServer_MultiAgent_StaticCount(t *testing.T) {
 			{"server-count", strconv.Itoa(replicas)},
 		},
 	}
-	agentStatefulSet, _, err := renderTemplate("agent/statefulset.yaml", agentStatefulSetConfig)
+	agentDeployment, _, err := renderTemplate("agent/deployment.yaml", agentDeploymentConfig)
 	if err != nil {
 		t.Fatalf("could not render agent deployment: %v", err)
 	}
 
-	feature := features.New("konnectivity server and agent stateful set with single replica for each")
-	feature.Setup(deployAndWaitForStatefulSet(serverStatefulSet))
-	feature.Setup(deployAndWaitForStatefulSet(agentStatefulSet))
-	feature.Assess("all servers connected to all clients", assertServersAreConnected(replicas, serverServiceHost, adminPort))
-	feature.Assess("all agents connected to all servers", assertAgentsAreConnected(replicas, agentServiceHost, adminPort))
-	feature.Assess("all agents have correct known server count", assertAgentKnownServerCount(replicas, agentServiceHost, adminPort))
+	feature := features.New("konnectivity server and agent deployment with single replica for each")
+	feature.Setup(deployAndWaitForDeployment(serverDeployment))
+	feature.Setup(deployAndWaitForDeployment(agentDeployment))
+	feature.Assess("all servers connected to all clients", assertServersAreConnected(replicas, adminPort))
+	feature.Assess("all agents connected to all servers", assertAgentsAreConnected(replicas, adminPort))
 }

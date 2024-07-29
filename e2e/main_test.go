@@ -88,7 +88,7 @@ type KeyValue struct {
 	Value string
 }
 
-type StatefulSetConfig struct {
+type DeploymentConfig struct {
 	Replicas int
 	Image    string
 	Args     []KeyValue
@@ -156,21 +156,21 @@ func renderAndApplyManifests(ctx context.Context, cfg *envconf.Config) (context.
 	return ctx, nil
 }
 
-func deployAndWaitForStatefulSet(statefulSet client.Object) func(context.Context, *testing.T, *envconf.Config) context.Context {
+func deployAndWaitForDeployment(deployment client.Object) func(context.Context, *testing.T, *envconf.Config) context.Context {
 	return func(ctx context.Context, t *testing.T, cfg *envconf.Config) context.Context {
 		client := cfg.Client()
-		err := client.Resources().Create(ctx, statefulSet)
+		err := client.Resources().Create(ctx, deployment)
 		if err != nil {
-			t.Fatalf("could not create StatefulSet: %v", err)
+			t.Fatalf("could not create Deployment: %v", err)
 		}
 
 		err = wait.For(
-			conditions.New(client.Resources()).DeploymentAvailable(statefulSet.GetName(), statefulSet.GetNamespace()),
+			conditions.New(client.Resources()).DeploymentAvailable(deployment.GetName(), deployment.GetNamespace()),
 			wait.WithTimeout(1*time.Minute),
 			wait.WithInterval(10*time.Second),
 		)
 		if err != nil {
-			t.Fatalf("waiting for StatefulSet deployment failed: %v", err)
+			t.Fatalf("waiting for Deployment failed: %v", err)
 		}
 
 		return ctx

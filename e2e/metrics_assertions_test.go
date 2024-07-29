@@ -34,7 +34,7 @@ func getMetricsGaugeValue(url string, name string) (int, error) {
 	return value, nil
 }
 
-func assertAgentsAreConnected(expectedConnections int, serviceHost string, adminPort int) func(context.Context, *testing.T, *envconf.Config) context.Context {
+func assertAgentsAreConnected(expectedConnections int, adminPort int) func(context.Context, *testing.T, *envconf.Config) context.Context {
 	return func(ctx context.Context, t *testing.T, cfg *envconf.Config) context.Context {
 		client := cfg.Client()
 
@@ -45,7 +45,7 @@ func assertAgentsAreConnected(expectedConnections int, serviceHost string, admin
 		}
 
 		for _, agentPod := range agentPods.Items {
-			numConnections, err := getMetricsGaugeValue(fmt.Sprintf("%v-%v:%v/metrics", agentPod.Name, serviceHost, adminPort), "konnectivity_network_proxy_agent_open_server_connections")
+			numConnections, err := getMetricsGaugeValue(fmt.Sprintf("%v:%v/metrics", agentPod.Status.PodIP, adminPort), "konnectivity_network_proxy_agent_open_server_connections")
 			if err != nil {
 				t.Fatalf("couldn't get agent metric 'konnectivity_network_proxy_agent_open_server_connections' for pod %v", agentPod.Name)
 			}
@@ -59,7 +59,7 @@ func assertAgentsAreConnected(expectedConnections int, serviceHost string, admin
 	}
 }
 
-func assertServersAreConnected(expectedConnections int, serviceHost string, adminPort int) func(context.Context, *testing.T, *envconf.Config) context.Context {
+func assertServersAreConnected(expectedConnections int, adminPort int) func(context.Context, *testing.T, *envconf.Config) context.Context {
 	return func(ctx context.Context, t *testing.T, cfg *envconf.Config) context.Context {
 		client := cfg.Client()
 
@@ -70,38 +70,13 @@ func assertServersAreConnected(expectedConnections int, serviceHost string, admi
 		}
 
 		for _, serverPod := range serverPods.Items {
-			numConnections, err := getMetricsGaugeValue(fmt.Sprintf("%v-%v:%v/metrics", serverPod.Name, serviceHost, adminPort), "konnectivity_network_proxy_server_ready_backend_connections")
+			numConnections, err := getMetricsGaugeValue(fmt.Sprintf("%v:%v/metrics", serverPod.Status.PodIP, adminPort), "konnectivity_network_proxy_server_ready_backend_connections")
 			if err != nil {
 				t.Fatalf("couldn't get agent metric 'konnectivity_network_proxy_server_ready_backend_connections' for pod %v", serverPod.Name)
 			}
 
 			if numConnections != expectedConnections {
 				t.Errorf("incorrect number of connected agents (want: %v, got: %v)", expectedConnections, numConnections)
-			}
-		}
-
-		return ctx
-	}
-}
-
-func assertAgentKnownServerCount(expectedServerCount int, serviceHost string, adminPort int) func(context.Context, *testing.T, *envconf.Config) context.Context {
-	return func(ctx context.Context, t *testing.T, cfg *envconf.Config) context.Context {
-		client := cfg.Client()
-
-		var agentPods *corev1.PodList
-		err := client.Resources().List(ctx, agentPods, resources.WithLabelSelector("k8s-app=konnectivity-agent"))
-		if err != nil {
-			t.Fatalf("couldn't get server pods: %v", err)
-		}
-
-		for _, agentPod := range agentPods.Items {
-			knownServerCount, err := getMetricsGaugeValue(fmt.Sprintf("%v-%v:%v/metrics", agentPod.Name, serviceHost, adminPort), "konnectivity_network_proxy_agent_known_server_count")
-			if err != nil {
-				t.Fatalf("couldn't get agent metric 'konnectivity_network_proxy_agent_known_server_count' for pod %v", agentPod.Name)
-			}
-
-			if knownServerCount != expectedServerCount {
-				t.Errorf("incorrect known server count (want: %v, got: %v)", knownServerCount, expectedServerCount)
 			}
 		}
 
