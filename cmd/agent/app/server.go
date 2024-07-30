@@ -39,7 +39,6 @@ import (
 	"google.golang.org/grpc/credentials"
 	"google.golang.org/grpc/keepalive"
 	"k8s.io/apimachinery/pkg/labels"
-	"k8s.io/client-go/informers"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/tools/clientcmd"
 	"k8s.io/klog/v2"
@@ -147,20 +146,18 @@ func (a *Agent) runProxyConnection(o *options.GrpcProxyAgentOptions, drainCh, st
 		if err != nil {
 			return nil, fmt.Errorf("failed to create kubernetes clientset: %v", err)
 		}
-		sharedInformerFactory := informers.NewSharedInformerFactory(k8sClient, o.InformerResync)
 		serverLeaseSelector, err := labels.Parse(o.ServerLeaseSelector)
 		if err != nil {
 			return nil, fmt.Errorf("invalid server count lease selector: %w", err)
 		}
 		serverLeaseCounter := agent.NewServerLeaseCounter(
-			sharedInformerFactory,
+			k8sClient,
 			serverLeaseSelector,
 		)
 		if err != nil {
 			return nil, fmt.Errorf("failed to create server lease counter: %w", err)
 		}
 		cc.ServerLeaseCounter = serverLeaseCounter
-		sharedInformerFactory.Start(context.Background().Done())
 	}
 
 	cs := cc.NewAgentClientSet(drainCh, stopCh)
