@@ -53,17 +53,14 @@ func (lc *ServerLeaseCounter) Count() int {
 		if isLeaseValid(lease) {
 			count++
 		} else {
-			klog.InfoS("excluding expired lease from server count", "selector", lc.selector, "lease", lease)
 		}
 	}
 
 	if count == 0 {
-		klog.Infof("no valid leases found, using fallback count (%v)", lc.fallbackCount)
 		return lc.fallbackCount
 	}
 
 	if count != lc.fallbackCount {
-		klog.Infof("found %v valid leases, updating fallback count", count)
 		lc.fallbackCount = count
 	}
 
