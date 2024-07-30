@@ -1,13 +1,16 @@
 package agent
 
 import (
+	"context"
 	"time"
 
 	"k8s.io/apimachinery/pkg/labels"
+	"k8s.io/client-go/kubernetes"
 	"k8s.io/klog/v2"
 
 	coordinationv1api "k8s.io/api/coordination/v1"
-	coordinationv1listers "k8s.io/client-go/listers/coordination/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	coordinationv1 "k8s.io/client-go/kubernetes/typed/coordination/v1"
 )
 
 var timeNow = time.Now
@@ -15,16 +18,16 @@ var timeNow = time.Now
 // A ServerLeaseCounter counts leases in the k8s apiserver to determine the
 // current proxy server count.
 type ServerLeaseCounter struct {
-	lister        coordinationv1listers.LeaseLister
+	leaseClient   coordinationv1.LeaseInterface
 	selector      labels.Selector
 	fallbackCount int
 }
 
 // NewServerLeaseCounter creates a server counter that counts valid leases that match the label
 // selector and provides the fallback count (initially 0) if this fails.
-func NewServerLeaseCounter(lister coordinationv1listers.LeaseLister, labelSelector labels.Selector) *ServerLeaseCounter {
+func NewServerLeaseCounter(k8sClient kubernetes.Interface, labelSelector labels.Selector) *ServerLeaseCounter {
 	return &ServerLeaseCounter{
-		lister:        lister,
+		leaseClient:   k8sClient.CoordinationV1().Leases(""),
 		selector:      labelSelector,
 		fallbackCount: 0,
 	}
@@ -36,20 +39,17 @@ func NewServerLeaseCounter(lister coordinationv1listers.LeaseLister, labelSelect
 // In the event that no valid leases are found or lease listing fails, the
 // fallback count is returned. This fallback count is updated upon successful
 // discovery of valid leases.
-func (lc *ServerLeaseCounter) Count() int {
+func (lc *ServerLeaseCounter) Count(ctx context.Context) int {
 	// Since the number of proxy servers is generally small (1-10), we opted against
-	// using a LIST and WATCH pattern and instead list all leases in the informer.
-	// The informer still uses LIST and WATCH under the hood, so this doesn't result
-	// in additional calls in the apiserver, and checking whether a lease is valid
-	// is cheap.
-	leases, err := lc.lister.List(lc.selector)
+	// using a LIST and WATCH pattern and instead list all leases on each call.
+	leases, err := lc.leaseClient.List(ctx, metav1.ListOptions{LabelSelector: lc.selector.String()})
 	if err != nil {
 		klog.Errorf("could not list leases to update server count, using fallback count (%v): %v", lc.fallbackCount, err)
 		return lc.fallbackCount
 	}
 
 	count := 0
-	for _, lease := range leases {
+	for _, lease := range leases.Items {
 		if isLeaseValid(lease) {
 			count++
 		} else {
@@ -67,7 +67,7 @@ func (lc *ServerLeaseCounter) Count() int {
 	return count
 }
 
-func isLeaseValid(lease *coordinationv1api.Lease) bool {
+func isLeaseValid(lease coordinationv1api.Lease) bool {
 	var lastRenewTime time.Time
 	if lease.Spec.RenewTime != nil {
 		lastRenewTime = lease.Spec.RenewTime.Time

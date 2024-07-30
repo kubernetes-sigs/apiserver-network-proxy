@@ -153,7 +153,7 @@ func (a *Agent) runProxyConnection(o *options.GrpcProxyAgentOptions, drainCh, st
 			return nil, fmt.Errorf("invalid server count lease selector: %w", err)
 		}
 		serverLeaseCounter := agent.NewServerLeaseCounter(
-			sharedInformerFactory.Coordination().V1().Leases().Lister(),
+			sharedInformerFactory,
 			serverLeaseSelector,
 		)
 		if err != nil {

@@ -1,13 +1,19 @@
 package agent
 
 import (
+	"context"
 	"fmt"
 	"testing"
 	"time"
 
+	"github.com/google/uuid"
+	"k8s.io/apimachinery/pkg/labels"
+	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/client-go/kubernetes/fake"
+	k8stesting "k8s.io/client-go/testing"
+
 	coordinationv1 "k8s.io/api/coordination/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/labels"
 	coordinationv1listers "k8s.io/client-go/listers/coordination/v1"
 )
 
@@ -34,6 +40,7 @@ func newLeaseFromTemplate(template leaseTemplate) *coordinationv1.Lease {
 	lease := &coordinationv1.Lease{
 		TypeMeta: metav1.TypeMeta{},
 		ObjectMeta: metav1.ObjectMeta{
+			Name:   uuid.New().String(),
 			Labels: template.labels,
 		},
 		Spec: coordinationv1.LeaseSpec{},
@@ -103,7 +110,7 @@ func TestIsLeaseValid(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			lease := newLeaseFromTemplate(tc.template)
 
-			got := isLeaseValid(lease)
+			got := isLeaseValid(*lease)
 			if got != tc.want {
 				t.Errorf("incorrect lease validity (got: %v, want: %v)", got, tc.want)
 			}
@@ -234,20 +241,18 @@ func TestServerLeaseCounter(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			ct := &controlledTime{t: time.Unix(10000000, 0)}
 			timeNow = ct.Now
-			leases := make([]*coordinationv1.Lease, len(tc.templates))
+			leases := make([]runtime.Object, len(tc.templates))
 			for i, template := range tc.templates {
 				leases[i] = newLeaseFromTemplate(template)
 			}
-			lister := &fakeLeaseLister{
-				leases: leases,
-				err:    tc.leaseListerError,
-			}
 			ct.Advance(time.Millisecond)
 
+			k8sClient := fake.NewSimpleClientset(leases...)
 			selector, _ := labels.Parse(tc.labelSelector)
-			counter := NewServerLeaseCounter(lister, selector)
 
-			got := counter.Count()
+			counter := NewServerLeaseCounter(k8sClient, selector)
+
+			got := counter.Count(context.Background())
 			if tc.want != got {
 				t.Errorf("incorrect server count (got: %v, want: %v)", got, tc.want)
 			}
@@ -269,37 +274,41 @@ func TestServerLeaseCounter_FallbackCount(t *testing.T) {
 
 	ct := &controlledTime{t: time.Unix(1000, 0)}
 	timeNow = ct.Now
-	leases := []*coordinationv1.Lease{}
-	leases = append(leases, newLeaseFromTemplate(validLease), newLeaseFromTemplate(validLease), newLeaseFromTemplate(validLease), newLeaseFromTemplate(invalidLease))
+	leases := []runtime.Object{newLeaseFromTemplate(validLease), newLeaseFromTemplate(validLease), newLeaseFromTemplate(validLease), newLeaseFromTemplate(invalidLease)}
 	ct.Advance(time.Millisecond)
 
-	lister := &fakeLeaseLister{
-		leases: leases,
-		err:    fmt.Errorf("dummy lister error"),
-	}
+	k8sClient := fake.NewSimpleClientset(leases...)
+	callShouldFail := true
 
 	selector, _ := labels.Parse("label=value")
-	counter := NewServerLeaseCounter(lister, selector)
 
-	// First call should return fallback count of 0 because of lister error.
-	got := counter.Count()
+	counter := NewServerLeaseCounter(k8sClient, selector)
+
+	// First call should return fallback count of 0 because of leaseClient error.
+	k8sClient.PrependReactor("*", "*", func(action k8stesting.Action) (handled bool, ret runtime.Object, err error) {
+		if callShouldFail {
+			return true, nil, fmt.Errorf("dummy lease client error")
+		}
+		return false, nil, nil
+	})
+	ctx := context.Background()
+	got := counter.Count(ctx)
 	if got != 0 {
-		t.Errorf("lease counter did not return fallback count on lister error (got: %v, want: 0", got)
+		t.Errorf("lease counter did not return fallback count on leaseClient error (got: %v, want: 0)", got)
 	}
 
-	// Second call should return the actual count (3) upon lister success.
+	// Second call should return the actual count (3) upon leaseClient success.
+	callShouldFail = false
 	actualCount := 3
-	lister.err = nil
-	got = counter.Count()
+	got = counter.Count(ctx)
 	if got != actualCount {
-		t.Errorf("lease counter did not return actual count on lister success (got: %v, want: %v)", got, actualCount)
+		t.Errorf("lease counter did not return actual count on leaseClient success (got: %v, want: %v)", got, actualCount)
 	}
 
-	// Third call should return updated fallback count (3) upon lister failure.
-	lister.err = fmt.Errorf("dummy lister error")
-	lister.leases = append(lister.leases, newLeaseFromTemplate(validLease)) // Change actual count just in case.
-	got = counter.Count()
+	// Third call should return updated fallback count (3) upon leaseClient failure.
+	callShouldFail = true
+	got = counter.Count(ctx)
 	if got != actualCount {
-		t.Errorf("lease counter did not update fallback count after lister success, returned incorrect count on subsequent lister error (got: %v, want: %v)", got, actualCount)
+		t.Errorf("lease counter did not update fallback count after leaseClient success, returned incorrect count on subsequent leaseClient error (got: %v, want: %v)", got, actualCount)
 	}
 }
