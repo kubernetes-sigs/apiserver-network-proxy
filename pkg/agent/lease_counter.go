@@ -2,13 +2,16 @@ package agent
 
 import (
 	"context"
+	"errors"
 	"time"
 
 	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/klog/v2"
+	"sigs.k8s.io/apiserver-network-proxy/pkg/agent/metrics"
 
 	coordinationv1api "k8s.io/api/coordination/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	coordinationv1 "k8s.io/client-go/kubernetes/typed/coordination/v1"
 )
@@ -42,11 +45,27 @@ func NewServerLeaseCounter(k8sClient kubernetes.Interface, labelSelector labels.
 func (lc *ServerLeaseCounter) Count(ctx context.Context) int {
 	// Since the number of proxy servers is generally small (1-10), we opted against
 	// using a LIST and WATCH pattern and instead list all leases on each call.
+	start := timeNow()
+	defer func() {
+		latency := timeNow().Sub(start)
+		metrics.Metrics.ObserveLeaseListLatency(latency)
+	}()
 	leases, err := lc.leaseClient.List(ctx, metav1.ListOptions{LabelSelector: lc.selector.String()})
 	if err != nil {
 		klog.Errorf("could not list leases to update server count, using fallback count (%v): %v", lc.fallbackCount, err)
+
+		apiStatus, ok := err.(apierrors.APIStatus)
+		if ok || errors.As(err, &apiStatus) {
+			status := apiStatus.Status()
+			metrics.Metrics.ObserveLeaseList(int(status.Code), string(status.Reason))
+		} else {
+			klog.Errorf("error could not be logged to metrics as it is not an APIStatus: %v", err)
+		}
+
 		return lc.fallbackCount
 	}
+
+	metrics.Metrics.ObserveLeaseList(200, "")
 
 	count := 0
 	for _, lease := range leases.Items {
