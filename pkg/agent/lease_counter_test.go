@@ -14,7 +14,6 @@ import (
 
 	coordinationv1 "k8s.io/api/coordination/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	coordinationv1listers "k8s.io/client-go/listers/coordination/v1"
 )
 
 type leaseTemplate struct {
@@ -118,46 +117,7 @@ func TestIsLeaseValid(t *testing.T) {
 	}
 }
 
-type fakeLeaseLister struct {
-	leases []*coordinationv1.Lease
-	calls  []labels.Selector
-	err    error
-}
-
 type labelMap map[string]string
-
-func (l labelMap) Has(label string) bool {
-	_, exists := l[label]
-	return exists
-}
-func (l labelMap) Get(label string) string {
-	value, exists := l[label]
-	if !exists {
-		return ""
-	}
-
-	return value
-}
-
-func (lister *fakeLeaseLister) List(selector labels.Selector) ([]*coordinationv1.Lease, error) {
-	lister.calls = append(lister.calls, selector)
-
-	if lister.err != nil {
-		return nil, lister.err
-	}
-
-	res := []*coordinationv1.Lease{}
-	for _, lease := range lister.leases {
-		if selector.Matches(labelMap(lease.Labels)) {
-			res = append(res, lease)
-		}
-	}
-
-	return res, nil
-}
-func (lister *fakeLeaseLister) Leases(_ string) coordinationv1listers.LeaseNamespaceLister {
-	panic("not implemented")
-}
 
 func TestServerLeaseCounter(t *testing.T) {
 	testCases := []struct {
