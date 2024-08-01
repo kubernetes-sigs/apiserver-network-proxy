@@ -54,8 +54,8 @@ func (lc *ServerLeaseCounter) Count(ctx context.Context) int {
 	if err != nil {
 		klog.Errorf("could not list leases to update server count, using fallback count (%v): %v", lc.fallbackCount, err)
 
-		apiStatus, ok := err.(apierrors.APIStatus)
-		if ok || errors.As(err, &apiStatus) {
+		var apiStatus apierrors.APIStatus
+		if errors.As(err, &apiStatus) {
 			status := apiStatus.Status()
 			metrics.Metrics.ObserveLeaseList(int(status.Code), string(status.Reason))
 		} else {
@@ -73,10 +73,6 @@ func (lc *ServerLeaseCounter) Count(ctx context.Context) int {
 			count++
 		} else {
 		}
-	}
-
-	if count == 0 {
-		return lc.fallbackCount
 	}
 
 	if count != lc.fallbackCount {
