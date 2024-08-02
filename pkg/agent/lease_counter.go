@@ -9,14 +9,12 @@ import (
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/klog/v2"
 	"sigs.k8s.io/apiserver-network-proxy/pkg/agent/metrics"
+	"sigs.k8s.io/apiserver-network-proxy/pkg/util"
 
-	coordinationv1api "k8s.io/api/coordination/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	coordinationv1 "k8s.io/client-go/kubernetes/typed/coordination/v1"
 )
-
-var timeNow = time.Now
 
 // A ServerLeaseCounter counts leases in the k8s apiserver to determine the
 // current proxy server count.
@@ -45,9 +43,9 @@ func NewServerLeaseCounter(k8sClient kubernetes.Interface, labelSelector labels.
 func (lc *ServerLeaseCounter) Count(ctx context.Context) int {
 	// Since the number of proxy servers is generally small (1-10), we opted against
 	// using a LIST and WATCH pattern and instead list all leases on each call.
-	start := timeNow()
+	start := time.Now()
 	defer func() {
-		latency := timeNow().Sub(start)
+		latency := time.Now().Sub(start)
 		metrics.Metrics.ObserveLeaseListLatency(latency)
 	}()
 	leases, err := lc.leaseClient.List(ctx, metav1.ListOptions{LabelSelector: lc.selector.String()})
@@ -69,7 +67,7 @@ func (lc *ServerLeaseCounter) Count(ctx context.Context) int {
 
 	count := 0
 	for _, lease := range leases.Items {
-		if isLeaseValid(lease) {
+		if util.IsLeaseValid(lease) {
 			count++
 		} else {
 		}
@@ -80,20 +78,4 @@ func (lc *ServerLeaseCounter) Count(ctx context.Context) int {
 	}
 
 	return count
-}
-
-func isLeaseValid(lease coordinationv1api.Lease) bool {
-	var lastRenewTime time.Time
-	if lease.Spec.RenewTime != nil {
-		lastRenewTime = lease.Spec.RenewTime.Time
-	} else if lease.Spec.AcquireTime != nil {
-		lastRenewTime = lease.Spec.AcquireTime.Time
-	} else {
-		klog.Warningf("lease %v has neither a renew time or an acquire time, marking as expired: %v", lease.Name, lease)
-		return false
-	}
-
-	duration := time.Duration(*lease.Spec.LeaseDurationSeconds) * time.Second
-
-	return lastRenewTime.Add(duration).After(timeNow()) // renewTime+duration > time.Now()
 }

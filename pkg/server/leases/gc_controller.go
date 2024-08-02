@@ -4,15 +4,14 @@ import (
 	"context"
 	"time"
 
-	coordinationv1api "k8s.io/api/coordination/v1"
+	"k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/client-go/kubernetes"
 	coordinationv1 "k8s.io/client-go/kubernetes/typed/coordination/v1"
 	"k8s.io/klog/v2"
+	"sigs.k8s.io/apiserver-network-proxy/pkg/util"
 )
-
-var timeNow = time.Now
 
 type GarbageCollectionController struct {
 	leaseInterface coordinationv1.LeaseInterface
@@ -29,10 +28,8 @@ func NewGarbageCollectionController(k8sclient kubernetes.Interface, namespace st
 	}
 }
 
-func (c *GarbageCollectionController) Run(stopCh <-chan struct{}) {
-	go wait.Until(c.gc, c.gcCheckPeriod, stopCh)
-
-	<-stopCh
+func (c *GarbageCollectionController) Run(ctx context.Context) {
+	wait.Until(c.gc, c.gcCheckPeriod, ctx.Done())
 }
 
 func (c *GarbageCollectionController) gc() {
@@ -44,28 +41,17 @@ func (c *GarbageCollectionController) gc() {
 	}
 
 	for _, lease := range leases.Items {
-		if isLeaseValid(lease) {
+		if util.IsLeaseValid(lease) {
 			continue
 		}
 
 		// Optimistic concurrency: if a lease has a different resourceVersion than
 		// when we got it, it may have been renewed.
-
+		err := c.leaseInterface.Delete(ctx, lease.Name, *metav1.NewRVDeletionPrecondition(lease.ResourceVersion))
+		if errors.IsNotFound(err) {
+			klog.Infof("lease %v was already deleted", lease.Name)
+		} else if err != nil {
+			klog.Errorf("could not delete lease %v: %v", lease.Name, err)
+		}
 	}
-}
-
-func isLeaseValid(lease coordinationv1api.Lease) bool {
-	var lastRenewTime time.Time
-	if lease.Spec.RenewTime != nil {
-		lastRenewTime = lease.Spec.RenewTime.Time
-	} else if lease.Spec.AcquireTime != nil {
-		lastRenewTime = lease.Spec.AcquireTime.Time
-	} else {
-		klog.Warningf("lease %v has neither a renew time or an acquire time, marking as expired: %v", lease.Name, lease)
-		return false
-	}
-
-	duration := time.Duration(*lease.Spec.LeaseDurationSeconds) * time.Second
-
-	return lastRenewTime.Add(duration).After(timeNow()) // renewTime+duration > time.Now()
 }

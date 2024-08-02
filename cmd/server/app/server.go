@@ -39,13 +39,14 @@ import (
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials"
 	"google.golang.org/grpc/keepalive"
+	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/tools/clientcmd"
 	"k8s.io/klog/v2"
-
 	"sigs.k8s.io/apiserver-network-proxy/cmd/server/app/options"
 	"sigs.k8s.io/apiserver-network-proxy/konnectivity-client/proto/client"
 	"sigs.k8s.io/apiserver-network-proxy/pkg/server"
+	"sigs.k8s.io/apiserver-network-proxy/pkg/server/leases"
 	"sigs.k8s.io/apiserver-network-proxy/pkg/util"
 	"sigs.k8s.io/apiserver-network-proxy/proto/agent"
 )
@@ -140,6 +141,16 @@ func (p *Proxy) Run(o *options.ProxyRunOptions, stopCh <-chan struct{}) error {
 	}
 	if frontendStop != nil {
 		defer frontendStop()
+	}
+
+	if o.LeaseLabelSelector != "" || o.LeaseDuration != 0 || o.LeaseGCInterval != 0 || o.LeaseRenewalInterval != 0 {
+		leaseLabels, err := labels.ConvertSelectorToLabelsMap(o.LeaseLabelSelector)
+		if err != nil {
+			return fmt.Errorf("could not parse lease label selector: %w", err)
+		}
+		leaseController := leases.NewController(k8sClient, o.ServerID, int32(o.LeaseDuration.Seconds()), o.LeaseRenewalInterval, o.LeaseGCInterval, fmt.Sprintf("konnectivity-proxy-server-%v", o.ServerID), o.LeaseNamespace, leaseLabels)
+		klog.V(1).Infoln("Starting lease acquisition and garbage collection controller.")
+		leaseController.Run(ctx)
 	}
 
 	klog.V(1).Infoln("Starting agent server for tunnel connections.")

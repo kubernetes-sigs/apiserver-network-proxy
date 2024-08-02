@@ -6,116 +6,12 @@ import (
 	"testing"
 	"time"
 
-	"github.com/google/uuid"
 	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/client-go/kubernetes/fake"
 	k8stesting "k8s.io/client-go/testing"
-
-	coordinationv1 "k8s.io/api/coordination/v1"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"sigs.k8s.io/apiserver-network-proxy/pkg/util"
 )
-
-type leaseTemplate struct {
-	durationSecs     int32
-	timeSinceAcquire time.Duration
-	timeSinceRenew   time.Duration
-	labels           map[string]string
-}
-
-type controlledTime struct {
-	t time.Time
-}
-
-func (ct *controlledTime) Now() time.Time {
-	return ct.t
-}
-
-func (ct *controlledTime) Advance(d time.Duration) {
-	ct.t = ct.t.Add(d)
-}
-
-func newLeaseFromTemplate(template leaseTemplate) *coordinationv1.Lease {
-	lease := &coordinationv1.Lease{
-		TypeMeta: metav1.TypeMeta{},
-		ObjectMeta: metav1.ObjectMeta{
-			Name:   uuid.New().String(),
-			Labels: template.labels,
-		},
-		Spec: coordinationv1.LeaseSpec{},
-	}
-
-	if template.durationSecs != 0 {
-		lease.Spec.LeaseDurationSeconds = &template.durationSecs
-	}
-	if template.timeSinceAcquire != time.Duration(0) {
-		acquireTime := metav1.NewMicroTime(timeNow().Add(-template.timeSinceAcquire))
-		lease.Spec.AcquireTime = &acquireTime
-	}
-	if template.timeSinceRenew != time.Duration(0) {
-		renewTime := metav1.NewMicroTime(timeNow().Add(-template.timeSinceRenew))
-		lease.Spec.RenewTime = &renewTime
-	}
-
-	return lease
-}
-
-func TestIsLeaseValid(t *testing.T) {
-	testCases := []struct {
-		name     string
-		template leaseTemplate
-		want     bool
-	}{
-		{
-			name: "freshly acquired lease is valid",
-			template: leaseTemplate{
-				durationSecs:     1000,
-				timeSinceAcquire: time.Second,
-			},
-			want: true,
-		}, {
-			name: "freshly renewed lease is valid",
-			template: leaseTemplate{
-				durationSecs:     1000,
-				timeSinceAcquire: 10000 * time.Second,
-				timeSinceRenew:   time.Second,
-			},
-			want: true,
-		}, {
-			name: "lease with neither acquisition nor renewal time is invalid",
-			template: leaseTemplate{
-				durationSecs: 1000,
-			},
-			want: false,
-		}, {
-			name: "expired lease (only acquired) is invalid",
-			template: leaseTemplate{
-				durationSecs:     1000,
-				timeSinceAcquire: 10000 * time.Second,
-			},
-			want: false,
-		}, {
-			name: "expired lease (acquired and renewed) is invalid",
-			template: leaseTemplate{
-				durationSecs:     1000,
-				timeSinceAcquire: 10000 * time.Second,
-				timeSinceRenew:   9000 * time.Second,
-			},
-			want: false,
-		},
-	}
-
-	for _, tc := range testCases {
-		t.Run(tc.name, func(t *testing.T) {
-			lease := newLeaseFromTemplate(tc.template)
-
-			got := isLeaseValid(*lease)
-			if got != tc.want {
-				t.Errorf("incorrect lease validity (got: %v, want: %v)", got, tc.want)
-			}
-		})
-	}
-}
 
 type labelMap map[string]string
 
@@ -123,7 +19,7 @@ func TestServerLeaseCounter(t *testing.T) {
 	testCases := []struct {
 		name string
 
-		templates        []leaseTemplate
+		templates        []util.LeaseTemplate
 		leaseListerError error
 
 		labelSelector string
@@ -132,64 +28,64 @@ func TestServerLeaseCounter(t *testing.T) {
 	}{
 		{
 			name:          "returns fallback count (0) when no leases exist",
-			templates:     []leaseTemplate{},
+			templates:     []util.LeaseTemplate{},
 			labelSelector: "label=value",
 			want:          0,
 		}, {
 			name: "returns fallback count (0) when no leases matching selector exist",
-			templates: []leaseTemplate{
+			templates: []util.LeaseTemplate{
 				{
-					durationSecs:     1000,
-					timeSinceAcquire: time.Second,
-					labels:           labelMap{"label": "wrong_value"},
+					DurationSecs:     1000,
+					TimeSinceAcquire: time.Second,
+					Labels:           labelMap{"label": "wrong_value"},
 				},
 				{
-					durationSecs:     1000,
-					timeSinceAcquire: time.Second,
-					labels:           labelMap{"wrong_label": "value"},
+					DurationSecs:     1000,
+					TimeSinceAcquire: time.Second,
+					Labels:           labelMap{"wrong_label": "value"},
 				},
 			},
 			labelSelector: "label=value",
 			want:          0,
 		}, {
 			name: "returns fallback count (0) when no leases matching selector are still valid",
-			templates: []leaseTemplate{
+			templates: []util.LeaseTemplate{
 				{
-					durationSecs:     1000,
-					timeSinceAcquire: 10000 * time.Second,
-					labels:           labelMap{"label": "value"},
+					DurationSecs:     1000,
+					TimeSinceAcquire: 10000 * time.Second,
+					Labels:           labelMap{"label": "value"},
 				},
 				{
-					durationSecs:     1000,
-					timeSinceAcquire: time.Second,
-					labels:           labelMap{"wrong_label": "value"},
+					DurationSecs:     1000,
+					TimeSinceAcquire: time.Second,
+					Labels:           labelMap{"wrong_label": "value"},
 				},
 			},
 			labelSelector: "label=value",
 			want:          0,
 		}, {
 			name:             "returns fallback count (0) when LeaseLister returns an error",
-			templates:        []leaseTemplate{},
+			templates:        []util.LeaseTemplate{},
 			labelSelector:    "label=value",
 			leaseListerError: fmt.Errorf("test error"),
 			want:             0,
 		}, {
 			name: "counts only valid leases matching label selector",
-			templates: []leaseTemplate{
+			templates: []util.LeaseTemplate{
 				{
-					durationSecs:     1000,
-					timeSinceAcquire: time.Second,
-					labels:           labelMap{"label": "value"},
+					DurationSecs:     1000,
+					TimeSinceAcquire: time.Second,
+					Labels:           labelMap{"label": "value"},
 				},
 				{
-					durationSecs:     1000,
-					timeSinceAcquire: time.Second,
-					labels:           labelMap{"label": "value"},
+					DurationSecs:     1000,
+					TimeSinceAcquire: time.Second,
+					Labels:           labelMap{"label": "value"},
 				},
 				{
-					durationSecs:     1000,
-					timeSinceAcquire: time.Second,
-					labels:           labelMap{"label": "wrong_value"},
+					DurationSecs:     1000,
+					TimeSinceAcquire: time.Second,
+					Labels:           labelMap{"label": "wrong_value"},
 				},
 			},
 			labelSelector: "label=value",
@@ -199,13 +95,10 @@ func TestServerLeaseCounter(t *testing.T) {
 
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
-			ct := &controlledTime{t: time.Unix(10000000, 0)}
-			timeNow = ct.Now
 			leases := make([]runtime.Object, len(tc.templates))
 			for i, template := range tc.templates {
-				leases[i] = newLeaseFromTemplate(template)
+				leases[i] = util.NewLeaseFromTemplate(template)
 			}
-			ct.Advance(time.Millisecond)
 
 			k8sClient := fake.NewSimpleClientset(leases...)
 			selector, _ := labels.Parse(tc.labelSelector)
@@ -221,21 +114,18 @@ func TestServerLeaseCounter(t *testing.T) {
 }
 
 func TestServerLeaseCounter_FallbackCount(t *testing.T) {
-	validLease := leaseTemplate{
-		durationSecs:     1000,
-		timeSinceAcquire: time.Second,
-		labels:           map[string]string{"label": "value"},
+	validLease := util.LeaseTemplate{
+		DurationSecs:     1000,
+		TimeSinceAcquire: time.Second,
+		Labels:           map[string]string{"label": "value"},
 	}
-	invalidLease := leaseTemplate{
-		durationSecs:     1000,
-		timeSinceAcquire: time.Second * 10000,
-		labels:           map[string]string{"label": "value"},
+	invalidLease := util.LeaseTemplate{
+		DurationSecs:     1000,
+		TimeSinceAcquire: time.Second * 10000,
+		Labels:           map[string]string{"label": "value"},
 	}
 
-	ct := &controlledTime{t: time.Unix(1000, 0)}
-	timeNow = ct.Now
-	leases := []runtime.Object{newLeaseFromTemplate(validLease), newLeaseFromTemplate(validLease), newLeaseFromTemplate(validLease), newLeaseFromTemplate(invalidLease)}
-	ct.Advance(time.Millisecond)
+	leases := []runtime.Object{util.NewLeaseFromTemplate(validLease), util.NewLeaseFromTemplate(validLease), util.NewLeaseFromTemplate(validLease), util.NewLeaseFromTemplate(invalidLease)}
 
 	k8sClient := fake.NewSimpleClientset(leases...)
 	callShouldFail := true

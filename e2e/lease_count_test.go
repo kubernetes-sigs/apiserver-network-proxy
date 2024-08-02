@@ -188,3 +188,140 @@ func TestLeaseCount(t *testing.T) {
 	feature.Setup(lc.DeleteValidLease())
 	feature.Assess("agents correctly count 3 leases (3 valid, 3 expired)", assertAgentKnownServerCount(3, adminPort))
 }
+
+func TestSingleServer_SingleAgent_LeaseCount(t *testing.T) {
+	adminPort := 8093
+
+	serverDeploymentConfig := DeploymentConfig{
+		Replicas: 1,
+		Image:    *serverImage,
+		Args: []KeyValue{
+			{"log-file", "/var/log/konnectivity-server.log"},
+			{"logtostderr", "true"},
+			{"log-file-max-size", "0"},
+			{"uds-name", "/etc/kubernetes/konnectivity-server/konnectivity-server.socket"},
+			{Key: "delete-existing-uds-file"},
+			{"cluster-cert", "/etc/kubernetes/pki/apiserver.crt"},
+			{"cluster-key", "/etc/kubernetes/pki/apiserver.key"},
+			{"server-port", "8090"},
+			{"agent-port", "8091"},
+			{"health-port", "8092"},
+			{"admin-port", strconv.Itoa(adminPort)},
+			{"keepalive-time", "1h"},
+			{"mode", "grpc"},
+			{"agent-namespace", "kube-system"},
+			{"agent-service-account", "konnectivity-agent"},
+			{"kubeconfig", "/etc/kubernetes/admin.conf"},
+			{"authentication-audience", "system:konnectivity-server"},
+			{"lease-gc-interval", "10s"},
+			{"lease-renewal-interval", "5s"},
+			{"lease-label-selector", "k8s-app=konnectivity-server"},
+			{"lease-namespace", "kube-system"},
+		},
+	}
+	serverDeployment, _, err := renderTemplate("server/deployment.yaml", serverDeploymentConfig)
+	if err != nil {
+		t.Fatalf("could not render server deployment: %v", err)
+	}
+
+	agentDeploymentConfig := DeploymentConfig{
+		Replicas: 1,
+		Image:    *agentImage,
+		Args: []KeyValue{
+			{"logtostderr", "true"},
+			{"ca-cert", "/var/run/secrets/kubernetes.io/serviceaccount/ca.crt"},
+			{"proxy-server-host", "konnectivity-server.kube-system.svc.cluster.local"},
+			{"proxy-server-port", "8091"},
+			{"sync-interval", "1s"},
+			{"sync-interval-cap", "10s"},
+			{Key: "sync-forever"},
+			{"probe-interval", "1s"},
+			{"service-account-token-path", "/var/run/secrets/tokens/konnectivity-agent-token"},
+			{"server-lease-selector", "k8s-app=konnectivity-server"},
+		},
+	}
+	agentDeployment, _, err := renderTemplate("agent/deployment.yaml", agentDeploymentConfig)
+	if err != nil {
+		t.Fatalf("could not render agent deployment: %v", err)
+	}
+
+	feature := features.New("konnectivity server and agent deployment with single replica for each")
+	feature.Setup(deployAndWaitForDeployment(serverDeployment))
+	feature.Setup(deployAndWaitForDeployment(agentDeployment))
+	feature.Assess("konnectivity server has a connected client", assertServersAreConnected(1, adminPort))
+	feature.Assess("konnectivity agent is connected to a server", assertAgentsAreConnected(1, adminPort))
+}
+
+func TestMultiServer_MultiAgent_LeaseCount(t *testing.T) {
+	adminPort := 8093
+	initialAgentReplicas := 2
+	initialServerReplicas := 2
+
+	serverDeploymentConfig := DeploymentConfig{
+		Replicas: initialServerReplicas,
+		Image:    *serverImage,
+		Args: []KeyValue{
+			{"log-file", "/var/log/konnectivity-server.log"},
+			{"logtostderr", "true"},
+			{"log-file-max-size", "0"},
+			{"uds-name", "/etc/kubernetes/konnectivity-server/konnectivity-server.socket"},
+			{Key: "delete-existing-uds-file"},
+			{"cluster-cert", "/etc/kubernetes/pki/apiserver.crt"},
+			{"cluster-key", "/etc/kubernetes/pki/apiserver.key"},
+			{"server-port", "8090"},
+			{"agent-port", "8091"},
+			{"health-port", "8092"},
+			{"admin-port", strconv.Itoa(adminPort)},
+			{"keepalive-time", "1h"},
+			{"mode", *connectionMode},
+			{"agent-namespace", "kube-system"},
+			{"agent-service-account", "konnectivity-agent"},
+			{"kubeconfig", "/etc/kubernetes/admin.conf"},
+			{"authentication-audience", "system:konnectivity-server"},
+			{"server-count", strconv.Itoa(initialServerReplicas)},
+			{"lease-gc-interval", "10s"},
+			{"lease-renewal-interval", "5s"},
+			{"lease-label-selector", "k8s-app=konnectivity-server"},
+			{"lease-namespace", "kube-system"},
+		},
+	}
+	serverDeployment, _, err := renderTemplate("server/deployment.yaml", serverDeploymentConfig)
+	if err != nil {
+		t.Fatalf("could not render server deployment: %v", err)
+	}
+
+	agentDeploymentConfig := DeploymentConfig{
+		Replicas: initialAgentReplicas,
+		Image:    *agentImage,
+		Args: []KeyValue{
+			{"logtostderr", "true"},
+			{"ca-cert", "/var/run/secrets/kubernetes.io/serviceaccount/ca.crt"},
+			{"proxy-server-host", "konnectivity-server.kube-system.svc.cluster.local"},
+			{"proxy-server-port", "8091"},
+			{"sync-interval", "1s"},
+			{"sync-interval-cap", "10s"},
+			{Key: "sync-forever"},
+			{"probe-interval", "1s"},
+			{"service-account-token-path", "/var/run/secrets/tokens/konnectivity-agent-token"},
+			{"server-lease-selector", "k8s-app=konnectivity-server"},
+		},
+	}
+	agentDeployment, _, err := renderTemplate("agent/deployment.yaml", agentDeploymentConfig)
+	if err != nil {
+		t.Fatalf("could not render agent deployment: %v", err)
+	}
+
+	feature := features.New("konnectivity server and agent deployment with single replica for each")
+	feature.Setup(deployAndWaitForDeployment(serverDeployment))
+	feature.Setup(deployAndWaitForDeployment(agentDeployment))
+	feature.Assess("all servers connected to all clients", assertServersAreConnected(initialAgentReplicas, adminPort))
+	feature.Assess("all agents connected to all servers", assertAgentsAreConnected(initialServerReplicas, adminPort))
+	feature.Setup(scaleDeployment(serverDeployment, 4))
+	feature.Setup(scaleDeployment(agentDeployment, 4))
+	feature.Assess("all servers connected to all clients after scale up", assertServersAreConnected(4, adminPort))
+	feature.Assess("all agents connected to all servers after scale up", assertAgentsAreConnected(4, adminPort))
+	feature.Setup(scaleDeployment(serverDeployment, 3))
+	feature.Setup(scaleDeployment(agentDeployment, 3))
+	feature.Assess("all servers connected to all clients after scale down", assertServersAreConnected(3, adminPort))
+	feature.Assess("all agents connected to all servers after scale down", assertAgentsAreConnected(3, adminPort))
+}
