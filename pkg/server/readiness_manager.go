@@ -23,11 +23,4 @@ type ReadinessManager interface {
 	Ready() (bool, string)
 }
 
-var _ ReadinessManager = &DefaultBackendStorage{}
-
-func (s *DefaultBackendStorage) Ready() (bool, string) {
-	if s.NumBackends() == 0 {
-		return false, "no connection to any proxy agent"
-	}
-	return true, ""
-}
+var _ ReadinessManager = &DefaultBackendManager{}
