@@ -24,7 +24,7 @@ ALL_ARCH ?= amd64 arm arm64 ppc64le s390x
 # The output type could either be docker (local), or registry.
 OUTPUT_TYPE ?= docker
 GO_TOOLCHAIN ?= golang
-GO_VERSION ?= 1.22.2
+GO_VERSION ?= 1.22.5
 BASEIMAGE ?= gcr.io/distroless/static-debian11:nonroot
 
 ifeq ($(GOPATH),)
@@ -54,6 +54,9 @@ TAG ?= $(shell git rev-parse HEAD)
 DOCKER_CMD ?= docker
 DOCKER_CLI_EXPERIMENTAL ?= enabled
 PROXY_SERVER_IP ?= 127.0.0.1
+
+KIND_IMAGE ?= kindest/node
+CONNECTION_MODE ?= grpc
 ## --------------------------------------
 ## Testing
 ## --------------------------------------
@@ -67,18 +70,27 @@ mock_gen:
 # Unit tests with faster execution (nicer for development).
 .PHONY: fast-test
 fast-test:
-	go test -mod=vendor -race ./...
+	go test -mod=vendor -race $(shell go list ./... | grep -v -e "/e2e$$" -e "/e2e/.*")
 	cd konnectivity-client && go test -race ./...
 
 # Unit tests with fuller coverage, invoked by CI system.
 .PHONY: test
 test:
-	go test -mod=vendor -race -covermode=atomic -coverprofile=konnectivity.out ./... && go tool cover -html=konnectivity.out -o=konnectivity.html
+	go test -mod=vendor -race -covermode=atomic -coverprofile=konnectivity.out $(shell go list ./... | grep -v -e "/e2e$$" -e "/e2e/.*") && go tool cover -html=konnectivity.out -o=konnectivity.html
 	cd konnectivity-client && go test -race -covermode=atomic -coverprofile=client.out ./... && go tool cover -html=client.out -o=client.html
 
 .PHONY: test-integration
 test-integration: build
 	go test -mod=vendor -race ./tests -agent-path $(PWD)/bin/proxy-agent
+
+.PHONY: test-e2e
+test-e2e: docker-build
+	go test -mod=vendor ./e2e -race -agent-image ${AGENT_FULL_IMAGE}-$(TARGETARCH):${TAG} -server-image ${SERVER_FULL_IMAGE}-$(TARGETARCH):${TAG} -kind-image ${KIND_IMAGE} -mode ${CONNECTION_MODE}
+
+# e2e test runner for continuous integration that does not build a new image.
+.PHONY: test-e2e-ci
+test-e2e-ci:
+	go test -mod=vendor ./e2e -race -agent-image ${AGENT_FULL_IMAGE}-$(TARGETARCH):${TAG} -server-image ${SERVER_FULL_IMAGE}-$(TARGETARCH):${TAG} -kind-image ${KIND_IMAGE} -mode ${CONNECTION_MODE}
 
 ## --------------------------------------
 ## Binaries

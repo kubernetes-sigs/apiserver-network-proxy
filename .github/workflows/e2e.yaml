@@ -48,6 +48,53 @@ jobs:
       with:
         name: konnectivity-agent
         path: _output/konnectivity-agent.tar
+  kind-e2e:
+    name: kind-e2e
+    runs-on: ubuntu-20.04
+    timeout-minutes: 100
+    needs:
+    - build
+    env:
+      REGISTRY: gcr.io/k8s-staging-kas-network-proxy
+      KIND_IMAGE: kindest/node${{ matrix.k8s }}
+      TAG: master
+      CONNECTION_MODE: ${{ matrix.connection-mode }}
+    strategy:
+      fail-fast: false
+      matrix:
+        k8s: [ v1.27.11, v1.28.7, v1.29.2 ]
+        connection-mode: [ grpc, http-connect ]
+    steps:
+    - name: Install kind
+      run: |
+        curl -Lo ./kind https://kind.sigs.k8s.io/dl/v0.23.0/kind-linux-amd64
+        chmod +x ./kind
+        sudo mv ./kind /usr/local/bin/kind
+    - name: Check out code
+      uses: actions/checkout@v4
+    - name: Set up Go
+      uses: actions/setup-go@v5
+      with:
+        go-version-file: go.mod
+      id: go
+    - name: Download prebuilt konnectivity-server image
+      uses: actions/download-artifact@v4
+      with:
+        name: konnectivity-server
+    - name: Download prebuilt konnectivity-agent image
+      uses: actions/download-artifact@v4
+      with:
+        name: konnectivity-agent
+    - name: Load prebuilt konnectivity images
+      run: |
+        docker load --input konnectivity-server.tar
+        docker load --input konnectivity-agent.tar
+    - name: Fix konnectivity docker image tags
+      run: |
+        docker tag gcr.io/k8s-staging-kas-network-proxy/proxy-server:master gcr.io/k8s-staging-kas-network-proxy/proxy-server-amd64:master
+        docker tag gcr.io/k8s-staging-kas-network-proxy/proxy-agent:master gcr.io/k8s-staging-kas-network-proxy/proxy-agent-amd64:master
+    - name: Run e2e tests
+      run: make test-e2e-ci
   e2e:
     name: e2e
     runs-on: ubuntu-20.04

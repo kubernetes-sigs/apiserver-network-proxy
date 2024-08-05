@@ -1,0 +1,82 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  labels:
+    k8s-app: konnectivity-agent
+  namespace: kube-system
+  name: konnectivity-agent
+spec:
+  replicas: {{ .Replicas }}
+  selector:
+    matchLabels:
+      k8s-app: konnectivity-agent
+  template:
+    metadata:
+      labels:
+        k8s-app: konnectivity-agent
+    spec:
+      containers:
+      - name: konnectivity-agent-container
+        image: {{ .Image }}
+        resources:
+          requests:
+            cpu: 50m
+          limits:
+            memdeploymentory: 30Mi
+        command: [ "/proxy-agent"]
+        args: [
+          {{ range .Args }}
+          "--{{ .Key }}{{if ne .Value ""}}={{ .Value }}{{ end }}",
+          {{ end }}
+          ]
+        env:
+        - name: POD_NAME
+          valueFrom:
+            fieldRef:
+              fieldPath: metadata.name
+        - name: POD_NAMESPACE
+          valueFrom:
+            fieldRef:
+              fieldPath: metadata.namespace
+        - name: HOST_IP
+          valueFrom:
+            fieldRef:
+              fieldPath: status.hostIP
+        livenessProbe:
+          httpGet:
+            scheme: HTTP
+            port: 8093
+            path: /healthz
+          initialDelaySeconds: 15
+          timeoutSeconds: 15
+        readinessProbe:
+          httpGet:
+            scheme: HTTP
+            port: 8093
+            path: /readyz
+          initialDelaySeconds: 15
+          timeoutSeconds: 15
+        volumeMounts:
+          - mountPath: /var/run/secrets/tokens
+            name: konnectivity-agent-token
+      serviceAccountName: konnectivity-agent
+      ports:
+      - name: serverport
+        containerPort: 8090
+        hostPort: 8090
+      - name: agentport
+        containerPort: 8091
+        hostPort: 8091
+      - name: healthport
+        containerPort: 8092
+        hostPort: 8092
+      - name: adminport
+        containerPort: 8093
+        hostPort: 8093
+      volumes:
+      - name: konnectivity-agent-token
+        projected:
+          sources:
+          - serviceAccountToken:
+              path: konnectivity-agent-token
+              audience: system:konnectivity-server
