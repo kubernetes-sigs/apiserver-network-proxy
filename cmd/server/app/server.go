@@ -143,10 +143,10 @@ func (p *Proxy) Run(o *options.ProxyRunOptions, stopCh <-chan struct{}) error {
 		defer frontendStop()
 	}
 
-	if o.LeaseLabelSelector != "" || o.LeaseDuration != 0 || o.LeaseGCInterval != 0 || o.LeaseRenewalInterval != 0 {
+	if o.IsLeaseCountingEnabled() {
 		leaseLabels, err := labels.ConvertSelectorToLabelsMap(o.LeaseLabelSelector)
 		if err != nil {
-			return fmt.Errorf("could not parse lease label selector: %w", err)
+			return fmt.Errorf("could not parse lease label selector (%q): %w", o.LeaseLabelSelector, err)
 		}
 		leaseController := leases.NewController(k8sClient, o.ServerID, int32(o.LeaseDuration.Seconds()), o.LeaseRenewalInterval, o.LeaseGCInterval, fmt.Sprintf("konnectivity-proxy-server-%v", o.ServerID), o.LeaseNamespace, leaseLabels)
 		klog.V(1).Infoln("Starting lease acquisition and garbage collection controller.")

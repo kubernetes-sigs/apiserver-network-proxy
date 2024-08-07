@@ -155,6 +155,7 @@ func (a *Agent) runProxyConnection(o *options.GrpcProxyAgentOptions, drainCh, st
 			serverLeaseSelector,
 		)
 		if err != nil {
+			klog.Errorf("failed to create server lease counter: %v", err)
 			return nil, fmt.Errorf("failed to create server lease counter: %w", err)
 		}
 		cc.ServerLeaseCounter = serverLeaseCounter

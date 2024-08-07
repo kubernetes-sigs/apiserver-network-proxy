@@ -305,21 +305,21 @@ func (o *ProxyRunOptions) Validate() error {
 	}
 
 	// Validate leasing parameters. All must be empty or have a value.
-	if o.LeaseLabelSelector != "" || o.LeaseDuration != 0 || o.LeaseGCInterval != 0 || o.LeaseRenewalInterval != 0 || o.LeaseNamespace != "" {
+	if o.IsLeaseCountingEnabled() {
 		if o.LeaseLabelSelector == "" {
 			return fmt.Errorf("LeaseLabelSelector cannot be empty when leasing system is enabled")
 		}
 		if o.LeaseNamespace == "" {
 			return fmt.Errorf("LeaseNamespace cannot be empty when leasing system is enabled")
 		}
-		if o.LeaseDuration == 0 {
-			return fmt.Errorf("LeaseDuration cannot be zero when leasing system is enabled")
+		if o.LeaseDuration <= 0 {
+			return fmt.Errorf("LeaseDuration cannot be zero or negative when leasing system is enabled")
 		}
-		if o.LeaseGCInterval == 0 {
-			return fmt.Errorf("LeaseGCInterval cannot be zero when leasing system is enabled")
+		if o.LeaseGCInterval <= 0 {
+			return fmt.Errorf("LeaseGCInterval cannot be zero or negative when leasing system is enabled")
 		}
-		if o.LeaseRenewalInterval == 0 {
-			return fmt.Errorf("LeaseRenewalInterval cannot be zero when leasing system is enabled")
+		if o.LeaseRenewalInterval <= 0 {
+			return fmt.Errorf("LeaseRenewalInterval cannot be zero or negative when leasing system is enabled")
 		}
 	}
 
@@ -397,4 +397,8 @@ func defaultServerID() string {
 		return id
 	}
 	return uuid.New().String()
+}
+
+func (o *ProxyRunOptions) IsLeaseCountingEnabled() bool {
+	return o.LeaseLabelSelector != "" || o.LeaseDuration != 0 || o.LeaseGCInterval != 0 || o.LeaseRenewalInterval != 0 || o.LeaseNamespace != ""
 }

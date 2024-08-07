@@ -211,6 +211,9 @@ func (o *GrpcProxyAgentOptions) Validate() error {
 		if _, err := labels.Parse(o.ServerLeaseSelector); err != nil {
 			return fmt.Errorf("invalid server count lease selector: %w", err)
 		}
+		if o.KubeconfigPath == "" {
+			return fmt.Errorf("kubeconfig path must be provided if server count lease system is enabled")
+		}
 	}
 	if o.KubeconfigPath != "" {
 		if _, err := os.Stat(o.KubeconfigPath); os.IsNotExist(err) {
