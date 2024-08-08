@@ -69,8 +69,13 @@ func (lc *ServerLeaseCounter) Count(ctx context.Context) int {
 	for _, lease := range leases.Items {
 		if util.IsLeaseValid(lease) {
 			count++
-		} else {
 		}
+	}
+
+	// Ensure returned count is always at least 1.
+	if count == 0 {
+		klog.Warningf("no valid leases found, assuming server count of 1")
+		count = 1
 	}
 
 	if count != lc.fallbackCount {
