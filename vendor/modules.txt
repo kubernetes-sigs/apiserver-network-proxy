@@ -285,7 +285,7 @@ gopkg.in/yaml.v2
 # gopkg.in/yaml.v3 v3.0.1
 ## explicit
 gopkg.in/yaml.v3
-# k8s.io/api v0.30.2
+# k8s.io/api v0.30.3
 ## explicit; go 1.22.0
 k8s.io/api/admissionregistration/v1
 k8s.io/api/admissionregistration/v1alpha1
@@ -341,7 +341,7 @@ k8s.io/api/storage/v1
 k8s.io/api/storage/v1alpha1
 k8s.io/api/storage/v1beta1
 k8s.io/api/storagemigration/v1alpha1
-# k8s.io/apimachinery v0.30.2
+# k8s.io/apimachinery v0.30.3
 ## explicit; go 1.22.0
 k8s.io/apimachinery/pkg/api/equality
 k8s.io/apimachinery/pkg/api/errors
@@ -397,7 +397,7 @@ k8s.io/apimachinery/pkg/watch
 k8s.io/apimachinery/third_party/forked/golang/json
 k8s.io/apimachinery/third_party/forked/golang/netutil
 k8s.io/apimachinery/third_party/forked/golang/reflect
-# k8s.io/client-go v0.30.2
+# k8s.io/client-go v0.30.3
 ## explicit; go 1.22.0
 k8s.io/client-go/applyconfigurations/admissionregistration/v1
 k8s.io/client-go/applyconfigurations/admissionregistration/v1alpha1
@@ -597,6 +597,9 @@ k8s.io/component-base/metrics/legacyregistry
 k8s.io/component-base/metrics/prometheus/feature
 k8s.io/component-base/metrics/prometheusextension
 k8s.io/component-base/version
+# k8s.io/component-helpers v0.30.3
+## explicit; go 1.22.0
+k8s.io/component-helpers/apimachinery/lease
 # k8s.io/klog/v2 v2.130.0
 ## explicit; go 1.18
 k8s.io/klog/v2
@@ -623,6 +626,7 @@ k8s.io/utils/clock
 k8s.io/utils/clock/testing
 k8s.io/utils/internal/third_party/forked/golang/net
 k8s.io/utils/net
+k8s.io/utils/pointer
 k8s.io/utils/ptr
 k8s.io/utils/strings/slices
 # sigs.k8s.io/apiserver-network-proxy/konnectivity-client v0.0.0 => ./konnectivity-client

@@ -80,6 +80,12 @@ type GrpcProxyAgentOptions struct {
 
 	SyncForever    bool
 	XfrChannelSize int
+
+	// Enables updating the server count by counting the number of valid leases
+	// matching the selector.
+	CountServerLeases bool
+	// Path to kubeconfig (used by kubernetes client for lease listing)
+	KubeconfigPath string
 }
 
 func (o *GrpcProxyAgentOptions) ClientSetConfig(dialOptions ...grpc.DialOption) *agent.ClientSetConfig {
@@ -122,6 +128,8 @@ func (o *GrpcProxyAgentOptions) Flags() *pflag.FlagSet {
 	flags.BoolVar(&o.WarnOnChannelLimit, "warn-on-channel-limit", o.WarnOnChannelLimit, "Turns on a warning if the system is going to push to a full channel. The check involves an unsafe read.")
 	flags.BoolVar(&o.SyncForever, "sync-forever", o.SyncForever, "If true, the agent continues syncing, in order to support server count changes.")
 	flags.IntVar(&o.XfrChannelSize, "xfr-channel-size", 150, "Set the size of the channel for transferring data between the agent and the proxy server.")
+	flags.BoolVar(&o.CountServerLeases, "count-server-leases", o.CountServerLeases, "Enables lease counting system to determine the number of proxy servers to connect to.")
+	flags.StringVar(&o.KubeconfigPath, "kubeconfig", o.KubeconfigPath, "Path to the kubeconfig file")
 	return flags
 }
 
@@ -198,6 +206,12 @@ func (o *GrpcProxyAgentOptions) Validate() error {
 	if err := validateAgentIdentifiers(o.AgentIdentifiers); err != nil {
 		return fmt.Errorf("agent address is invalid: %v", err)
 	}
+	if o.KubeconfigPath != "" {
+		if _, err := os.Stat(o.KubeconfigPath); os.IsNotExist(err) {
+			return fmt.Errorf("error checking KubeconfigPath %q, got %v", o.KubeconfigPath, err)
+		}
+	}
+
 	return nil
 }
 
@@ -243,6 +257,8 @@ func NewGrpcProxyAgentOptions() *GrpcProxyAgentOptions {
 		WarnOnChannelLimit:        false,
 		SyncForever:               false,
 		XfrChannelSize:            150,
+		CountServerLeases:         false,
+		KubeconfigPath:            "",
 	}
 	return &o
 }

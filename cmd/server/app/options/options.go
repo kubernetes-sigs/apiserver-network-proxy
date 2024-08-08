@@ -102,6 +102,9 @@ type ProxyRunOptions struct {
 	// see: https://pkg.go.dev/crypto/tls#Config, so in that case, this option won't have any effect.
 	CipherSuites   []string
 	XfrChannelSize int
+
+	// Lease controller configuration
+	EnableLeaseController bool
 }
 
 func (o *ProxyRunOptions) Flags() *pflag.FlagSet {
@@ -138,7 +141,7 @@ func (o *ProxyRunOptions) Flags() *pflag.FlagSet {
 	flags.StringVar(&o.ProxyStrategies, "proxy-strategies", o.ProxyStrategies, "The list of proxy strategies used by the server to pick an agent/tunnel, available strategies are: default, destHost, defaultRoute.")
 	flags.StringSliceVar(&o.CipherSuites, "cipher-suites", o.CipherSuites, "The comma separated list of allowed cipher suites. Has no effect on TLS1.3. Empty means allow default list.")
 	flags.IntVar(&o.XfrChannelSize, "xfr-channel-size", o.XfrChannelSize, "The size of the two KNP server channels used in server for transferring data. One channel is for data coming from the Kubernetes API Server, and the other one is for data coming from the KNP agent.")
-
+	flags.BoolVar(&o.EnableLeaseController, "enable-lease-controller", o.EnableLeaseController, "Enable lease controller to publish and garbage collect proxy server leases.")
 	flags.Bool("warn-on-channel-limit", true, "This behavior is now thread safe and always on. This flag will be removed in a future release.")
 	flags.MarkDeprecated("warn-on-channel-limit", "This behavior is now thread safe and always on. This flag will be removed in a future release.")
 
@@ -351,6 +354,7 @@ func NewProxyRunOptions() *ProxyRunOptions {
 		ProxyStrategies:           "default",
 		CipherSuites:              make([]string, 0),
 		XfrChannelSize:            10,
+		EnableLeaseController:     false,
 	}
 	return &o
 }

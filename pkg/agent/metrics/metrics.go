@@ -17,6 +17,7 @@ limitations under the License.
 package metrics
 
 import (
+	"strconv"
 	"time"
 
 	"github.com/prometheus/client_golang/prometheus"
@@ -53,9 +54,12 @@ type AgentMetrics struct {
 	serverFailures      *prometheus.CounterVec
 	dialFailures        *prometheus.CounterVec
 	serverConnections   *prometheus.GaugeVec
+	serverCount         *prometheus.GaugeVec
 	endpointConnections *prometheus.GaugeVec
 	streamPackets       *prometheus.CounterVec
 	streamErrors        *prometheus.CounterVec
+	leaseLists          *prometheus.CounterVec
+	leaseListLatencies  *prometheus.HistogramVec
 }
 
 // newAgentMetrics create a new AgentMetrics, configured with default metric names.
@@ -97,12 +101,40 @@ func newAgentMetrics() *AgentMetrics {
 		},
 		[]string{},
 	)
+	serverCount := prometheus.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Namespace: Namespace,
+			Subsystem: Subsystem,
+			Name:      "known_server_count",
+			Help:      "Current number of servers agent is trying to connect to.",
+		},
+		[]string{},
+	)
 	endpointConnections := prometheus.NewGaugeVec(
 		prometheus.GaugeOpts{
 			Namespace: Namespace,
 			Subsystem: Subsystem,
 			Name:      "open_endpoint_connections",
 			Help:      "Current number of open endpoint connections.",
+		},
+		[]string{},
+	)
+	leaseLists := prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Namespace: Namespace,
+			Subsystem: Subsystem,
+			Name:      "lease_lists_total",
+			Help:      "Count of server lease list calls made by the agent to the k8s apiserver, labeled by HTTP response code and reason",
+		},
+		[]string{"http_response_code", "reason"},
+	)
+	leaseListLatencies := prometheus.NewHistogramVec(
+		prometheus.HistogramOpts{
+			Namespace: Namespace,
+			Subsystem: Subsystem,
+			Name:      "lease_list_latency_seconds",
+			Help:      "Latency of server lease listing in seconds",
+			Buckets:   latencyBuckets,
 		},
 		[]string{},
 	)
@@ -115,6 +147,9 @@ func newAgentMetrics() *AgentMetrics {
 	prometheus.MustRegister(endpointConnections)
 	prometheus.MustRegister(streamPackets)
 	prometheus.MustRegister(streamErrors)
+	prometheus.MustRegister(serverCount)
+	prometheus.MustRegister(leaseLists)
+	prometheus.MustRegister(leaseListLatencies)
 	return &AgentMetrics{
 		dialLatencies:       dialLatencies,
 		serverFailures:      serverFailures,
@@ -123,6 +158,9 @@ func newAgentMetrics() *AgentMetrics {
 		endpointConnections: endpointConnections,
 		streamPackets:       streamPackets,
 		streamErrors:        streamErrors,
+		serverCount:         serverCount,
+		leaseLists:          leaseLists,
+		leaseListLatencies:  leaseListLatencies,
 	}
 
 }
@@ -136,6 +174,9 @@ func (a *AgentMetrics) Reset() {
 	a.endpointConnections.Reset()
 	a.streamPackets.Reset()
 	a.streamErrors.Reset()
+	a.serverCount.Reset()
+	a.leaseLists.Reset()
+	a.leaseListLatencies.Reset()
 }
 
 // ObserveServerFailure records a failure to send to or receive from the proxy
@@ -163,6 +204,18 @@ func (a *AgentMetrics) ObserveDialFailure(reason DialFailureReason) {
 
 func (a *AgentMetrics) SetServerConnectionsCount(count int) {
 	a.serverConnections.WithLabelValues().Set(float64(count))
+}
+
+func (a *AgentMetrics) SetServerCount(count int) {
+	a.serverCount.WithLabelValues().Set(float64(count))
+}
+
+func (a *AgentMetrics) ObserveLeaseList(httpCode int, reason string) {
+	a.leaseLists.WithLabelValues(strconv.Itoa(httpCode), reason).Inc()
+}
+
+func (a *AgentMetrics) ObserveLeaseListLatency(latency time.Duration) {
+	a.leaseListLatencies.WithLabelValues().Observe(latency.Seconds())
 }
 
 // EndpointConnectionInc increments a new endpoint connection.

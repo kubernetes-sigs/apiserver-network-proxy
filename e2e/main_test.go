@@ -12,6 +12,7 @@ import (
 	"text/template"
 	"time"
 
+	appsv1api "k8s.io/api/apps/v1"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/client-go/kubernetes/scheme"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -156,12 +157,41 @@ func renderAndApplyManifests(ctx context.Context, cfg *envconf.Config) (context.
 	return ctx, nil
 }
 
-func deployAndWaitForDeployment(deployment client.Object) func(context.Context, *testing.T, *envconf.Config) context.Context {
+func deployAndWaitForDeployment(obj client.Object) func(context.Context, *testing.T, *envconf.Config) context.Context {
 	return func(ctx context.Context, t *testing.T, cfg *envconf.Config) context.Context {
 		client := cfg.Client()
-		err := client.Resources().Create(ctx, deployment)
+		err := client.Resources().Create(ctx, obj)
 		if err != nil {
 			t.Fatalf("could not create Deployment: %v", err)
+		}
+
+		err = wait.For(
+			conditions.New(client.Resources()).DeploymentAvailable(obj.GetName(), obj.GetNamespace()),
+			wait.WithTimeout(1*time.Minute),
+			wait.WithInterval(10*time.Second),
+		)
+		if err != nil {
+			t.Fatalf("waiting for Deployment failed: %v", err)
+		}
+
+		return ctx
+	}
+}
+
+func scaleDeployment(obj client.Object, replicas int) func(context.Context, *testing.T, *envconf.Config) context.Context {
+	return func(ctx context.Context, t *testing.T, cfg *envconf.Config) context.Context {
+		deployment, ok := obj.(*appsv1api.Deployment)
+		if !ok {
+			t.Fatalf("provided object is not a deployment")
+		}
+
+		newReplicas := int32(replicas)
+		deployment.Spec.Replicas = &newReplicas
+
+		client := cfg.Client()
+		err := client.Resources().Update(ctx, deployment)
+		if err != nil {
+			t.Fatalf("could not update Deployment replicas: %v", err)
 		}
 
 		err = wait.For(
