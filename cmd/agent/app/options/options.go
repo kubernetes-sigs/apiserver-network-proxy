@@ -27,7 +27,6 @@ import (
 	"github.com/google/uuid"
 	"github.com/spf13/pflag"
 	"google.golang.org/grpc"
-	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/klog/v2"
 
 	"sigs.k8s.io/apiserver-network-proxy/pkg/agent"
@@ -82,9 +81,9 @@ type GrpcProxyAgentOptions struct {
 	SyncForever    bool
 	XfrChannelSize int
 
-	// Providing a label selector enables updating the server count by counting the
-	// number of valid leases matching the selector.
-	ServerLeaseSelector string
+	// Enables updating the server count by counting the number of valid leases
+	// matching the selector.
+	CountServerLeases bool
 	// Path to kubeconfig (used by kubernetes client for lease listing)
 	KubeconfigPath string
 }
@@ -129,7 +128,7 @@ func (o *GrpcProxyAgentOptions) Flags() *pflag.FlagSet {
 	flags.BoolVar(&o.WarnOnChannelLimit, "warn-on-channel-limit", o.WarnOnChannelLimit, "Turns on a warning if the system is going to push to a full channel. The check involves an unsafe read.")
 	flags.BoolVar(&o.SyncForever, "sync-forever", o.SyncForever, "If true, the agent continues syncing, in order to support server count changes.")
 	flags.IntVar(&o.XfrChannelSize, "xfr-channel-size", 150, "Set the size of the channel for transferring data between the agent and the proxy server.")
-	flags.StringVar(&o.ServerLeaseSelector, "server-lease-selector", o.ServerLeaseSelector, "Providing a label selector enables updating the server count by counting the number of valid leases matching the selector.")
+	flags.BoolVar(&o.CountServerLeases, "count-server-leases", o.CountServerLeases, "Enables lease counting system to determine the number of proxy servers to connect to.")
 	flags.StringVar(&o.KubeconfigPath, "kubeconfig", o.KubeconfigPath, "Path to the kubeconfig file")
 	return flags
 }
@@ -207,11 +206,6 @@ func (o *GrpcProxyAgentOptions) Validate() error {
 	if err := validateAgentIdentifiers(o.AgentIdentifiers); err != nil {
 		return fmt.Errorf("agent address is invalid: %v", err)
 	}
-	if o.ServerLeaseSelector != "" {
-		if _, err := labels.Parse(o.ServerLeaseSelector); err != nil {
-			return fmt.Errorf("invalid server count lease selector: %w", err)
-		}
-	}
 	if o.KubeconfigPath != "" {
 		if _, err := os.Stat(o.KubeconfigPath); os.IsNotExist(err) {
 			return fmt.Errorf("error checking KubeconfigPath %q, got %v", o.KubeconfigPath, err)
@@ -263,7 +257,7 @@ func NewGrpcProxyAgentOptions() *GrpcProxyAgentOptions {
 		WarnOnChannelLimit:        false,
 		SyncForever:               false,
 		XfrChannelSize:            150,
-		ServerLeaseSelector:       "",
+		CountServerLeases:         false,
 		KubeconfigPath:            "",
 	}
 	return &o

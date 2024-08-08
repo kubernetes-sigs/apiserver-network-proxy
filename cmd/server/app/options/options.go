@@ -104,11 +104,7 @@ type ProxyRunOptions struct {
 	XfrChannelSize int
 
 	// Lease controller configuration
-	LeaseDuration        time.Duration
-	LeaseRenewalInterval time.Duration
-	LeaseGCInterval      time.Duration
-	LeaseLabelSelector   string
-	LeaseNamespace       string
+	EnableLeaseController bool
 }
 
 func (o *ProxyRunOptions) Flags() *pflag.FlagSet {
@@ -145,11 +141,7 @@ func (o *ProxyRunOptions) Flags() *pflag.FlagSet {
 	flags.StringVar(&o.ProxyStrategies, "proxy-strategies", o.ProxyStrategies, "The list of proxy strategies used by the server to pick an agent/tunnel, available strategies are: default, destHost, defaultRoute.")
 	flags.StringSliceVar(&o.CipherSuites, "cipher-suites", o.CipherSuites, "The comma separated list of allowed cipher suites. Has no effect on TLS1.3. Empty means allow default list.")
 	flags.IntVar(&o.XfrChannelSize, "xfr-channel-size", o.XfrChannelSize, "The size of the two KNP server channels used in server for transferring data. One channel is for data coming from the Kubernetes API Server, and the other one is for data coming from the KNP agent.")
-	flags.DurationVar(&o.LeaseDuration, "lease-duration", o.LeaseDuration, "The duration of the KNP server lease. Lease system off by default")
-	flags.DurationVar(&o.LeaseRenewalInterval, "lease-renewal-interval", o.LeaseRenewalInterval, "The interval between KNP server lease renewal calls. Lease system off by default")
-	flags.DurationVar(&o.LeaseGCInterval, "lease-gc-interval", o.LeaseGCInterval, "The interval between KNP server garbage collection calls. Lease system off by default")
-	flags.StringVar(&o.LeaseLabelSelector, "lease-label-selector", o.LeaseLabelSelector, "The label selector for KNP server leases. Lease system off by default")
-	flags.StringVar(&o.LeaseNamespace, "lease-namespace", o.LeaseNamespace, "The namespace to which KNP server leases will be published. Lease system off by default")
+	flags.BoolVar(&o.EnableLeaseController, "enable-lease-controller", o.EnableLeaseController, "Enable lease controller to publish and garbage collect proxy server leases.")
 	flags.Bool("warn-on-channel-limit", true, "This behavior is now thread safe and always on. This flag will be removed in a future release.")
 	flags.MarkDeprecated("warn-on-channel-limit", "This behavior is now thread safe and always on. This flag will be removed in a future release.")
 
@@ -304,25 +296,6 @@ func (o *ProxyRunOptions) Validate() error {
 		}
 	}
 
-	// Validate leasing parameters. All must be empty or have a value.
-	if o.IsLeaseCountingEnabled() {
-		if o.LeaseLabelSelector == "" {
-			return fmt.Errorf("LeaseLabelSelector cannot be empty when leasing system is enabled")
-		}
-		if o.LeaseNamespace == "" {
-			return fmt.Errorf("LeaseNamespace cannot be empty when leasing system is enabled")
-		}
-		if o.LeaseDuration <= 0 {
-			return fmt.Errorf("LeaseDuration cannot be zero or negative when leasing system is enabled")
-		}
-		if o.LeaseGCInterval <= 0 {
-			return fmt.Errorf("LeaseGCInterval cannot be zero or negative when leasing system is enabled")
-		}
-		if o.LeaseRenewalInterval <= 0 {
-			return fmt.Errorf("LeaseRenewalInterval cannot be zero or negative when leasing system is enabled")
-		}
-	}
-
 	// validate the proxy strategies
 	if len(o.ProxyStrategies) == 0 {
 		return fmt.Errorf("ProxyStrategies cannot be empty")
@@ -381,11 +354,7 @@ func NewProxyRunOptions() *ProxyRunOptions {
 		ProxyStrategies:           "default",
 		CipherSuites:              make([]string, 0),
 		XfrChannelSize:            10,
-		LeaseGCInterval:           0,
-		LeaseDuration:             0,
-		LeaseRenewalInterval:      0,
-		LeaseLabelSelector:        "",
-		LeaseNamespace:            "",
+		EnableLeaseController:     false,
 	}
 	return &o
 }
@@ -397,8 +366,4 @@ func defaultServerID() string {
 		return id
 	}
 	return uuid.New().String()
-}
-
-func (o *ProxyRunOptions) IsLeaseCountingEnabled() bool {
-	return o.LeaseLabelSelector != "" || o.LeaseDuration != 0 || o.LeaseGCInterval != 0 || o.LeaseRenewalInterval != 0 || o.LeaseNamespace != ""
 }

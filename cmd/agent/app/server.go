@@ -42,12 +42,16 @@ import (
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/tools/clientcmd"
 	"k8s.io/klog/v2"
+	"k8s.io/utils/clock"
 	"sigs.k8s.io/apiserver-network-proxy/cmd/agent/app/options"
 	"sigs.k8s.io/apiserver-network-proxy/pkg/agent"
 	"sigs.k8s.io/apiserver-network-proxy/pkg/util"
 )
 
-const ReadHeaderTimeout = 60 * time.Second
+const (
+	ReadHeaderTimeout = 60 * time.Second
+	LeaseNamespace    = "kube-system"
+)
 
 func NewAgentCommand(a *Agent, o *options.GrpcProxyAgentOptions) *cobra.Command {
 	cmd := &cobra.Command{
@@ -136,7 +140,7 @@ func (a *Agent) runProxyConnection(o *options.GrpcProxyAgentOptions, drainCh, st
 	}
 	cc := o.ClientSetConfig(dialOptions...)
 
-	if o.ServerLeaseSelector != "" {
+	if o.CountServerLeases {
 		var k8sClient *kubernetes.Clientset
 		config, err := clientcmd.BuildConfigFromFlags("", o.KubeconfigPath)
 		if err != nil {
@@ -146,18 +150,13 @@ func (a *Agent) runProxyConnection(o *options.GrpcProxyAgentOptions, drainCh, st
 		if err != nil {
 			return nil, fmt.Errorf("failed to create kubernetes clientset: %v", err)
 		}
-		serverLeaseSelector, err := labels.Parse(o.ServerLeaseSelector)
-		if err != nil {
-			return nil, fmt.Errorf("invalid server count lease selector: %w", err)
-		}
+		serverLeaseSelector, _ := labels.Parse("k8s-app=konnectivity-server")
 		serverLeaseCounter := agent.NewServerLeaseCounter(
+			clock.RealClock{},
 			k8sClient,
 			serverLeaseSelector,
+			LeaseNamespace,
 		)
-		if err != nil {
-			klog.Errorf("failed to create server lease counter: %v", err)
-			return nil, fmt.Errorf("failed to create server lease counter: %w", err)
-		}
 		cc.ServerLeaseCounter = serverLeaseCounter
 	}
 

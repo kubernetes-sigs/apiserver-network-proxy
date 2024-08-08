@@ -1,3 +1,18 @@
+/*
+Copyright 2024 The Kubernetes Authors.
+
+Licensed under the Apache License, Version 2.0 (the "License");
+you may not use this file except in compliance with the License.
+You may obtain a copy of the License at
+
+	http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions and
+limitations under the License.
+*/
 package agent
 
 import (
@@ -10,7 +25,8 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/client-go/kubernetes/fake"
 	k8stesting "k8s.io/client-go/testing"
-	"sigs.k8s.io/apiserver-network-proxy/pkg/util"
+	clocktesting "k8s.io/utils/clock/testing"
+	proxytesting "sigs.k8s.io/apiserver-network-proxy/pkg/testing"
 )
 
 type labelMap map[string]string
@@ -19,7 +35,7 @@ func TestServerLeaseCounter(t *testing.T) {
 	testCases := []struct {
 		name string
 
-		templates        []util.LeaseTemplate
+		templates        []proxytesting.LeaseTemplate
 		leaseListerError error
 
 		labelSelector string
@@ -27,13 +43,13 @@ func TestServerLeaseCounter(t *testing.T) {
 		want int
 	}{
 		{
-			name:          "returns fallback count (0) when no leases exist",
-			templates:     []util.LeaseTemplate{},
+			name:          "returns fallback count (1) when no leases exist",
+			templates:     []proxytesting.LeaseTemplate{},
 			labelSelector: "label=value",
-			want:          0,
+			want:          1,
 		}, {
-			name: "returns fallback count (0) when no leases matching selector exist",
-			templates: []util.LeaseTemplate{
+			name: "returns fallback count (1) when no leases matching selector exist",
+			templates: []proxytesting.LeaseTemplate{
 				{
 					DurationSecs:     1000,
 					TimeSinceAcquire: time.Second,
@@ -46,10 +62,10 @@ func TestServerLeaseCounter(t *testing.T) {
 				},
 			},
 			labelSelector: "label=value",
-			want:          0,
+			want:          1,
 		}, {
-			name: "returns fallback count (0) when no leases matching selector are still valid",
-			templates: []util.LeaseTemplate{
+			name: "returns fallback count (1) when no leases matching selector are still valid",
+			templates: []proxytesting.LeaseTemplate{
 				{
 					DurationSecs:     1000,
 					TimeSinceAcquire: 10000 * time.Second,
@@ -62,16 +78,16 @@ func TestServerLeaseCounter(t *testing.T) {
 				},
 			},
 			labelSelector: "label=value",
-			want:          0,
+			want:          1,
 		}, {
-			name:             "returns fallback count (0) when LeaseLister returns an error",
-			templates:        []util.LeaseTemplate{},
+			name:             "returns fallback count (1) when LeaseLister returns an error",
+			templates:        []proxytesting.LeaseTemplate{},
 			labelSelector:    "label=value",
 			leaseListerError: fmt.Errorf("test error"),
-			want:             0,
+			want:             1,
 		}, {
 			name: "counts only valid leases matching label selector",
-			templates: []util.LeaseTemplate{
+			templates: []proxytesting.LeaseTemplate{
 				{
 					DurationSecs:     1000,
 					TimeSinceAcquire: time.Second,
@@ -95,15 +111,16 @@ func TestServerLeaseCounter(t *testing.T) {
 
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
+			pc := clocktesting.NewFakePassiveClock(time.Now())
 			leases := make([]runtime.Object, len(tc.templates))
 			for i, template := range tc.templates {
-				leases[i] = util.NewLeaseFromTemplate(template)
+				leases[i] = proxytesting.NewLeaseFromTemplate(pc, template)
 			}
 
 			k8sClient := fake.NewSimpleClientset(leases...)
 			selector, _ := labels.Parse(tc.labelSelector)
 
-			counter := NewServerLeaseCounter(k8sClient, selector)
+			counter := NewServerLeaseCounter(pc, k8sClient, selector, "")
 
 			got := counter.Count(context.Background())
 			if tc.want != got {
@@ -114,25 +131,26 @@ func TestServerLeaseCounter(t *testing.T) {
 }
 
 func TestServerLeaseCounter_FallbackCount(t *testing.T) {
-	validLease := util.LeaseTemplate{
+	validLease := proxytesting.LeaseTemplate{
 		DurationSecs:     1000,
 		TimeSinceAcquire: time.Second,
 		Labels:           map[string]string{"label": "value"},
 	}
-	invalidLease := util.LeaseTemplate{
+	invalidLease := proxytesting.LeaseTemplate{
 		DurationSecs:     1000,
 		TimeSinceAcquire: time.Second * 10000,
 		Labels:           map[string]string{"label": "value"},
 	}
 
-	leases := []runtime.Object{util.NewLeaseFromTemplate(validLease), util.NewLeaseFromTemplate(validLease), util.NewLeaseFromTemplate(validLease), util.NewLeaseFromTemplate(invalidLease)}
+	pc := clocktesting.NewFakeClock(time.Now())
+	leases := []runtime.Object{proxytesting.NewLeaseFromTemplate(pc, validLease), proxytesting.NewLeaseFromTemplate(pc, validLease), proxytesting.NewLeaseFromTemplate(pc, validLease), proxytesting.NewLeaseFromTemplate(pc, invalidLease)}
 
 	k8sClient := fake.NewSimpleClientset(leases...)
 	callShouldFail := true
 
 	selector, _ := labels.Parse("label=value")
 
-	counter := NewServerLeaseCounter(k8sClient, selector)
+	counter := NewServerLeaseCounter(pc, k8sClient, selector, "")
 
 	// First call should return fallback count of 0 because of leaseClient error.
 	k8sClient.PrependReactor("*", "*", func(action k8stesting.Action) (handled bool, ret runtime.Object, err error) {

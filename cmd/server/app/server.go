@@ -39,7 +39,6 @@ import (
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials"
 	"google.golang.org/grpc/keepalive"
-	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/tools/clientcmd"
 	"k8s.io/klog/v2"
@@ -53,7 +52,13 @@ import (
 
 var udsListenerLock sync.Mutex
 
-const ReadHeaderTimeout = 60 * time.Second
+const (
+	ReadHeaderTimeout    = 60 * time.Second
+	LeaseDuration        = 30 * time.Second
+	LeaseRenewalInterval = 15 * time.Second
+	LeaseGCInterval      = 15 * time.Second
+	LeaseNamespace       = "kube-system"
+)
 
 func NewProxyCommand(p *Proxy, o *options.ProxyRunOptions) *cobra.Command {
 	cmd := &cobra.Command{
@@ -143,22 +148,27 @@ func (p *Proxy) Run(o *options.ProxyRunOptions, stopCh <-chan struct{}) error {
 		defer frontendStop()
 	}
 
-	if o.IsLeaseCountingEnabled() {
-		leaseLabels, err := labels.ConvertSelectorToLabelsMap(o.LeaseLabelSelector)
-		if err != nil {
-			return fmt.Errorf("could not parse lease label selector (%q): %w", o.LeaseLabelSelector, err)
-		}
-		leaseController := leases.NewController(k8sClient, o.ServerID, int32(o.LeaseDuration.Seconds()), o.LeaseRenewalInterval, o.LeaseGCInterval, fmt.Sprintf("konnectivity-proxy-server-%v", o.ServerID), o.LeaseNamespace, leaseLabels)
-		klog.V(1).Infoln("Starting lease acquisition and garbage collection controller.")
-		leaseController.Run(ctx)
-	}
-
 	klog.V(1).Infoln("Starting agent server for tunnel connections.")
 	err = p.runAgentServer(o, p.server)
 	if err != nil {
 		return fmt.Errorf("failed to run the agent server: %v", err)
 	}
 	defer p.agentServer.Stop()
+
+	if o.EnableLeaseController {
+		leaseController := leases.NewController(
+			k8sClient,
+			o.ServerID,
+			int32(LeaseDuration.Seconds()),
+			LeaseRenewalInterval,
+			LeaseGCInterval,
+			fmt.Sprintf("konnectivity-proxy-server-%v", o.ServerID),
+			LeaseNamespace,
+			map[string]string{"k8s-app": "konnectivity-server"},
+		)
+		klog.V(1).Infoln("Starting lease acquisition and garbage collection controller.")
+		leaseController.Run(ctx)
+	}
 
 	klog.V(1).Infoln("Starting admin server for debug connections.")
 	err = p.runAdminServer(o, p.server)

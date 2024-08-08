@@ -1,17 +1,29 @@
+/*
+Copyright 2024 The Kubernetes Authors.
+
+Licensed under the Apache License, Version 2.0 (the "License");
+you may not use this file except in compliance with the License.
+You may obtain a copy of the License at
+
+	http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions and
+limitations under the License.
+*/
 package util
 
 import (
 	"time"
 
-	"github.com/google/uuid"
 	coordinationv1api "k8s.io/api/coordination/v1"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/klog/v2"
+	"k8s.io/utils/clock"
 )
 
-var timeNow = time.Now
-
-func IsLeaseValid(lease coordinationv1api.Lease) bool {
+func IsLeaseValid(pc clock.PassiveClock, lease coordinationv1api.Lease) bool {
 	var lastRenewTime time.Time
 	if lease.Spec.RenewTime != nil {
 		lastRenewTime = lease.Spec.RenewTime.Time
@@ -24,36 +36,5 @@ func IsLeaseValid(lease coordinationv1api.Lease) bool {
 
 	duration := time.Duration(*lease.Spec.LeaseDurationSeconds) * time.Second
 
-	return lastRenewTime.Add(duration).After(timeNow()) // renewTime+duration > time.Now()
-}
-func NewLeaseFromTemplate(template LeaseTemplate) *coordinationv1api.Lease {
-	lease := &coordinationv1api.Lease{
-		TypeMeta: metav1.TypeMeta{},
-		ObjectMeta: metav1.ObjectMeta{
-			Name:   uuid.New().String(),
-			Labels: template.Labels,
-		},
-		Spec: coordinationv1api.LeaseSpec{},
-	}
-
-	if template.DurationSecs != 0 {
-		lease.Spec.LeaseDurationSeconds = &template.DurationSecs
-	}
-	if template.TimeSinceAcquire != time.Duration(0) {
-		acquireTime := metav1.NewMicroTime(timeNow().Add(-template.TimeSinceAcquire))
-		lease.Spec.AcquireTime = &acquireTime
-	}
-	if template.TimeSinceRenew != time.Duration(0) {
-		renewTime := metav1.NewMicroTime(timeNow().Add(-template.TimeSinceRenew))
-		lease.Spec.RenewTime = &renewTime
-	}
-
-	return lease
-}
-
-type LeaseTemplate struct {
-	DurationSecs     int32
-	TimeSinceAcquire time.Duration
-	TimeSinceRenew   time.Duration
-	Labels           map[string]string
+	return lastRenewTime.Add(duration).After(pc.Now()) // renewTime+duration > time.Now()
 }
