@@ -221,9 +221,6 @@ func (cs *ClientSet) ServerCount(ctx context.Context) int {
 	var serverCount int
 	if cs.leaseCounter != nil {
 		serverCount = cs.leaseCounter.Count(ctx)
-		if serverCount == 0 {
-			klog.Warningf("server lease counter could not find any leases")
-		}
 	} else {
 		serverCount = cs.lastReceivedServerCount
 	}

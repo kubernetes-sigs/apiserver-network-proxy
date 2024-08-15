@@ -70,12 +70,12 @@ func (c *Controller) Run(ctx context.Context) {
 	go c.gcController.Run(ctx)
 	go c.acquireController.Run(ctx)
 
-	// Clean up lease on shutdown.
-	go func() {
-		<-ctx.Done()
-		err := c.k8sClient.CoordinationV1().Leases(c.leaseNamespace).Delete(ctx, c.leaseName, metav1.DeleteOptions{})
-		if err != nil {
-			klog.Errorf("Could not clean up lease %q in namespace %q", c.leaseName, c.leaseNamespace)
-		}
-	}()
+}
+
+func (c *Controller) Stop() {
+	klog.Infof("Cleaning up server lease %q", c.leaseName)
+	err := c.k8sClient.CoordinationV1().Leases(c.leaseNamespace).Delete(context.Background(), c.leaseName, metav1.DeleteOptions{})
+	if err != nil {
+		klog.Errorf("Could not clean up lease %q in namespace %q", c.leaseName, c.leaseNamespace)
+	}
 }

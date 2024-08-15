@@ -168,6 +168,7 @@ func (p *Proxy) Run(o *options.ProxyRunOptions, stopCh <-chan struct{}) error {
 		)
 		klog.V(1).Infoln("Starting lease acquisition and garbage collection controller.")
 		leaseController.Run(ctx)
+		defer leaseController.Stop()
 	}
 
 	klog.V(1).Infoln("Starting admin server for debug connections.")
