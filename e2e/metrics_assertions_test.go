@@ -35,10 +35,10 @@ func getMetricsGaugeValue(restCfg *rest.Config, namespace string, podName string
 
 	metricsParser := &expfmt.TextParser{}
 	metricsFamilies, err := metricsParser.TextToMetricFamilies(resp.Body)
-	defer resp.Body.Close()
 	if err != nil {
 		return 0, fmt.Errorf("could not parse metrics: %w", err)
 	}
+	defer resp.Body.Close()
 
 	metricFamily, exists := metricsFamilies[metricName]
 	if !exists {
@@ -56,7 +56,7 @@ func assertAgentsAreConnected(expectedConnections int) func(context.Context, *te
 		agentPods := &corev1.PodList{}
 		err := client.Resources().List(ctx, agentPods, resources.WithLabelSelector("k8s-app=konnectivity-agent"))
 		if err != nil {
-			t.Fatalf("couldn't get agent pods: %v", err)
+			t.Fatalf("couldn't get agent pods (label selector 'k8s-app=konnectivity-agent'): %v", err)
 		}
 
 		for _, agentPod := range agentPods.Items {
@@ -66,7 +66,7 @@ func assertAgentsAreConnected(expectedConnections int) func(context.Context, *te
 			}
 
 			if numConnections != expectedConnections {
-				t.Errorf("incorrect number of connected servers (want: %v, got: %v)", expectedConnections, numConnections)
+				t.Errorf("incorrect number of connected servers (want: %d, got: %d)", expectedConnections, numConnections)
 			}
 		}
 
@@ -81,7 +81,7 @@ func assertServersAreConnected(expectedConnections int) func(context.Context, *t
 		serverPods := &corev1.PodList{}
 		err := client.Resources().List(ctx, serverPods, resources.WithLabelSelector("k8s-app=konnectivity-server"))
 		if err != nil {
-			t.Fatalf("couldn't get server pods: %v", err)
+			t.Fatalf("couldn't get server pods (label selector 'k8s-app=konnectivity-server'): %v", err)
 		}
 
 		for _, serverPod := range serverPods.Items {
@@ -91,7 +91,7 @@ func assertServersAreConnected(expectedConnections int) func(context.Context, *t
 			}
 
 			if numConnections != expectedConnections {
-				t.Errorf("incorrect number of connected agents (want: %v, got: %v)", expectedConnections, numConnections)
+				t.Errorf("incorrect number of connected agents (want: %d, got: %d)", expectedConnections, numConnections)
 			}
 		}
 
