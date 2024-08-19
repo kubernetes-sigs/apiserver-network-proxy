@@ -185,12 +185,12 @@ func (cs *ClientSet) resetBackoff() *wait.Backoff {
 }
 
 // sync makes sure that #clients >= #proxy servers
-func (cs *ClientSet) sync(ctx context.Context) {
+func (cs *ClientSet) sync() {
 	defer cs.shutdown()
 	backoff := cs.resetBackoff()
 	var duration time.Duration
 	for {
-		if serverCount, err := cs.connectOnce(ctx); err != nil {
+		if serverCount, err := cs.connectOnce(); err != nil {
 			if dse, ok := err.(*DuplicateServerError); ok {
 				clientsCount := cs.ClientsCount()
 				klog.V(4).InfoS("duplicate server", "serverID", dse.ServerID, "serverCount", serverCount, "clientsCount", clientsCount)
@@ -217,10 +217,10 @@ func (cs *ClientSet) sync(ctx context.Context) {
 	}
 }
 
-func (cs *ClientSet) ServerCount(ctx context.Context) int {
+func (cs *ClientSet) ServerCount() int {
 	var serverCount int
 	if cs.leaseCounter != nil {
-		serverCount = cs.leaseCounter.Count(ctx)
+		serverCount = cs.leaseCounter.Count()
 	} else {
 		serverCount = cs.lastReceivedServerCount
 	}
@@ -234,8 +234,8 @@ func (cs *ClientSet) ServerCount(ctx context.Context) int {
 	return serverCount
 }
 
-func (cs *ClientSet) connectOnce(ctx context.Context) (int, error) {
-	serverCount := cs.ServerCount(ctx)
+func (cs *ClientSet) connectOnce() (int, error) {
+	serverCount := cs.ServerCount()
 
 	if !cs.syncForever && serverCount != 0 && cs.ClientsCount() >= serverCount {
 		return serverCount, nil
@@ -265,7 +265,7 @@ func (cs *ClientSet) Serve() {
 		"agentIdentifiers", cs.agentIdentifiers,
 		"serverAddress", cs.address,
 	)
-	go runpprof.Do(context.Background(), labels, func(ctx context.Context) { cs.sync(ctx) })
+	go runpprof.Do(context.Background(), labels, func(ctx context.Context) { cs.sync() })
 }
 
 func (cs *ClientSet) shutdown() {
