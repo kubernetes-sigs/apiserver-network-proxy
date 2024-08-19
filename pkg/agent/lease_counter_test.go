@@ -124,7 +124,7 @@ func TestServerLeaseCounter(t *testing.T) {
 			leaseInformer.Run(context.TODO().Done())
 			leaseLister := coordinationv1lister.NewLeaseLister(leaseInformer.GetIndexer())
 
-			counter := NewServerLeaseCounter(pc, leaseLister, selector, "")
+			counter := NewServerLeaseCounter(pc, leaseLister, selector)
 
 			got := counter.Count()
 			if tc.want != got {
@@ -173,7 +173,7 @@ func TestServerLeaseCounter_FallbackCount(t *testing.T) {
 	selector, _ := labels.Parse("label=value")
 	leaseLister := fakeLeaseLister{LeaseList: leases}
 
-	counter := NewServerLeaseCounter(pc, leaseLister, selector, "")
+	counter := NewServerLeaseCounter(pc, leaseLister, selector)
 
 	got := counter.Count()
 	leaseLister.Err = fmt.Errorf("fake lease listing error")
