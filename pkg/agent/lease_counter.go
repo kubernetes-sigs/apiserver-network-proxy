@@ -47,7 +47,7 @@ type ServerLeaseCounter struct {
 
 // NewServerLeaseCounter creates a server counter that counts valid leases that match the label
 // selector and provides the fallback count (initially 0) if this fails.
-func NewServerLeaseCounter(pc clock.PassiveClock, leaseLister coordinationv1lister.LeaseLister, labelSelector labels.Selector, leaseNamespace string) *ServerLeaseCounter {
+func NewServerLeaseCounter(pc clock.PassiveClock, leaseLister coordinationv1lister.LeaseLister, labelSelector labels.Selector) *ServerLeaseCounter {
 	return &ServerLeaseCounter{
 		leaseLister:   leaseLister,
 		selector:      labelSelector,

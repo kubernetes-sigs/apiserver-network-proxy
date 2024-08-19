@@ -152,7 +152,7 @@ func (a *Agent) runProxyConnection(o *options.GrpcProxyAgentOptions, drainCh, st
 		if err != nil {
 			return nil, fmt.Errorf("failed to create kubernetes clientset: %v", err)
 		}
-		leaseInformer := agent.NewLeaseInformerWithMetrics(k8sClient, "", LeaseInformerResync)
+		leaseInformer := agent.NewLeaseInformerWithMetrics(k8sClient, LeaseNamespace, LeaseInformerResync)
 		go leaseInformer.Run(stopCh)
 		leaseLister := coordinationv1lister.NewLeaseLister(leaseInformer.GetIndexer())
 		serverLeaseSelector, _ := labels.Parse("k8s-app=konnectivity-server")
@@ -160,7 +160,6 @@ func (a *Agent) runProxyConnection(o *options.GrpcProxyAgentOptions, drainCh, st
 			clock.RealClock{},
 			leaseLister,
 			serverLeaseSelector,
-			LeaseNamespace,
 		)
 		cc.ServerLeaseCounter = serverLeaseCounter
 	}
