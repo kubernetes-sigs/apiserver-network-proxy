@@ -26,6 +26,7 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/client-go/kubernetes/fake"
 	coordinationv1lister "k8s.io/client-go/listers/coordination/v1"
+	"k8s.io/client-go/tools/cache"
 	clocktesting "k8s.io/utils/clock/testing"
 	proxytesting "sigs.k8s.io/apiserver-network-proxy/pkg/testing"
 )
@@ -120,8 +121,9 @@ func TestServerLeaseCounter(t *testing.T) {
 
 			k8sClient := fake.NewSimpleClientset(leases...)
 			selector, _ := labels.Parse(tc.labelSelector)
-			leaseInformer := NewLeaseInformerWithMetrics(k8sClient, "", time.Millisecond*100)
-			leaseInformer.Run(context.TODO().Done())
+			leaseInformer := NewLeaseInformerWithMetrics(k8sClient, "", time.Millisecond)
+			go leaseInformer.Run(context.Background().Done())
+			cache.WaitForCacheSync(context.Background().Done(), leaseInformer.HasSynced)
 			leaseLister := coordinationv1lister.NewLeaseLister(leaseInformer.GetIndexer())
 
 			counter := NewServerLeaseCounter(pc, leaseLister, selector)
@@ -139,7 +141,7 @@ type fakeLeaseLister struct {
 	Err       error
 }
 
-func (lister fakeLeaseLister) List(selector labels.Selector) (ret []*coordinationv1.Lease, err error) {
+func (lister *fakeLeaseLister) List(selector labels.Selector) (ret []*coordinationv1.Lease, err error) {
 	if lister.Err != nil {
 		return nil, lister.Err
 	}
@@ -152,7 +154,7 @@ func (lister fakeLeaseLister) List(selector labels.Selector) (ret []*coordinatio
 	return ret, nil
 }
 
-func (lister fakeLeaseLister) Leases(_ string) coordinationv1lister.LeaseNamespaceLister {
+func (lister *fakeLeaseLister) Leases(_ string) coordinationv1lister.LeaseNamespaceLister {
 	panic("should not be used")
 }
 
@@ -171,12 +173,12 @@ func TestServerLeaseCounter_FallbackCount(t *testing.T) {
 	pc := clocktesting.NewFakeClock(time.Now())
 	leases := []*coordinationv1.Lease{proxytesting.NewLeaseFromTemplate(pc, validLease), proxytesting.NewLeaseFromTemplate(pc, validLease), proxytesting.NewLeaseFromTemplate(pc, validLease), proxytesting.NewLeaseFromTemplate(pc, invalidLease)}
 	selector, _ := labels.Parse("label=value")
-	leaseLister := fakeLeaseLister{LeaseList: leases}
+	leaseLister := &fakeLeaseLister{LeaseList: leases}
 
 	counter := NewServerLeaseCounter(pc, leaseLister, selector)
 
-	got := counter.Count()
 	leaseLister.Err = fmt.Errorf("fake lease listing error")
+	got := counter.Count()
 	if got != 1 {
 		t.Errorf("lease counter did not return fallback count on leaseLister error (got: %v, want: 1)", got)
 	}

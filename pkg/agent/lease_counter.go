@@ -51,7 +51,7 @@ func NewServerLeaseCounter(pc clock.PassiveClock, leaseLister coordinationv1list
 	return &ServerLeaseCounter{
 		leaseLister:   leaseLister,
 		selector:      labelSelector,
-		fallbackCount: 0,
+		fallbackCount: 1,
 		pc:            pc,
 	}
 }

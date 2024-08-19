@@ -41,6 +41,7 @@ import (
 	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/client-go/kubernetes"
 	coordinationv1lister "k8s.io/client-go/listers/coordination/v1"
+	"k8s.io/client-go/tools/cache"
 	"k8s.io/client-go/tools/clientcmd"
 	"k8s.io/klog/v2"
 	"k8s.io/utils/clock"
@@ -154,6 +155,7 @@ func (a *Agent) runProxyConnection(o *options.GrpcProxyAgentOptions, drainCh, st
 		}
 		leaseInformer := agent.NewLeaseInformerWithMetrics(k8sClient, LeaseNamespace, LeaseInformerResync)
 		go leaseInformer.Run(stopCh)
+		cache.WaitForCacheSync(stopCh, leaseInformer.HasSynced)
 		leaseLister := coordinationv1lister.NewLeaseLister(leaseInformer.GetIndexer())
 		serverLeaseSelector, _ := labels.Parse("k8s-app=konnectivity-server")
 		serverLeaseCounter := agent.NewServerLeaseCounter(
