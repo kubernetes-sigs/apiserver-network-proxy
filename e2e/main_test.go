@@ -1,3 +1,18 @@
+/*
+Copyright 2024 The Kubernetes Authors.
+
+Licensed under the Apache License, Version 2.0 (the "License");
+you may not use this file except in compliance with the License.
+You may obtain a copy of the License at
+
+	http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions and
+limitations under the License.
+*/
 package e2e
 
 import (
@@ -218,13 +233,6 @@ func deleteDeployment(obj client.Object) func(context.Context, *testing.T, *envc
 	}
 }
 
-func sleepFor(duration time.Duration) func(context.Context, *testing.T, *envconf.Config) context.Context {
-	return func(ctx context.Context, t *testing.T, cfg *envconf.Config) context.Context {
-		time.Sleep(duration)
-		return ctx
-	}
-}
-
 func waitForDeployment(obj client.Object) func(context.Context, *testing.T, *envconf.Config) context.Context {
 	return func(ctx context.Context, t *testing.T, cfg *envconf.Config) context.Context {
 		deployment, ok := obj.(*appsv1api.Deployment)
@@ -235,7 +243,7 @@ func waitForDeployment(obj client.Object) func(context.Context, *testing.T, *env
 		k8sClient := kubernetes.NewForConfigOrDie(cfg.Client().RESTConfig())
 		err := wait.For(
 			conditions.New(cfg.Client().Resources(deployment.Namespace)).DeploymentAvailable(deployment.Name, deployment.Namespace),
-			wait.WithTimeout(60*time.Second),
+			wait.WithTimeout(120*time.Second),
 			wait.WithInterval(5*time.Second),
 		)
 		if err != nil {

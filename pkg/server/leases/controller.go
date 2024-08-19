@@ -28,8 +28,6 @@ import (
 	"k8s.io/utils/clock"
 )
 
-const shutdownDeleteGrace = 10
-
 type Controller struct {
 	leaseName      string
 	leaseNamespace string

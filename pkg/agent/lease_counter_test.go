@@ -21,10 +21,11 @@ import (
 	"testing"
 	"time"
 
+	coordinationv1 "k8s.io/api/coordination/v1"
 	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/client-go/kubernetes/fake"
-	k8stesting "k8s.io/client-go/testing"
+	coordinationv1lister "k8s.io/client-go/listers/coordination/v1"
 	clocktesting "k8s.io/utils/clock/testing"
 	proxytesting "sigs.k8s.io/apiserver-network-proxy/pkg/testing"
 )
@@ -119,8 +120,11 @@ func TestServerLeaseCounter(t *testing.T) {
 
 			k8sClient := fake.NewSimpleClientset(leases...)
 			selector, _ := labels.Parse(tc.labelSelector)
+			leaseInformer := NewLeaseInformerWithMetrics(k8sClient, "", time.Millisecond*100)
+			leaseInformer.Run(context.TODO().Done())
+			leaseLister := coordinationv1lister.NewLeaseLister(leaseInformer.GetIndexer())
 
-			counter := NewServerLeaseCounter(pc, k8sClient, selector, "")
+			counter := NewServerLeaseCounter(pc, leaseLister, selector, "")
 
 			got := counter.Count(context.Background())
 			if tc.want != got {
@@ -128,6 +132,28 @@ func TestServerLeaseCounter(t *testing.T) {
 			}
 		})
 	}
+}
+
+type fakeLeaseLister struct {
+	LeaseList []*coordinationv1.Lease
+	Err       error
+}
+
+func (lister fakeLeaseLister) List(selector labels.Selector) (ret []*coordinationv1.Lease, err error) {
+	if lister.Err != nil {
+		return nil, lister.Err
+	}
+
+	for _, lease := range lister.LeaseList {
+		if selector.Matches(labels.Set(lease.Labels)) {
+			ret = append(ret, lease)
+		}
+	}
+	return ret, nil
+}
+
+func (lister fakeLeaseLister) Leases(namespace string) coordinationv1lister.LeaseNamespaceLister {
+	panic("should not be used")
 }
 
 func TestServerLeaseCounter_FallbackCount(t *testing.T) {
@@ -143,30 +169,21 @@ func TestServerLeaseCounter_FallbackCount(t *testing.T) {
 	}
 
 	pc := clocktesting.NewFakeClock(time.Now())
-	leases := []runtime.Object{proxytesting.NewLeaseFromTemplate(pc, validLease), proxytesting.NewLeaseFromTemplate(pc, validLease), proxytesting.NewLeaseFromTemplate(pc, validLease), proxytesting.NewLeaseFromTemplate(pc, invalidLease)}
-
-	k8sClient := fake.NewSimpleClientset(leases...)
-	callShouldFail := true
-
+	leases := []*coordinationv1.Lease{proxytesting.NewLeaseFromTemplate(pc, validLease), proxytesting.NewLeaseFromTemplate(pc, validLease), proxytesting.NewLeaseFromTemplate(pc, validLease), proxytesting.NewLeaseFromTemplate(pc, invalidLease)}
 	selector, _ := labels.Parse("label=value")
+	leaseLister := fakeLeaseLister{LeaseList: leases}
 
-	counter := NewServerLeaseCounter(pc, k8sClient, selector, "")
+	counter := NewServerLeaseCounter(pc, leaseLister, selector, "")
 
-	// First call should return fallback count of 0 because of leaseClient error.
-	k8sClient.PrependReactor("*", "*", func(action k8stesting.Action) (handled bool, ret runtime.Object, err error) {
-		if callShouldFail {
-			return true, nil, fmt.Errorf("dummy lease client error")
-		}
-		return false, nil, nil
-	})
 	ctx := context.Background()
 	got := counter.Count(ctx)
-	if got != 0 {
-		t.Errorf("lease counter did not return fallback count on leaseClient error (got: %v, want: 0)", got)
+	leaseLister.Err = fmt.Errorf("fake lease listing error")
+	if got != 1 {
+		t.Errorf("lease counter did not return fallback count on leaseLister error (got: %v, want: 1)", got)
 	}
 
 	// Second call should return the actual count (3) upon leaseClient success.
-	callShouldFail = false
+	leaseLister.Err = nil
 	actualCount := 3
 	got = counter.Count(ctx)
 	if got != actualCount {
@@ -174,7 +191,7 @@ func TestServerLeaseCounter_FallbackCount(t *testing.T) {
 	}
 
 	// Third call should return updated fallback count (3) upon leaseClient failure.
-	callShouldFail = true
+	leaseLister.Err = fmt.Errorf("fake lease listing error")
 	got = counter.Count(ctx)
 	if got != actualCount {
 		t.Errorf("lease counter did not update fallback count after leaseClient success, returned incorrect count on subsequent leaseClient error (got: %v, want: %v)", got, actualCount)

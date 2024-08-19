@@ -1,0 +1,121 @@
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: system:konnectivity-agent
+  labels:
+    kubernetes.io/cluster-service: "true"
+rules:
+- apiGroups: ["coordination.k8s.io"]
+  resources: ["leases"]
+  verbs: ["get", "watch", "list"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: system:konnectivity-agent
+  labels:
+    kubernetes.io/cluster-service: "true"
+subjects:
+- kind: ServiceAccount
+  name: konnectivity-agent
+  namespace:  kube-system
+roleRef:
+  kind: ClusterRole
+  name: system:konnectivity-agent
+  apiGroup: rbac.authorization.k8s.io
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: konnectivity-agent
+  namespace: kube-system
+  labels:
+    kubernetes.io/cluster-service: "true"
+---
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  labels:
+    k8s-app: konnectivity-agent
+  namespace: kube-system
+  name: konnectivity-agent
+spec:
+  selector:
+    matchLabels:
+      k8s-app: konnectivity-agent
+  updateStrategy:
+    type: RollingUpdate
+  template:
+    metadata:
+      labels:
+        k8s-app: konnectivity-agent
+    spec:
+      priorityClassName: system-cluster-critical
+      tolerations:
+        - key: "CriticalAddonsOnly"
+          operator: "Exists"
+        - operator: "Exists"
+          effect: "NoExecute"
+      nodeSelector:
+        kubernetes.io/os: linux
+      dnsPolicy: ClusterFirstWithHostNet
+      containers:
+      - name: konnectivity-agent-container
+        image: gcr.io/carreter-dev2/proxy-agent-amd64:01e3cce3bd4c8e4cff2366d1169c0326a2f1af02
+        resources:
+          requests:
+            cpu: 50m
+          limits:
+            memory: 30Mi
+        command: [ "/proxy-agent"]
+        args: [
+          "--logtostderr=true",
+          "--ca-cert=/var/run/secrets/kubernetes.io/serviceaccount/ca.crt",
+          "--proxy-server-host=konnectivity-server.kube-system.svc.cluster.local",
+          "--proxy-server-port=8091",
+          "--sync-interval=5s",
+          "--sync-interval-cap=30s",
+          "--sync-forever",
+          "--probe-interval=5s",
+          "--service-account-token-path=/var/run/secrets/tokens/konnectivity-agent-token",
+          "--agent-identifiers=ipv4=${HOST_IP}",
+          "--count-server-leases",
+          ]
+        env:
+          - name: POD_NAME
+            valueFrom:
+              fieldRef:
+                fieldPath: metadata.name
+          - name: POD_NAMESPACE
+            valueFrom:
+              fieldRef:
+                fieldPath: metadata.namespace
+          - name: HOST_IP
+            valueFrom:
+              fieldRef:
+                fieldPath: status.hostIP
+        livenessProbe:
+          httpGet:
+            scheme: HTTP
+            port: 8093
+            path: /healthz
+          initialDelaySeconds: 15
+          timeoutSeconds: 15
+        readinessProbe:
+          httpGet:
+            scheme: HTTP
+            port: 8093
+            path: /readyz
+          initialDelaySeconds: 15
+          timeoutSeconds: 15
+        volumeMounts:
+          - mountPath: /var/run/secrets/tokens
+            name: konnectivity-agent-token
+      serviceAccountName: konnectivity-agent
+      volumes:
+      - name: konnectivity-agent-token
+        projected:
+          sources:
+          - serviceAccountToken:
+              path: konnectivity-agent-token
+              audience: system:konnectivity-server

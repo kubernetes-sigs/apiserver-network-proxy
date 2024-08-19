@@ -21,21 +21,25 @@ import (
 	"time"
 
 	"k8s.io/apimachinery/pkg/labels"
+	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/watch"
 	"k8s.io/client-go/kubernetes"
+	"k8s.io/client-go/tools/cache"
 	"k8s.io/klog/v2"
 	"k8s.io/utils/clock"
 	"sigs.k8s.io/apiserver-network-proxy/pkg/agent/metrics"
 	"sigs.k8s.io/apiserver-network-proxy/pkg/util"
 
+	coordinationv1api "k8s.io/api/coordination/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	coordinationv1 "k8s.io/client-go/kubernetes/typed/coordination/v1"
+	coordinationv1lister "k8s.io/client-go/listers/coordination/v1"
 )
 
 // A ServerLeaseCounter counts leases in the k8s apiserver to determine the
 // current proxy server count.
 type ServerLeaseCounter struct {
-	leaseClient   coordinationv1.LeaseInterface
+	leaseLister   coordinationv1lister.LeaseLister
 	selector      labels.Selector
 	fallbackCount int
 	pc            clock.PassiveClock
@@ -43,9 +47,9 @@ type ServerLeaseCounter struct {
 
 // NewServerLeaseCounter creates a server counter that counts valid leases that match the label
 // selector and provides the fallback count (initially 0) if this fails.
-func NewServerLeaseCounter(pc clock.PassiveClock, k8sClient kubernetes.Interface, labelSelector labels.Selector, leaseNamespace string) *ServerLeaseCounter {
+func NewServerLeaseCounter(pc clock.PassiveClock, leaseLister coordinationv1lister.LeaseLister, labelSelector labels.Selector, leaseNamespace string) *ServerLeaseCounter {
 	return &ServerLeaseCounter{
-		leaseClient:   k8sClient.CoordinationV1().Leases(leaseNamespace),
+		leaseLister:   leaseLister,
 		selector:      labelSelector,
 		fallbackCount: 0,
 		pc:            pc,
@@ -67,17 +71,9 @@ func (lc *ServerLeaseCounter) Count(ctx context.Context) int {
 		latency := time.Now().Sub(start)
 		metrics.Metrics.ObserveLeaseListLatency(latency)
 	}()
-	leases, err := lc.leaseClient.List(ctx, metav1.ListOptions{LabelSelector: lc.selector.String()})
+	leases, err := lc.leaseLister.List(lc.selector)
 	if err != nil {
 		klog.Errorf("Could not list leases to update server count, using fallback count (%v): %v", lc.fallbackCount, err)
-
-		var apiStatus apierrors.APIStatus
-		if errors.As(err, &apiStatus) {
-			status := apiStatus.Status()
-			metrics.Metrics.ObserveLeaseList(int(status.Code), string(status.Reason))
-		} else {
-			klog.Errorf("Error could not be logged to metrics as it is not an APIStatus: %v", err)
-		}
 
 		return lc.fallbackCount
 	}
@@ -85,8 +81,8 @@ func (lc *ServerLeaseCounter) Count(ctx context.Context) int {
 	metrics.Metrics.ObserveLeaseList(200, "")
 
 	count := 0
-	for _, lease := range leases.Items {
-		if util.IsLeaseValid(lc.pc, lease) {
+	for _, lease := range leases {
+		if util.IsLeaseValid(lc.pc, *lease) {
 			count++
 		}
 	}
@@ -102,4 +98,50 @@ func (lc *ServerLeaseCounter) Count(ctx context.Context) int {
 	}
 
 	return count
+}
+
+func NewLeaseInformerWithMetrics(client kubernetes.Interface, namespace string, resyncPeriod time.Duration) cache.SharedIndexInformer {
+	return cache.NewSharedIndexInformer(
+		&cache.ListWatch{
+			ListFunc: func(options metav1.ListOptions) (runtime.Object, error) {
+				obj, err := client.CoordinationV1().Leases(namespace).List(context.TODO(), options)
+				if err != nil {
+					klog.Errorf("Could not list leases: %v", err)
+
+					var apiStatus apierrors.APIStatus
+					if errors.As(err, &apiStatus) {
+						status := apiStatus.Status()
+						metrics.Metrics.ObserveLeaseList(int(status.Code), string(status.Reason))
+					} else {
+						klog.Errorf("Lease list error could not be logged to metrics as it is not an APIStatus: %v", err)
+					}
+					return nil, err
+				}
+
+				metrics.Metrics.ObserveLeaseList(200, "")
+				return obj, nil
+			},
+			WatchFunc: func(options metav1.ListOptions) (watch.Interface, error) {
+				obj, err := client.CoordinationV1().Leases(namespace).Watch(context.TODO(), options)
+				if err != nil {
+					klog.Errorf("Could not watch leases: %v", err)
+
+					var apiStatus apierrors.APIStatus
+					if errors.As(err, &apiStatus) {
+						status := apiStatus.Status()
+						metrics.Metrics.ObserveLeaseWatch(int(status.Code), string(status.Reason))
+					} else {
+						klog.Errorf("Lease watch error could not be logged to metrics as it is not an APIStatus: %v", err)
+					}
+					return nil, err
+				}
+
+				metrics.Metrics.ObserveLeaseWatch(200, "")
+				return obj, nil
+			},
+		},
+		&coordinationv1api.Lease{},
+		resyncPeriod,
+		cache.Indexers{cache.NamespaceIndex: cache.MetaNamespaceIndexFunc},
+	)
 }

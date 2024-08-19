@@ -55,7 +55,7 @@ DOCKER_CMD ?= docker
 DOCKER_CLI_EXPERIMENTAL ?= enabled
 PROXY_SERVER_IP ?= 127.0.0.1
 
-KIND_IMAGE ?= kindest/node
+KIND_IMAGE ?= kindest/node:v1.30.2
 CONNECTION_MODE ?= grpc
 ## --------------------------------------
 ## Testing

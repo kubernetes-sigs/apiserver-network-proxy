@@ -40,6 +40,7 @@ import (
 	"google.golang.org/grpc/keepalive"
 	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/client-go/kubernetes"
+	coordinationv1lister "k8s.io/client-go/listers/coordination/v1"
 	"k8s.io/client-go/tools/clientcmd"
 	"k8s.io/klog/v2"
 	"k8s.io/utils/clock"
@@ -49,8 +50,9 @@ import (
 )
 
 const (
-	ReadHeaderTimeout = 60 * time.Second
-	LeaseNamespace    = "kube-system"
+	ReadHeaderTimeout   = 60 * time.Second
+	LeaseNamespace      = "kube-system"
+	LeaseInformerResync = time.Second * 10
 )
 
 func NewAgentCommand(a *Agent, o *options.GrpcProxyAgentOptions) *cobra.Command {
@@ -150,10 +152,13 @@ func (a *Agent) runProxyConnection(o *options.GrpcProxyAgentOptions, drainCh, st
 		if err != nil {
 			return nil, fmt.Errorf("failed to create kubernetes clientset: %v", err)
 		}
+		leaseInformer := agent.NewLeaseInformerWithMetrics(k8sClient, "", LeaseInformerResync)
+		go leaseInformer.Run(stopCh)
+		leaseLister := coordinationv1lister.NewLeaseLister(leaseInformer.GetIndexer())
 		serverLeaseSelector, _ := labels.Parse("k8s-app=konnectivity-server")
 		serverLeaseCounter := agent.NewServerLeaseCounter(
 			clock.RealClock{},
-			k8sClient,
+			leaseLister,
 			serverLeaseSelector,
 			LeaseNamespace,
 		)
