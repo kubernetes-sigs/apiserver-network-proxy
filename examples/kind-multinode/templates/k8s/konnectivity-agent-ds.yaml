@@ -79,7 +79,7 @@ spec:
           "--probe-interval=5s",
           "--service-account-token-path=/var/run/secrets/tokens/konnectivity-agent-token",
           "--agent-identifiers=ipv4=${HOST_IP}",
-          "--server-count-lease-selector=apiserver.kubernetes.io/identity=kube-apiserver",
+          "--count-server-leases",
           ]
         env:
           - name: POD_NAME

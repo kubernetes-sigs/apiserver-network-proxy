@@ -81,7 +81,7 @@ spec:
           "--agent-service-account=konnectivity-agent",
           "--kubeconfig=/etc/kubernetes/admin.conf",
           "--authentication-audience=system:konnectivity-server",
-          "--server-count=2",
+          "--enable-lease-controller",
           ]
         livenessProbe:
           httpGet:
