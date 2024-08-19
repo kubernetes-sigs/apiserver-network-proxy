@@ -45,6 +45,7 @@ func renderStaticCountDeployments(serverReplicas, agentReplicas int) (serverDepl
 			{Flag: "authentication-audience", Value: "system:konnectivity-server"},
 			{Flag: "admin-bind-address", EmptyValue: true},
 			{Flag: "server-count", Value: strconv.Itoa(serverReplicas)},
+			{Flag: "mode", Value: *connectionMode},
 		},
 	}
 	serverDeployment, _, err = renderTemplate("server/deployment.yaml", serverDeploymentConfig)

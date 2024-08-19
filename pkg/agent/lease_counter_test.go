@@ -126,7 +126,7 @@ func TestServerLeaseCounter(t *testing.T) {
 
 			counter := NewServerLeaseCounter(pc, leaseLister, selector, "")
 
-			got := counter.Count(context.Background())
+			got := counter.Count()
 			if tc.want != got {
 				t.Errorf("incorrect server count (got: %v, want: %v)", got, tc.want)
 			}
@@ -152,7 +152,7 @@ func (lister fakeLeaseLister) List(selector labels.Selector) (ret []*coordinatio
 	return ret, nil
 }
 
-func (lister fakeLeaseLister) Leases(namespace string) coordinationv1lister.LeaseNamespaceLister {
+func (lister fakeLeaseLister) Leases(_ string) coordinationv1lister.LeaseNamespaceLister {
 	panic("should not be used")
 }
 
@@ -175,8 +175,7 @@ func TestServerLeaseCounter_FallbackCount(t *testing.T) {
 
 	counter := NewServerLeaseCounter(pc, leaseLister, selector, "")
 
-	ctx := context.Background()
-	got := counter.Count(ctx)
+	got := counter.Count()
 	leaseLister.Err = fmt.Errorf("fake lease listing error")
 	if got != 1 {
 		t.Errorf("lease counter did not return fallback count on leaseLister error (got: %v, want: 1)", got)
@@ -185,14 +184,14 @@ func TestServerLeaseCounter_FallbackCount(t *testing.T) {
 	// Second call should return the actual count (3) upon leaseClient success.
 	leaseLister.Err = nil
 	actualCount := 3
-	got = counter.Count(ctx)
+	got = counter.Count()
 	if got != actualCount {
 		t.Errorf("lease counter did not return actual count on leaseClient success (got: %v, want: %v)", got, actualCount)
 	}
 
 	// Third call should return updated fallback count (3) upon leaseClient failure.
 	leaseLister.Err = fmt.Errorf("fake lease listing error")
-	got = counter.Count(ctx)
+	got = counter.Count()
 	if got != actualCount {
 		t.Errorf("lease counter did not update fallback count after leaseClient success, returned incorrect count on subsequent leaseClient error (got: %v, want: %v)", got, actualCount)
 	}

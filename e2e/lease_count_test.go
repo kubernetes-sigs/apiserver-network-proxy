@@ -44,6 +44,7 @@ func renderLeaseCountDeployments(serverReplicas, agentReplicas int) (serverDeplo
 			{Flag: "authentication-audience", Value: "system:konnectivity-server"},
 			{Flag: "enable-lease-controller"},
 			{Flag: "admin-bind-address", EmptyValue: true},
+			{Flag: "mode", Value: *connectionMode},
 		},
 	}
 	serverDeployment, _, err = renderTemplate("server/deployment.yaml", serverDeploymentConfig)

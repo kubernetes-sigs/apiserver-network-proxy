@@ -62,7 +62,7 @@ func NewServerLeaseCounter(pc clock.PassiveClock, leaseLister coordinationv1list
 // In the event that no valid leases are found or lease listing fails, the
 // fallback count is returned. This fallback count is updated upon successful
 // discovery of valid leases.
-func (lc *ServerLeaseCounter) Count(ctx context.Context) int {
+func (lc *ServerLeaseCounter) Count() int {
 	// Since the number of proxy servers is generally small (1-10), we opted against
 	// using a LIST and WATCH pattern and instead list all leases on each call.
 	// TODO: Switch to an informer-based system and use events rather than a polling loop.
