@@ -67,7 +67,6 @@ func NewController(k8sClient kubernetes.Interface, holderIdentity string, leaseD
 func (c *Controller) Run(ctx context.Context) {
 	go c.gcController.Run(ctx)
 	go c.acquireController.Run(ctx)
-
 }
 
 func (c *Controller) Stop() {

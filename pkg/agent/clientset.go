@@ -265,7 +265,7 @@ func (cs *ClientSet) Serve() {
 		"agentIdentifiers", cs.agentIdentifiers,
 		"serverAddress", cs.address,
 	)
-	go runpprof.Do(context.Background(), labels, func(ctx context.Context) { cs.sync() })
+	go runpprof.Do(context.Background(), labels, func(context.Context) { cs.sync() })
 }
 
 func (cs *ClientSet) shutdown() {

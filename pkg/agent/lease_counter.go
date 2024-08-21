@@ -63,22 +63,12 @@ func NewServerLeaseCounter(pc clock.PassiveClock, leaseLister coordinationv1list
 // fallback count is returned. This fallback count is updated upon successful
 // discovery of valid leases.
 func (lc *ServerLeaseCounter) Count() int {
-	// Since the number of proxy servers is generally small (1-10), we opted against
-	// using a LIST and WATCH pattern and instead list all leases on each call.
-	// TODO: Switch to an informer-based system and use events rather than a polling loop.
-	start := time.Now()
-	defer func() {
-		latency := time.Now().Sub(start)
-		metrics.Metrics.ObserveLeaseListLatency(latency)
-	}()
 	leases, err := lc.leaseLister.List(lc.selector)
 	if err != nil {
 		klog.Errorf("Could not list leases to update server count, using fallback count (%v): %v", lc.fallbackCount, err)
 
 		return lc.fallbackCount
 	}
-
-	metrics.Metrics.ObserveLeaseList(200, "")
 
 	count := 0
 	for _, lease := range leases {
@@ -104,6 +94,11 @@ func NewLeaseInformerWithMetrics(client kubernetes.Interface, namespace string, 
 	return cache.NewSharedIndexInformer(
 		&cache.ListWatch{
 			ListFunc: func(options metav1.ListOptions) (runtime.Object, error) {
+				start := time.Now()
+				defer func() {
+					latency := time.Now().Sub(start)
+					metrics.Metrics.ObserveLeaseListLatency(latency)
+				}()
 				obj, err := client.CoordinationV1().Leases(namespace).List(context.TODO(), options)
 				if err != nil {
 					klog.Errorf("Could not list leases: %v", err)
