@@ -26,6 +26,7 @@ import (
 	coordinationv1 "k8s.io/client-go/kubernetes/typed/coordination/v1"
 	"k8s.io/klog/v2"
 	"k8s.io/utils/clock"
+	"sigs.k8s.io/apiserver-network-proxy/pkg/server/metrics"
 	"sigs.k8s.io/apiserver-network-proxy/pkg/util"
 )
 
@@ -70,6 +71,8 @@ func (c *GarbageCollectionController) gc(ctx context.Context) {
 			klog.V(4).Infof("Lease %v was already deleted", lease.Name)
 		} else if err != nil {
 			klog.Errorf("Could not delete lease %v: %v", lease.Name, err)
+		} else {
+			metrics.Metrics.CulledLeasesInc()
 		}
 	}
 }

@@ -56,6 +56,7 @@ type ServerMetrics struct {
 	dialFailures      *prometheus.CounterVec
 	streamPackets     *prometheus.CounterVec
 	streamErrors      *prometheus.CounterVec
+	culledLeases      prometheus.Counter
 }
 
 // newServerMetrics create a new ServerMetrics, configured with default metric names.
@@ -148,6 +149,12 @@ func newServerMetrics() *ServerMetrics {
 			"reason",
 		},
 	)
+	culledLeases := prometheus.NewCounter(prometheus.CounterOpts{
+		Namespace: Namespace,
+		Subsystem: Subsystem,
+		Name:      "culled_leases_count",
+		Help:      "Count of expired leases that the lease garbage collection controller has culled.",
+	})
 	streamPackets := commonmetrics.MakeStreamPacketsTotalMetric(Namespace, Subsystem)
 	streamErrors := commonmetrics.MakeStreamErrorsTotalMetric(Namespace, Subsystem)
 	prometheus.MustRegister(endpointLatencies)
@@ -161,6 +168,7 @@ func newServerMetrics() *ServerMetrics {
 	prometheus.MustRegister(dialFailures)
 	prometheus.MustRegister(streamPackets)
 	prometheus.MustRegister(streamErrors)
+	prometheus.MustRegister(culledLeases)
 	return &ServerMetrics{
 		endpointLatencies: endpointLatencies,
 		frontendLatencies: frontendLatencies,
@@ -173,6 +181,7 @@ func newServerMetrics() *ServerMetrics {
 		dialFailures:      dialFailures,
 		streamPackets:     streamPackets,
 		streamErrors:      streamErrors,
+		culledLeases:      culledLeases,
 	}
 }
 
@@ -188,6 +197,11 @@ func (s *ServerMetrics) Reset() {
 	s.dialFailures.Reset()
 	s.streamPackets.Reset()
 	s.streamErrors.Reset()
+}
+
+// CulledLeasesInc increments the number of leases that the GC controller has culled.
+func (s *ServerMetrics) CulledLeasesInc() {
+	s.culledLeases.Inc()
 }
 
 // ObserveDialLatency records the latency of dial to the remote endpoint.
