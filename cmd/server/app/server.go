@@ -42,17 +42,23 @@ import (
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/tools/clientcmd"
 	"k8s.io/klog/v2"
-
 	"sigs.k8s.io/apiserver-network-proxy/cmd/server/app/options"
 	"sigs.k8s.io/apiserver-network-proxy/konnectivity-client/proto/client"
 	"sigs.k8s.io/apiserver-network-proxy/pkg/server"
+	"sigs.k8s.io/apiserver-network-proxy/pkg/server/leases"
 	"sigs.k8s.io/apiserver-network-proxy/pkg/util"
 	"sigs.k8s.io/apiserver-network-proxy/proto/agent"
 )
 
 var udsListenerLock sync.Mutex
 
-const ReadHeaderTimeout = 60 * time.Second
+const (
+	ReadHeaderTimeout    = 60 * time.Second
+	LeaseDuration        = 30 * time.Second
+	LeaseRenewalInterval = 15 * time.Second
+	LeaseGCInterval      = 15 * time.Second
+	LeaseNamespace       = "kube-system"
+)
 
 func NewProxyCommand(p *Proxy, o *options.ProxyRunOptions) *cobra.Command {
 	cmd := &cobra.Command{
@@ -148,6 +154,22 @@ func (p *Proxy) Run(o *options.ProxyRunOptions, stopCh <-chan struct{}) error {
 		return fmt.Errorf("failed to run the agent server: %v", err)
 	}
 	defer p.agentServer.Stop()
+
+	if o.EnableLeaseController {
+		leaseController := leases.NewController(
+			k8sClient,
+			o.ServerID,
+			int32(LeaseDuration.Seconds()),
+			LeaseRenewalInterval,
+			LeaseGCInterval,
+			fmt.Sprintf("konnectivity-proxy-server-%v", o.ServerID),
+			LeaseNamespace,
+			map[string]string{"k8s-app": "konnectivity-server"},
+		)
+		klog.V(1).Infoln("Starting lease acquisition and garbage collection controller.")
+		leaseController.Run(ctx)
+		defer leaseController.Stop()
+	}
 
 	klog.V(1).Infoln("Starting admin server for debug connections.")
 	err = p.runAdminServer(o, p.server)

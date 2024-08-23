@@ -22,11 +22,11 @@ spec:
           requests:
             cpu: 50m
           limits:
-            memdeploymentory: 30Mi
+            memory: 30Mi
         command: [ "/proxy-agent"]
         args: [
           {{ range .Args }}
-          "--{{ .Key }}{{if ne .Value ""}}={{ .Value }}{{ end }}",
+          "--{{ .Flag }}{{if or (ne .Value "") .EmptyValue}}={{ .Value }}{{ end }}",
           {{ end }}
           ]
         env:
@@ -57,26 +57,32 @@ spec:
           initialDelaySeconds: 15
           timeoutSeconds: 15
         volumeMounts:
+          - name: kubernetes
+            mountPath: /etc/kubernetes
+            readOnly: true
           - mountPath: /var/run/secrets/tokens
             name: konnectivity-agent-token
-      serviceAccountName: konnectivity-agent
-      ports:
-      - name: serverport
-        containerPort: 8090
-        hostPort: 8090
-      - name: agentport
-        containerPort: 8091
-        hostPort: 8091
-      - name: healthport
-        containerPort: 8092
-        hostPort: 8092
-      - name: adminport
-        containerPort: 8093
-        hostPort: 8093
+        ports:
+        - name: serverport
+          containerPort: 8090
+          hostPort: 8090
+        - name: agentport
+          containerPort: 8091
+          hostPort: 8091
+        - name: healthport
+          containerPort: 8093
+          hostPort: 8093
+        - name: adminport
+          containerPort: 8094
+          hostPort: 8094
       volumes:
+      - name: kubernetes
+        hostPath:
+          path: /etc/kubernetes
       - name: konnectivity-agent-token
         projected:
           sources:
           - serviceAccountToken:
               path: konnectivity-agent-token
               audience: system:konnectivity-server
+      serviceAccountName: konnectivity-agent

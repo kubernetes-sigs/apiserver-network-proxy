@@ -14,16 +14,27 @@ spec:
     metadata:
       labels:
         k8s-app: konnectivity-server
+    spec:
+      priorityClassName: system-cluster-critical
+      tolerations:
+      - key: "CriticalAddonsOnly"
+        operator: "Exists"
+      - operator: "Exists"
+      nodeSelector:
+        node-role.kubernetes.io/control-plane: ""
       containers:
       - name: konnectivity-server-container
         image: {{ .Image }}
+        securityContext:
+          allowPrivilegeEscalation: false
+          runAsUser: 0
         resources:
           requests:
             cpu: 1m
         command: [ "/proxy-server"]
         args: [
           {{ range .Args }}
-          "--{{ .Key }}{{if ne .Value ""}}={{ .Value }}{{ end }}",
+          "--{{ .Flag }}{{if or (ne .Value "") .EmptyValue}}={{ .Value }}{{ end }}",
           {{ end }}
           ]
         livenessProbe:
@@ -45,8 +56,8 @@ spec:
           containerPort: 8092
           hostPort: 8092
         - name: adminport
-          containerPort: 8093
-          hostPort: 8093
+          containerPort: 8095
+          hostPort: 8095
         volumeMounts:
         - name: varlogkonnectivityserver
           mountPath: /var/log/konnectivity-server.log

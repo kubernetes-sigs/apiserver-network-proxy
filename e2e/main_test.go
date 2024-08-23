@@ -1,3 +1,18 @@
+/*
+Copyright 2024 The Kubernetes Authors.
+
+Licensed under the Apache License, Version 2.0 (the "License");
+you may not use this file except in compliance with the License.
+You may obtain a copy of the License at
+
+	http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions and
+limitations under the License.
+*/
 package e2e
 
 import (
@@ -5,6 +20,7 @@ import (
 	"context"
 	"flag"
 	"fmt"
+	"io"
 	"log"
 	"os"
 	"path"
@@ -12,9 +28,15 @@ import (
 	"text/template"
 	"time"
 
+	appsv1api "k8s.io/api/apps/v1"
+	corev1 "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/runtime/schema"
+	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/kubernetes/scheme"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/e2e-framework/klient/k8s"
 	"sigs.k8s.io/e2e-framework/klient/wait"
 	"sigs.k8s.io/e2e-framework/klient/wait/conditions"
 	"sigs.k8s.io/e2e-framework/pkg/env"
@@ -47,7 +69,7 @@ func TestMain(m *testing.M) {
 	kindCluster := kind.NewCluster(kindClusterName).WithOpts(kind.WithImage(*kindImage))
 
 	testenv.Setup(
-		envfuncs.CreateCluster(kindCluster, kindClusterName),
+		envfuncs.CreateClusterWithConfig(kindCluster, kindClusterName, "templates/kind.config"),
 		envfuncs.LoadImageToCluster(kindClusterName, *agentImage),
 		envfuncs.LoadImageToCluster(kindClusterName, *serverImage),
 		renderAndApplyManifests,
@@ -83,15 +105,16 @@ func renderTemplate(file string, params any) (client.Object, *schema.GroupVersio
 	return obj.(client.Object), gvk, nil
 }
 
-type KeyValue struct {
-	Key   string
-	Value string
+type CLIFlag struct {
+	Flag       string
+	Value      string
+	EmptyValue bool
 }
 
 type DeploymentConfig struct {
 	Replicas int
 	Image    string
-	Args     []KeyValue
+	Args     []CLIFlag
 }
 
 func renderAndApplyManifests(ctx context.Context, cfg *envconf.Config) (context.Context, error) {
@@ -110,10 +133,6 @@ func renderAndApplyManifests(ctx context.Context, cfg *envconf.Config) (context.
 	if err != nil {
 		return ctx, err
 	}
-	agentService, _, err := renderTemplate("agent/service.yaml", struct{}{})
-	if err != nil {
-		return ctx, err
-	}
 
 	// Submit agent RBAC templates to k8s.
 	err = client.Resources().Create(ctx, agentServiceAccount)
@@ -125,10 +144,6 @@ func renderAndApplyManifests(ctx context.Context, cfg *envconf.Config) (context.
 		return ctx, err
 	}
 	err = client.Resources().Create(ctx, agentClusterRoleBinding)
-	if err != nil {
-		return ctx, err
-	}
-	err = client.Resources().Create(ctx, agentService)
 	if err != nil {
 		return ctx, err
 	}
@@ -156,21 +171,165 @@ func renderAndApplyManifests(ctx context.Context, cfg *envconf.Config) (context.
 	return ctx, nil
 }
 
-func deployAndWaitForDeployment(deployment client.Object) func(context.Context, *testing.T, *envconf.Config) context.Context {
+func createDeployment(obj client.Object) func(context.Context, *testing.T, *envconf.Config) context.Context {
 	return func(ctx context.Context, t *testing.T, cfg *envconf.Config) context.Context {
-		client := cfg.Client()
-		err := client.Resources().Create(ctx, deployment)
+		deployment, ok := obj.(*appsv1api.Deployment)
+		if !ok {
+			t.Fatalf("object %q is not a deployment", obj.GetName())
+		}
+
+		err := cfg.Client().Resources(deployment.Namespace).Create(ctx, deployment)
 		if err != nil {
-			t.Fatalf("could not create Deployment: %v", err)
+			t.Fatalf("could not create deployment %q: %v", deployment.Name, err)
+		}
+
+		newDeployment := &appsv1api.Deployment{}
+		err = cfg.Client().Resources(deployment.Namespace).Get(ctx, deployment.Name, deployment.Namespace, newDeployment)
+		if err != nil {
+			t.Fatalf("could not get deployment %q after creation: %v", deployment.Name, err)
+		}
+
+		return ctx
+	}
+}
+
+func deleteDeployment(obj client.Object) func(context.Context, *testing.T, *envconf.Config) context.Context {
+	return func(ctx context.Context, t *testing.T, cfg *envconf.Config) context.Context {
+		deployment, ok := obj.(*appsv1api.Deployment)
+		if !ok {
+			t.Fatalf("object %q is not a deployment", obj.GetName())
+		}
+
+		k8sClient := kubernetes.NewForConfigOrDie(cfg.Client().RESTConfig())
+		pods, err := k8sClient.CoreV1().Pods(deployment.Namespace).List(ctx, metav1.ListOptions{LabelSelector: labels.FormatLabels(deployment.Spec.Selector.MatchLabels)})
+		if err != nil {
+			t.Fatalf("could not get pods for deployment %q: %v", deployment.Name, err)
+		}
+
+		cfg.Client().Resources(deployment.Namespace).Delete(ctx, deployment)
+
+		err = wait.For(
+			conditions.New(cfg.Client().Resources(deployment.Namespace)).ResourcesDeleted(pods),
+			wait.WithTimeout(60*time.Second),
+			wait.WithInterval(5*time.Second),
+		)
+		if err != nil {
+			pods, err := k8sClient.CoreV1().Pods(deployment.Namespace).List(ctx, metav1.ListOptions{LabelSelector: labels.FormatLabels(deployment.Spec.Selector.MatchLabels)})
+			if err != nil {
+				t.Fatalf("could not get pods for deployment %q: %v", deployment.Name, err)
+			}
+
+			for _, pod := range pods.Items {
+				logs, err := dumpPodLogs(ctx, k8sClient, pod.Namespace, pod.Name)
+				if err != nil {
+					t.Fatalf("could not dump logs for pod %q: %v", pod.Name, err)
+				}
+				t.Errorf("logs for pod %q: %v", pod.Name, logs)
+			}
+			t.Fatalf("waiting for deletion of pods for deployment %q failed, dumped pod logs", deployment.Name)
+		}
+
+		return ctx
+	}
+}
+
+func waitForDeployment(obj client.Object) func(context.Context, *testing.T, *envconf.Config) context.Context {
+	return func(ctx context.Context, t *testing.T, cfg *envconf.Config) context.Context {
+		deployment, ok := obj.(*appsv1api.Deployment)
+		if !ok {
+			t.Fatalf("object %q is not a deployment", obj.GetName())
+		}
+
+		k8sClient := kubernetes.NewForConfigOrDie(cfg.Client().RESTConfig())
+		err := wait.For(
+			conditions.New(cfg.Client().Resources(deployment.Namespace)).DeploymentAvailable(deployment.Name, deployment.Namespace),
+			wait.WithTimeout(120*time.Second),
+			wait.WithInterval(5*time.Second),
+		)
+		if err != nil {
+			pods, err := k8sClient.CoreV1().Pods(deployment.Namespace).List(ctx, metav1.ListOptions{LabelSelector: labels.FormatLabels(deployment.Spec.Selector.MatchLabels)})
+			if err != nil {
+				t.Fatalf("could not get pods for deployment %q: %v", deployment.Name, err)
+			}
+
+			for _, pod := range pods.Items {
+				if isPodReady(&pod) {
+					continue
+				}
+
+				logs, err := dumpPodLogs(ctx, k8sClient, pod.Namespace, pod.Name)
+				if err != nil {
+					t.Fatalf("could not dump logs for pod %q: %v", pod.Name, err)
+				}
+				t.Errorf("logs for pod %q: %v", pod.Name, logs)
+			}
+			t.Fatalf("waiting for deployment %q failed, dumped pod logs", deployment.Name)
+		}
+
+		return ctx
+	}
+}
+
+func isPodReady(pod *corev1.Pod) bool {
+	for _, condition := range pod.Status.Conditions {
+		if condition.Type == corev1.PodReady {
+			return condition.Status == corev1.ConditionTrue
+		}
+	}
+	return false
+}
+
+func dumpPodLogs(ctx context.Context, k8sClient kubernetes.Interface, namespace, name string) (string, error) {
+	req := k8sClient.CoreV1().Pods(namespace).GetLogs(name, &corev1.PodLogOptions{})
+	podLogs, err := req.Stream(ctx)
+	if err != nil {
+		return "", fmt.Errorf("could not stream logs for pod %q in namespace %q: %w", name, namespace, err)
+	}
+	defer podLogs.Close()
+
+	b, err := io.ReadAll(podLogs)
+	if err != nil {
+		return "", fmt.Errorf("could not read logs for pod %q in namespace %q from stream: %w", name, namespace, err)
+	}
+
+	return string(b), nil
+}
+
+func scaleDeployment(obj client.Object, replicas int) func(context.Context, *testing.T, *envconf.Config) context.Context {
+	return func(ctx context.Context, t *testing.T, cfg *envconf.Config) context.Context {
+		deployment, ok := obj.(*appsv1api.Deployment)
+		if !ok {
+			t.Fatalf("provided object is not a deployment")
+		}
+
+		err := cfg.Client().Resources().Get(ctx, deployment.Name, deployment.Namespace, deployment)
+		if err != nil {
+			t.Fatalf("could not get Deployment to update (name: %q, namespace: %q): %v", deployment.Name, deployment.Namespace, err)
+		}
+
+		newReplicas := int32(replicas)
+		deployment.Spec.Replicas = &newReplicas
+
+		client := cfg.Client()
+		err = client.Resources().Update(ctx, deployment)
+		if err != nil {
+			t.Fatalf("could not update Deployment replicas: %v", err)
 		}
 
 		err = wait.For(
-			conditions.New(client.Resources()).DeploymentAvailable(deployment.GetName(), deployment.GetNamespace()),
-			wait.WithTimeout(1*time.Minute),
-			wait.WithInterval(10*time.Second),
+			conditions.New(cfg.Client().Resources(deployment.Namespace)).ResourceScaled(deployment, func(obj k8s.Object) int32 {
+				deployment, ok := obj.(*appsv1api.Deployment)
+				if !ok {
+					t.Fatalf("provided object is not a deployment")
+				}
+
+				return deployment.Status.AvailableReplicas
+			}, int32(replicas)),
+			wait.WithTimeout(60*time.Second),
+			wait.WithInterval(5*time.Second),
 		)
 		if err != nil {
-			t.Fatalf("waiting for Deployment failed: %v", err)
+			t.Fatalf("waiting for deployment %q to scale failed", deployment.Name)
 		}
 
 		return ctx

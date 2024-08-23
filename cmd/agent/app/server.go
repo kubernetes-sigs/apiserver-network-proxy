@@ -38,14 +38,24 @@ import (
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials"
 	"google.golang.org/grpc/keepalive"
+	"k8s.io/apimachinery/pkg/labels"
+	"k8s.io/client-go/kubernetes"
+	coordinationv1lister "k8s.io/client-go/listers/coordination/v1"
+	"k8s.io/client-go/rest"
+	"k8s.io/client-go/tools/cache"
+	"k8s.io/client-go/tools/clientcmd"
 	"k8s.io/klog/v2"
-
+	"k8s.io/utils/clock"
 	"sigs.k8s.io/apiserver-network-proxy/cmd/agent/app/options"
 	"sigs.k8s.io/apiserver-network-proxy/pkg/agent"
 	"sigs.k8s.io/apiserver-network-proxy/pkg/util"
 )
 
-const ReadHeaderTimeout = 60 * time.Second
+const (
+	ReadHeaderTimeout   = 60 * time.Second
+	LeaseNamespace      = "kube-system"
+	LeaseInformerResync = time.Second * 10
+)
 
 func NewAgentCommand(a *Agent, o *options.GrpcProxyAgentOptions) *cobra.Command {
 	cmd := &cobra.Command{
@@ -133,6 +143,38 @@ func (a *Agent) runProxyConnection(o *options.GrpcProxyAgentOptions, drainCh, st
 		}),
 	}
 	cc := o.ClientSetConfig(dialOptions...)
+
+	if o.CountServerLeases {
+		var config *rest.Config
+		if o.KubeconfigPath != "" {
+			config, err = clientcmd.BuildConfigFromFlags("", o.KubeconfigPath)
+			if err != nil {
+				return nil, fmt.Errorf("failed to load kubernetes client config: %v", err)
+			}
+		} else {
+			config, err = rest.InClusterConfig()
+			if err != nil {
+				return nil, fmt.Errorf("failed to load in cluster kubernetes client config: %w", err)
+			}
+		}
+
+		k8sClient, err := kubernetes.NewForConfig(config)
+		if err != nil {
+			return nil, fmt.Errorf("failed to create kubernetes clientset: %v", err)
+		}
+		leaseInformer := agent.NewLeaseInformerWithMetrics(k8sClient, LeaseNamespace, LeaseInformerResync)
+		go leaseInformer.Run(stopCh)
+		cache.WaitForCacheSync(stopCh, leaseInformer.HasSynced)
+		leaseLister := coordinationv1lister.NewLeaseLister(leaseInformer.GetIndexer())
+		serverLeaseSelector, _ := labels.Parse("k8s-app=konnectivity-server")
+		serverLeaseCounter := agent.NewServerLeaseCounter(
+			clock.RealClock{},
+			leaseLister,
+			serverLeaseSelector,
+		)
+		cc.ServerLeaseCounter = serverLeaseCounter
+	}
+
 	cs := cc.NewAgentClientSet(drainCh, stopCh)
 	cs.Serve()
 

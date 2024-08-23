@@ -6,11 +6,8 @@ metadata:
 spec:
   selector:
     k8s-app: konnectivity-server
-  clusterIP: None
   ports:
   - protocol: TCP
     port: 8091
     targetPort: 8091
-  - protocol: TCP
-    port: 8093
-    targetPort: 8093
+    name: agent
