@@ -54,11 +54,25 @@ func (c *GarbageCollectionController) Run(ctx context.Context) {
 }
 
 func (c *GarbageCollectionController) gc(ctx context.Context) {
+	start := time.Now()
 	leases, err := c.leaseInterface.List(ctx, metav1.ListOptions{LabelSelector: c.labelSelector})
+	latency := time.Now().Sub(start)
 	if err != nil {
 		klog.Errorf("Could not list leases to garbage collect: %v", err)
+
+		var apiStatus apierrors.APIStatus
+		if errors.As(err, &apiStatus) {
+			status := apiStatus.Status()
+			metrics.Metrics.ObserveLeaseList(int(status.Code), string(status.Reason))
+			metrics.Metrics.ObserveLeaseListLatency(int(status.Code), latency)
+		} else {
+			klog.Errorf("Lease list error could not be logged to metrics as it is not an APIStatus: %v", err)
+		}
+
 		return
 	}
+	metrics.Metrics.ObserveLeaseList(200, "")
+	metrics.Metrics.ObserveLeaseListLatency(200, latency)
 
 	for _, lease := range leases.Items {
 		if util.IsLeaseValid(c.pc, lease) {

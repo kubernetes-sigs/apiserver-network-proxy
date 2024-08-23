@@ -60,6 +60,8 @@ type ServerMetrics struct {
 	culledLeases         prometheus.Counter
 	leaseDeleteLatencies *prometheus.HistogramVec
 	leaseDeletes         *prometheus.CounterVec
+	leaseListLatencies   *prometheus.HistogramVec
+	leaseLists           *prometheus.CounterVec
 }
 
 // newServerMetrics create a new ServerMetrics, configured with default metric names.
@@ -176,6 +178,24 @@ func newServerMetrics() *ServerMetrics {
 		},
 		[]string{"http_status_code", "reason"},
 	)
+	leaseListLatencies := prometheus.NewHistogramVec(
+		prometheus.HistogramOpts{
+			Namespace: Namespace,
+			Subsystem: Subsystem,
+			Name:      "lease_list_latency_seconds",
+			Help:      "Latency of lease list calls by the garbage collection controller in seconds.",
+		},
+		[]string{"http_status_code"},
+	)
+	leaseLists := prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Namespace: Namespace,
+			Subsystem: Subsystem,
+			Name:      "lease_list_total",
+			Help:      "Count of lease deletion calls by the garbage collection controller. Labeled by HTTP status code and reason.",
+		},
+		[]string{"http_status_code", "reason"},
+	)
 	streamPackets := commonmetrics.MakeStreamPacketsTotalMetric(Namespace, Subsystem)
 	streamErrors := commonmetrics.MakeStreamErrorsTotalMetric(Namespace, Subsystem)
 	prometheus.MustRegister(endpointLatencies)
@@ -192,6 +212,8 @@ func newServerMetrics() *ServerMetrics {
 	prometheus.MustRegister(culledLeases)
 	prometheus.MustRegister(leaseDeleteLatencies)
 	prometheus.MustRegister(leaseDeletes)
+	prometheus.MustRegister(leaseListLatencies)
+	prometheus.MustRegister(leaseLists)
 	return &ServerMetrics{
 		endpointLatencies:    endpointLatencies,
 		frontendLatencies:    frontendLatencies,
@@ -207,6 +229,8 @@ func newServerMetrics() *ServerMetrics {
 		culledLeases:         culledLeases,
 		leaseDeleteLatencies: leaseDeleteLatencies,
 		leaseDeletes:         leaseDeletes,
+		leaseListLatencies:   leaseListLatencies,
+		leaseLists:           leaseLists,
 	}
 }
 
@@ -308,4 +332,12 @@ func (s *ServerMetrics) ObserveLeaseDeleteLatency(httpCode int, latency time.Dur
 
 func (s *ServerMetrics) ObserveLeaseDelete(httpCode int, reason string) {
 	s.leaseDeletes.WithLabelValues(strconv.Itoa(httpCode), reason).Inc()
+}
+
+func (s *ServerMetrics) ObserveLeaseListLatency(httpCode int, latency time.Duration) {
+	s.leaseListLatencies.WithLabelValues(strconv.Itoa(httpCode)).Observe(latency.Seconds())
+}
+
+func (s *ServerMetrics) ObserveLeaseList(httpCode int, reason string) {
+	s.leaseLists.WithLabelValues(strconv.Itoa(httpCode), reason).Inc()
 }
