@@ -41,6 +41,7 @@ import (
 	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/client-go/kubernetes"
 	coordinationv1lister "k8s.io/client-go/listers/coordination/v1"
+	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/cache"
 	"k8s.io/client-go/tools/clientcmd"
 	"k8s.io/klog/v2"
@@ -144,12 +145,20 @@ func (a *Agent) runProxyConnection(o *options.GrpcProxyAgentOptions, drainCh, st
 	cc := o.ClientSetConfig(dialOptions...)
 
 	if o.CountServerLeases {
-		var k8sClient *kubernetes.Clientset
-		config, err := clientcmd.BuildConfigFromFlags("", o.KubeconfigPath)
-		if err != nil {
-			return nil, fmt.Errorf("failed to load kubernetes client config: %v", err)
+		var config *rest.Config
+		if o.KubeconfigPath != "" {
+			config, err = clientcmd.BuildConfigFromFlags("", o.KubeconfigPath)
+			if err != nil {
+				return nil, fmt.Errorf("failed to load kubernetes client config: %v", err)
+			}
+		} else {
+			config, err = rest.InClusterConfig()
+			if err != nil {
+				return nil, fmt.Errorf("failed to load in cluster kubernetes client config: %w", err)
+			}
 		}
-		k8sClient, err = kubernetes.NewForConfig(config)
+
+		k8sClient, err := kubernetes.NewForConfig(config)
 		if err != nil {
 			return nil, fmt.Errorf("failed to create kubernetes clientset: %v", err)
 		}
