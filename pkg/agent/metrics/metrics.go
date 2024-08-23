@@ -60,7 +60,7 @@ type AgentMetrics struct {
 	streamErrors        *prometheus.CounterVec
 	leaseLists          *prometheus.CounterVec
 	leaseWatches        *prometheus.CounterVec
-	leaseListLatencies  prometheus.Histogram
+	leaseListLatencies  *prometheus.HistogramVec
 }
 
 // newAgentMetrics create a new AgentMetrics, configured with default metric names.
@@ -137,7 +137,7 @@ func newAgentMetrics() *AgentMetrics {
 		},
 		[]string{"http_response_code", "reason"},
 	)
-	leaseListLatencies := prometheus.NewHistogram(
+	leaseListLatencies := prometheus.NewHistogramVec(
 		prometheus.HistogramOpts{
 			Namespace: Namespace,
 			Subsystem: Subsystem,
@@ -145,6 +145,7 @@ func newAgentMetrics() *AgentMetrics {
 			Help:      "Latency of server lease listing in seconds",
 			Buckets:   latencyBuckets,
 		},
+		[]string{"http_response_code"},
 	)
 	streamPackets := commonmetrics.MakeStreamPacketsTotalMetric(Namespace, Subsystem)
 	streamErrors := commonmetrics.MakeStreamErrorsTotalMetric(Namespace, Subsystem)
@@ -226,8 +227,8 @@ func (a *AgentMetrics) ObserveLeaseWatch(httpCode int, reason string) {
 	a.leaseLists.WithLabelValues(strconv.Itoa(httpCode), reason).Inc()
 }
 
-func (a *AgentMetrics) ObserveLeaseListLatency(latency time.Duration) {
-	a.leaseListLatencies.Observe(latency.Seconds())
+func (a *AgentMetrics) ObserveLeaseListLatency(latency time.Duration, httpCode int) {
+	a.leaseListLatencies.WithLabelValues(strconv.Itoa(httpCode)).Observe(latency.Seconds())
 }
 
 // EndpointConnectionInc increments a new endpoint connection.

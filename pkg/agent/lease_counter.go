@@ -95,9 +95,10 @@ func NewLeaseInformerWithMetrics(client kubernetes.Interface, namespace string, 
 		&cache.ListWatch{
 			ListFunc: func(options metav1.ListOptions) (runtime.Object, error) {
 				start := time.Now()
+				httpCode := 200
 				defer func() {
 					latency := time.Now().Sub(start)
-					metrics.Metrics.ObserveLeaseListLatency(latency)
+					metrics.Metrics.ObserveLeaseListLatency(latency, httpCode)
 				}()
 				obj, err := client.CoordinationV1().Leases(namespace).List(context.TODO(), options)
 				if err != nil {
@@ -106,6 +107,7 @@ func NewLeaseInformerWithMetrics(client kubernetes.Interface, namespace string, 
 					var apiStatus apierrors.APIStatus
 					if errors.As(err, &apiStatus) {
 						status := apiStatus.Status()
+						httpCode = int(status.Code)
 						metrics.Metrics.ObserveLeaseList(int(status.Code), string(status.Reason))
 					} else {
 						klog.Errorf("Lease list error could not be logged to metrics as it is not an APIStatus: %v", err)
