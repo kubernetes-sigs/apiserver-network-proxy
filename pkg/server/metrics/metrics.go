@@ -17,6 +17,7 @@ limitations under the License.
 package metrics
 
 import (
+	"strconv"
 	"time"
 
 	"github.com/prometheus/client_golang/prometheus"
@@ -45,18 +46,20 @@ var (
 
 // ServerMetrics includes all the metrics of the proxy server.
 type ServerMetrics struct {
-	endpointLatencies *prometheus.HistogramVec
-	frontendLatencies *prometheus.HistogramVec
-	grpcConnections   *prometheus.GaugeVec
-	httpConnections   prometheus.Gauge
-	backend           *prometheus.GaugeVec
-	pendingDials      *prometheus.GaugeVec
-	establishedConns  *prometheus.GaugeVec
-	fullRecvChannels  *prometheus.GaugeVec
-	dialFailures      *prometheus.CounterVec
-	streamPackets     *prometheus.CounterVec
-	streamErrors      *prometheus.CounterVec
-	culledLeases      prometheus.Counter
+	endpointLatencies    *prometheus.HistogramVec
+	frontendLatencies    *prometheus.HistogramVec
+	grpcConnections      *prometheus.GaugeVec
+	httpConnections      prometheus.Gauge
+	backend              *prometheus.GaugeVec
+	pendingDials         *prometheus.GaugeVec
+	establishedConns     *prometheus.GaugeVec
+	fullRecvChannels     *prometheus.GaugeVec
+	dialFailures         *prometheus.CounterVec
+	streamPackets        *prometheus.CounterVec
+	streamErrors         *prometheus.CounterVec
+	culledLeases         prometheus.Counter
+	leaseDeleteLatencies *prometheus.HistogramVec
+	leaseDeletes         *prometheus.CounterVec
 }
 
 // newServerMetrics create a new ServerMetrics, configured with default metric names.
@@ -155,6 +158,24 @@ func newServerMetrics() *ServerMetrics {
 		Name:      "culled_leases_count",
 		Help:      "Count of expired leases that the lease garbage collection controller has culled.",
 	})
+	leaseDeleteLatencies := prometheus.NewHistogramVec(
+		prometheus.HistogramOpts{
+			Namespace: Namespace,
+			Subsystem: Subsystem,
+			Name:      "lease_delete_latency_seconds",
+			Help:      "Latency of lease deletion calls by the garbage collection controller in seconds.",
+		},
+		[]string{"http_status_code"},
+	)
+	leaseDeletes := prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Namespace: Namespace,
+			Subsystem: Subsystem,
+			Name:      "lease_delete_total",
+			Help:      "Count of lease delection calls by the garbage collection controller. Labeled by HTTP status code and reason.",
+		},
+		[]string{"http_status_code", "reason"},
+	)
 	streamPackets := commonmetrics.MakeStreamPacketsTotalMetric(Namespace, Subsystem)
 	streamErrors := commonmetrics.MakeStreamErrorsTotalMetric(Namespace, Subsystem)
 	prometheus.MustRegister(endpointLatencies)
@@ -169,19 +190,23 @@ func newServerMetrics() *ServerMetrics {
 	prometheus.MustRegister(streamPackets)
 	prometheus.MustRegister(streamErrors)
 	prometheus.MustRegister(culledLeases)
+	prometheus.MustRegister(leaseDeleteLatencies)
+	prometheus.MustRegister(leaseDeletes)
 	return &ServerMetrics{
-		endpointLatencies: endpointLatencies,
-		frontendLatencies: frontendLatencies,
-		grpcConnections:   grpcConnections,
-		httpConnections:   httpConnections,
-		backend:           backend,
-		pendingDials:      pendingDials,
-		establishedConns:  establishedConns,
-		fullRecvChannels:  fullRecvChannels,
-		dialFailures:      dialFailures,
-		streamPackets:     streamPackets,
-		streamErrors:      streamErrors,
-		culledLeases:      culledLeases,
+		endpointLatencies:    endpointLatencies,
+		frontendLatencies:    frontendLatencies,
+		grpcConnections:      grpcConnections,
+		httpConnections:      httpConnections,
+		backend:              backend,
+		pendingDials:         pendingDials,
+		establishedConns:     establishedConns,
+		fullRecvChannels:     fullRecvChannels,
+		dialFailures:         dialFailures,
+		streamPackets:        streamPackets,
+		streamErrors:         streamErrors,
+		culledLeases:         culledLeases,
+		leaseDeleteLatencies: leaseDeleteLatencies,
+		leaseDeletes:         leaseDeletes,
 	}
 }
 
@@ -275,4 +300,12 @@ func (s *ServerMetrics) ObserveStreamErrorNoPacket(segment commonmetrics.Segment
 
 func (s *ServerMetrics) ObserveStreamError(segment commonmetrics.Segment, err error, packetType client.PacketType) {
 	commonmetrics.ObserveStreamError(s.streamErrors, segment, err, packetType)
+}
+
+func (s *ServerMetrics) ObserveLeaseDeleteLatency(httpCode int, latency time.Duration) {
+	s.leaseDeleteLatencies.WithLabelValues(strconv.Itoa(httpCode)).Observe(latency.Seconds())
+}
+
+func (s *ServerMetrics) ObserveLeaseDelete(httpCode int, reason string) {
+	s.leaseDeletes.WithLabelValues(strconv.Itoa(httpCode), reason).Inc()
 }

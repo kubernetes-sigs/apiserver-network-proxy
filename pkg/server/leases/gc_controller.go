@@ -17,9 +17,10 @@ package leases
 
 import (
 	"context"
+	"errors"
 	"time"
 
-	"k8s.io/apimachinery/pkg/api/errors"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/client-go/kubernetes"
@@ -66,13 +67,30 @@ func (c *GarbageCollectionController) gc(ctx context.Context) {
 
 		// Optimistic concurrency: if a lease has a different resourceVersion than
 		// when we got it, it may have been renewed.
+		start := time.Now()
 		err := c.leaseInterface.Delete(ctx, lease.Name, *metav1.NewRVDeletionPrecondition(lease.ResourceVersion))
-		if errors.IsNotFound(err) {
+		if apierrors.IsNotFound(err) {
 			klog.V(4).Infof("Lease %v was already deleted", lease.Name)
 		} else if err != nil {
 			klog.Errorf("Could not delete lease %v: %v", lease.Name, err)
 		} else {
 			metrics.Metrics.CulledLeasesInc()
+		}
+
+		// Log metrics for the deletion call.
+		latency := time.Now().Sub(start)
+		if err != nil {
+			var apiStatus apierrors.APIStatus
+			if errors.As(err, &apiStatus) {
+				status := apiStatus.Status()
+				metrics.Metrics.ObserveLeaseDelete(int(status.Code), string(status.Reason))
+				metrics.Metrics.ObserveLeaseDeleteLatency(int(status.Code), latency)
+			} else {
+				klog.Errorf("Lease delete error could not be logged to metrics as it is not an APIStatus: %v", err)
+			}
+		} else {
+			metrics.Metrics.ObserveLeaseDelete(200, "")
+			metrics.Metrics.ObserveLeaseDeleteLatency(200, latency)
 		}
 	}
 }
