@@ -62,6 +62,7 @@ func TestDefaultServerOptions(t *testing.T) {
 	assertDefaultValue(t, "ProxyStrategies", defaultServerOptions.ProxyStrategies, "default")
 	assertDefaultValue(t, "CipherSuites", defaultServerOptions.CipherSuites, make([]string, 0))
 	assertDefaultValue(t, "XfrChannelSize", defaultServerOptions.XfrChannelSize, 10)
+	assertDefaultValue(t, "APIContentType", defaultServerOptions.APIContentType, "application/vnd.kubernetes.protobuf")
 
 }
 

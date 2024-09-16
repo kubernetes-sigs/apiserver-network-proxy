@@ -120,6 +120,7 @@ func (p *Proxy) Run(o *options.ProxyRunOptions, stopCh <-chan struct{}) error {
 			klog.V(1).Infof("Setting k8s client Burst: %v", o.KubeconfigBurst)
 			config.Burst = o.KubeconfigBurst
 		}
+		config.ContentType = o.APIContentType
 		k8sClient, err = kubernetes.NewForConfig(config)
 		if err != nil {
 			return fmt.Errorf("failed to create kubernetes clientset: %v", err)

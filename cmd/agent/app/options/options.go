@@ -27,6 +27,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/spf13/pflag"
 	"google.golang.org/grpc"
+	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/klog/v2"
 
 	"sigs.k8s.io/apiserver-network-proxy/pkg/agent"
@@ -86,6 +87,8 @@ type GrpcProxyAgentOptions struct {
 	CountServerLeases bool
 	// Path to kubeconfig (used by kubernetes client for lease listing)
 	KubeconfigPath string
+	// Content type of requests sent to apiserver.
+	APIContentType string
 }
 
 func (o *GrpcProxyAgentOptions) ClientSetConfig(dialOptions ...grpc.DialOption) *agent.ClientSetConfig {
@@ -130,6 +133,7 @@ func (o *GrpcProxyAgentOptions) Flags() *pflag.FlagSet {
 	flags.IntVar(&o.XfrChannelSize, "xfr-channel-size", 150, "Set the size of the channel for transferring data between the agent and the proxy server.")
 	flags.BoolVar(&o.CountServerLeases, "count-server-leases", o.CountServerLeases, "Enables lease counting system to determine the number of proxy servers to connect to.")
 	flags.StringVar(&o.KubeconfigPath, "kubeconfig", o.KubeconfigPath, "Path to the kubeconfig file")
+	flags.StringVar(&o.APIContentType, "kube-api-content-type", o.APIContentType, "Content type of requests sent to apiserver.")
 	return flags
 }
 
@@ -156,6 +160,7 @@ func (o *GrpcProxyAgentOptions) Print() {
 	klog.V(1).Infof("WarnOnChannelLimit set to %t.\n", o.WarnOnChannelLimit)
 	klog.V(1).Infof("SyncForever set to %v.\n", o.SyncForever)
 	klog.V(1).Infof("ChannelSize set to %d.\n", o.XfrChannelSize)
+	klog.V(1).Infof("APIContentType set to %v.\n", o.APIContentType)
 }
 
 func (o *GrpcProxyAgentOptions) Validate() error {
@@ -259,6 +264,7 @@ func NewGrpcProxyAgentOptions() *GrpcProxyAgentOptions {
 		XfrChannelSize:            150,
 		CountServerLeases:         false,
 		KubeconfigPath:            "",
+		APIContentType:            runtime.ContentTypeProtobuf,
 	}
 	return &o
 }
