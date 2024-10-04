@@ -89,7 +89,7 @@ func newTestServerCommand(p *TestServer, o *TestServerRunOptions) *cobra.Command
 	cmd := &cobra.Command{
 		Use:  "test http server",
 		Long: `A test http server, url determines behavior for certain tests.`,
-		RunE: func(cmd *cobra.Command, args []string) error {
+		RunE: func(_ *cobra.Command, _ []string) error {
 			return p.run(o)
 		},
 	}

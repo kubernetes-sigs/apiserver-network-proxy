@@ -54,7 +54,7 @@ func TestServeData_HTTP(t *testing.T) {
 
 	// Start test http server as remote service
 	expectedBody := "Hello, client"
-	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		fmt.Fprint(w, expectedBody)
 	}))
 	defer ts.Close()
@@ -152,7 +152,7 @@ func TestClose_Client(t *testing.T) {
 	defer close(stopCh)
 
 	// Start test http server as remote service
-	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		fmt.Fprint(w, "hello, world")
 	}))
 	defer ts.Close()

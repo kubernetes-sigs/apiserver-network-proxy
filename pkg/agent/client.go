@@ -553,14 +553,14 @@ func (a *Client) remoteToProxy(connID int64, eConn *endpointConn) {
 				klog.ErrorS(err, "connection read failure", "connectionID", connID)
 			}
 			return
-		} else {
-			resp.Payload = &client.Packet_Data{Data: &client.Data{
-				Data:      buf[:n],
-				ConnectID: connID,
-			}}
-			if err := a.Send(resp); err != nil {
-				klog.ErrorS(err, "could not send DATA", "connectionID", connID)
-			}
+		}
+
+		resp.Payload = &client.Packet_Data{Data: &client.Data{
+			Data:      buf[:n],
+			ConnectID: connID,
+		}}
+		if err := a.Send(resp); err != nil {
+			klog.ErrorS(err, "could not send DATA", "connectionID", connID)
 		}
 	}
 }

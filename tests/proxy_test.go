@@ -362,7 +362,7 @@ func TestProxyDial_RequestCancelled_Concurrent_GRPC(t *testing.T) {
 	waitForConnectedServerCount(t, 1, a)
 
 	wg := sync.WaitGroup{}
-	dialFn := func(id int, cancelDelay time.Duration) {
+	dialFn := func(_ int, cancelDelay time.Duration) {
 		defer wg.Done()
 
 		// run test client
@@ -615,7 +615,7 @@ func TestBasicProxy_HTTPCONN(t *testing.T) {
 		t.Error("unexpected extra buffer")
 	}
 
-	dialer := func(network, addr string) (net.Conn, error) {
+	dialer := func(_, _ string) (net.Conn, error) {
 		return conn, nil
 	}
 
@@ -679,7 +679,7 @@ func TestFailedDNSLookupProxy_HTTPCONN(t *testing.T) {
 	if br.Buffered() > 0 {
 		t.Error("unexpected extra buffer")
 	}
-	dialer := func(network, addr string) (net.Conn, error) {
+	dialer := func(_, _ string) (net.Conn, error) {
 		return conn, nil
 	}
 
@@ -753,7 +753,7 @@ func TestFailedDial_HTTPCONN(t *testing.T) {
 		t.Fatalf("expect 200; got %d", res.StatusCode)
 	}
 
-	dialer := func(network, addr string) (net.Conn, error) {
+	dialer := func(_, _ string) (net.Conn, error) {
 		return conn, nil
 	}
 

@@ -287,9 +287,9 @@ func NewDefaultBackendStorage(idTypes []header.IdentifierType) *DefaultBackendSt
 	metrics.Metrics.SetBackendCount(0)
 	return &DefaultBackendStorage{
 		backends: make(map[string][]*Backend),
-		random:   rand.New(rand.NewSource(time.Now().UnixNano())),
+		random:   rand.New(rand.NewSource(time.Now().UnixNano())), /* #nosec G404 */
 		idTypes:  idTypes,
-	} /* #nosec G404 */
+	}
 }
 
 func containIDType(idTypes []header.IdentifierType, idType header.IdentifierType) bool {

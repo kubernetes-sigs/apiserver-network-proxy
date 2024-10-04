@@ -61,7 +61,7 @@ func NewAgentCommand(a *Agent, o *options.GrpcProxyAgentOptions) *cobra.Command 
 	cmd := &cobra.Command{
 		Use:  "agent",
 		Long: `A gRPC agent, Connects to the proxy and then allows traffic to be forwarded to it.`,
-		RunE: func(cmd *cobra.Command, args []string) error {
+		RunE: func(_ *cobra.Command, _ []string) error {
 			drainCh, stopCh := SetupSignalHandler()
 			return a.Run(o, drainCh, stopCh)
 		},
@@ -182,7 +182,7 @@ func (a *Agent) runProxyConnection(o *options.GrpcProxyAgentOptions, drainCh, st
 }
 
 func (a *Agent) runHealthServer(o *options.GrpcProxyAgentOptions, cs agent.ReadinessManager) error {
-	livenessHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	livenessHandler := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		fmt.Fprintf(w, "ok")
 	})
 
