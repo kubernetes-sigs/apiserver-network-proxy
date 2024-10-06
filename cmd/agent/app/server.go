@@ -157,6 +157,7 @@ func (a *Agent) runProxyConnection(o *options.GrpcProxyAgentOptions, drainCh, st
 				return nil, fmt.Errorf("failed to load in cluster kubernetes client config: %w", err)
 			}
 		}
+		config.ContentType = o.APIContentType
 
 		k8sClient, err := kubernetes.NewForConfig(config)
 		if err != nil {

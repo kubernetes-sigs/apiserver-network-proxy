@@ -23,6 +23,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/spf13/pflag"
+	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/klog/v2"
 
 	"sigs.k8s.io/apiserver-network-proxy/pkg/server"
@@ -86,6 +87,8 @@ type ProxyRunOptions struct {
 	KubeconfigQPS float32
 	// Client maximum burst for throttle.
 	KubeconfigBurst int
+	// Content type of requests sent to apiserver.
+	APIContentType string
 
 	// Proxy strategies used by the server.
 	// NOTE the order of the strategies matters. e.g., for list
@@ -137,6 +140,7 @@ func (o *ProxyRunOptions) Flags() *pflag.FlagSet {
 	flags.StringVar(&o.KubeconfigPath, "kubeconfig", o.KubeconfigPath, "absolute path to the kubeconfig file (used with agent-namespace, agent-service-account, authentication-audience).")
 	flags.Float32Var(&o.KubeconfigQPS, "kubeconfig-qps", o.KubeconfigQPS, "Maximum client QPS (proxy server uses this client to authenticate agent tokens).")
 	flags.IntVar(&o.KubeconfigBurst, "kubeconfig-burst", o.KubeconfigBurst, "Maximum client burst (proxy server uses this client to authenticate agent tokens).")
+	flags.StringVar(&o.APIContentType, "kube-api-content-type", o.APIContentType, "Content type of requests sent to apiserver.")
 	flags.StringVar(&o.AuthenticationAudience, "authentication-audience", o.AuthenticationAudience, "Expected agent's token authentication audience (used with agent-namespace, agent-service-account, kubeconfig).")
 	flags.StringVar(&o.ProxyStrategies, "proxy-strategies", o.ProxyStrategies, "The list of proxy strategies used by the server to pick an agent/tunnel, available strategies are: default, destHost, defaultRoute.")
 	flags.StringSliceVar(&o.CipherSuites, "cipher-suites", o.CipherSuites, "The comma separated list of allowed cipher suites. Has no effect on TLS1.3. Empty means allow default list.")
@@ -178,6 +182,7 @@ func (o *ProxyRunOptions) Print() {
 	klog.V(1).Infof("KubeconfigPath set to %q.\n", o.KubeconfigPath)
 	klog.V(1).Infof("KubeconfigQPS set to %f.\n", o.KubeconfigQPS)
 	klog.V(1).Infof("KubeconfigBurst set to %d.\n", o.KubeconfigBurst)
+	klog.V(1).Infof("APIContentType set to %v.\n", o.APIContentType)
 	klog.V(1).Infof("ProxyStrategies set to %q.\n", o.ProxyStrategies)
 	klog.V(1).Infof("CipherSuites set to %q.\n", o.CipherSuites)
 	klog.V(1).Infof("XfrChannelSize set to %d.\n", o.XfrChannelSize)
@@ -350,6 +355,7 @@ func NewProxyRunOptions() *ProxyRunOptions {
 		KubeconfigPath:            "",
 		KubeconfigQPS:             0,
 		KubeconfigBurst:           0,
+		APIContentType:            runtime.ContentTypeProtobuf,
 		AuthenticationAudience:    "",
 		ProxyStrategies:           "default",
 		CipherSuites:              make([]string, 0),
