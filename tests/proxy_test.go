@@ -251,7 +251,12 @@ func TestProxyHandle_RequestDeadlineExceeded_GRPC(t *testing.T) {
 
 	func() {
 		// Ensure that tunnels aren't leaked with long-running servers.
-		defer goleak.VerifyNone(t, goleak.IgnoreCurrent(), goleak.IgnoreTopFunction("google.golang.org/grpc.(*addrConn).resetTransport"))
+		ignoredGoRoutines := []goleak.Option{
+			goleak.IgnoreCurrent(),
+			goleak.IgnoreTopFunction("google.golang.org/grpc.(*addrConn).resetTransport"),
+			goleak.IgnoreTopFunction("google.golang.org/grpc.(*addrConn).resetTransportAndUnlock"),
+		}
+		defer goleak.VerifyNone(t, ignoredGoRoutines...)
 
 		// run test client
 		tunnel, err := createSingleUseGrpcTunnel(context.Background(), ps.FrontAddr())
@@ -309,7 +314,12 @@ func TestProxyDial_RequestCancelled_GRPC(t *testing.T) {
 
 	func() {
 		// Ensure that tunnels aren't leaked with long-running servers.
-		defer goleak.VerifyNone(t, goleak.IgnoreCurrent(), goleak.IgnoreTopFunction("google.golang.org/grpc.(*addrConn).resetTransport"))
+		ignoredGoRoutines := []goleak.Option{
+			goleak.IgnoreCurrent(),
+			goleak.IgnoreTopFunction("google.golang.org/grpc.(*addrConn).resetTransport"),
+			goleak.IgnoreTopFunction("google.golang.org/grpc.(*addrConn).resetTransportAndUnlock"),
+		}
+		defer goleak.VerifyNone(t, ignoredGoRoutines...)
 
 		// run test client
 		tunnel, err := createSingleUseGrpcTunnel(context.Background(), ps.FrontAddr())
@@ -404,6 +414,7 @@ func TestProxyDial_RequestCancelled_Concurrent_GRPC(t *testing.T) {
 	ignoredGoRoutines := []goleak.Option{
 		goleak.IgnoreCurrent(),
 		goleak.IgnoreTopFunction("google.golang.org/grpc.(*addrConn).resetTransport"),
+		goleak.IgnoreTopFunction("google.golang.org/grpc.(*addrConn).resetTransportAndUnlock"),
 	}
 
 	const concurrentConns = 50
@@ -444,7 +455,12 @@ func TestProxyDial_AgentTimeout_GRPC(t *testing.T) {
 
 	func() {
 		// Ensure that tunnels aren't leaked with long-running servers.
-		defer goleak.VerifyNone(t, goleak.IgnoreCurrent(), goleak.IgnoreTopFunction("google.golang.org/grpc.(*addrConn).resetTransport"))
+		ignoredGoRoutines := []goleak.Option{
+			goleak.IgnoreCurrent(),
+			goleak.IgnoreTopFunction("google.golang.org/grpc.(*addrConn).resetTransport"),
+			goleak.IgnoreTopFunction("google.golang.org/grpc.(*addrConn).resetTransportAndUnlock"),
+		}
+		defer goleak.VerifyNone(t, ignoredGoRoutines...)
 
 		// run test client
 		tunnel, err := createSingleUseGrpcTunnel(context.Background(), ps.FrontAddr())
@@ -975,9 +991,13 @@ func resetAllMetrics() {
 
 func expectCleanShutdown(t testing.TB) {
 	resetAllMetrics()
-	currentGoRoutines := goleak.IgnoreCurrent()
+	ignoredGoRoutines := []goleak.Option{
+		goleak.IgnoreCurrent(),
+		goleak.IgnoreTopFunction("google.golang.org/grpc.(*addrConn).resetTransport"),
+		goleak.IgnoreTopFunction("google.golang.org/grpc.(*addrConn).resetTransportAndUnlock"),
+	}
 	t.Cleanup(func() {
-		goleak.VerifyNone(t, currentGoRoutines, goleak.IgnoreTopFunction("google.golang.org/grpc.(*addrConn).resetTransport"))
+		goleak.VerifyNone(t, ignoredGoRoutines...)
 		if err := clientmetricstest.ExpectClientDialFailures(nil); err != nil {
 			t.Errorf("Unexpected %s metric: %v", "dial_failure_total", err)
 		}
