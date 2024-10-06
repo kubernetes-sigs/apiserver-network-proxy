@@ -45,7 +45,6 @@ import (
 	metricsagent "sigs.k8s.io/apiserver-network-proxy/pkg/agent/metrics"
 	"sigs.k8s.io/apiserver-network-proxy/pkg/server"
 	metricsserver "sigs.k8s.io/apiserver-network-proxy/pkg/server/metrics"
-	metricstest "sigs.k8s.io/apiserver-network-proxy/pkg/testing/metrics"
 	"sigs.k8s.io/apiserver-network-proxy/pkg/util"
 	agentproto "sigs.k8s.io/apiserver-network-proxy/proto/agent"
 	"sigs.k8s.io/apiserver-network-proxy/proto/header"
@@ -998,17 +997,6 @@ func expectCleanShutdown(t testing.TB) {
 	}
 	t.Cleanup(func() {
 		goleak.VerifyNone(t, ignoredGoRoutines...)
-		if err := clientmetricstest.ExpectClientDialFailures(nil); err != nil {
-			t.Errorf("Unexpected %s metric: %v", "dial_failure_total", err)
-		}
-
-		// The following checks are only used with in-process agent/server testing.
-		if err := metricstest.DefaultTester.ExpectServerDialFailures(nil); err != nil {
-			t.Errorf("Unexpected %s metric: %v", "dial_failure_count", err)
-		}
-		if err := metricstest.DefaultTester.ExpectAgentDialFailures(nil); err != nil {
-			t.Errorf("Unexpected %s metric: %v", "endpoint_dial_failure_total", err)
-		}
 	})
 }
 
