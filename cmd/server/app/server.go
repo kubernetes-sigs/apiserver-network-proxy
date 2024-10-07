@@ -64,7 +64,7 @@ func NewProxyCommand(p *Proxy, o *options.ProxyRunOptions) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:  "proxy",
 		Long: `A gRPC proxy server, receives requests from the API server and forwards to the agent.`,
-		RunE: func(cmd *cobra.Command, args []string) error {
+		RunE: func(_ *cobra.Command, _ []string) error {
 			stopCh := SetupSignalHandler()
 			return p.Run(o, stopCh)
 		},
@@ -451,10 +451,10 @@ func (p *Proxy) runAdminServer(o *options.ProxyRunOptions, _ *server.ProxyServer
 }
 
 func (p *Proxy) runHealthServer(o *options.ProxyRunOptions, server *server.ProxyServer) error {
-	livenessHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	livenessHandler := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		fmt.Fprintf(w, "ok")
 	})
-	readinessHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	readinessHandler := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		ready, msg := server.Readiness.Ready()
 		if ready {
 			w.WriteHeader(200)

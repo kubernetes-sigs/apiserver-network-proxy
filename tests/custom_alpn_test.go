@@ -40,7 +40,7 @@ func TestCustomALPN(t *testing.T) {
 	svr := httptest.NewUnstartedServer(http.DefaultServeMux)
 	svr.TLS = &tls.Config{NextProtos: []string{proto}, MinVersion: tls.VersionTLS13}
 	svr.Config.TLSNextProto = map[string]func(*http.Server, *tls.Conn, http.Handler){
-		proto: func(svr *http.Server, conn *tls.Conn, handle http.Handler) {
+		proto: func(*http.Server, *tls.Conn, http.Handler) {
 			atomic.AddInt32(&protoUsed, 1)
 		},
 	}
