@@ -33,7 +33,7 @@ endif
 GOOS ?= $(shell go env GOOS)
 GOARCH ?= $(shell go env GOARCH)
 INSTALL_LOCATION:=$(shell go env GOPATH)/bin
-GOLANGCI_LINT_VERSION ?= 1.56.2
+GOLANGCI_LINT_VERSION ?= 1.59.0
 GOSEC_VERSION ?= 2.13.1
 
 REGISTRY ?= gcr.io/$(shell gcloud config get-value project)
@@ -124,6 +124,7 @@ bin/proxy-server:
 
 .PHONY: lint
 lint:
+	go version
 	curl -sSfL https://raw.githubusercontent.com/golangci/golangci-lint/master/install.sh | sh -s -- -b $(INSTALL_LOCATION) v$(GOLANGCI_LINT_VERSION)
 	$(INSTALL_LOCATION)/golangci-lint run --verbose
 
