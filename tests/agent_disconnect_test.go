@@ -216,7 +216,7 @@ func createHTTPConnectClient(_ context.Context, proxyAddr, addr string) (*http.C
 		return nil, fmt.Errorf("unexpected extra buffer")
 	}
 
-	dialer := func(network, addr string) (net.Conn, error) {
+	dialer := func(_, _ string) (net.Conn, error) {
 		return conn, nil
 	}
 
