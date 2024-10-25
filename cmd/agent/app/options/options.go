@@ -85,6 +85,10 @@ type GrpcProxyAgentOptions struct {
 	// Enables updating the server count by counting the number of valid leases
 	// matching the selector.
 	CountServerLeases bool
+	// Namespace where lease objects are managed.
+	LeaseNamespace string
+	// Labels on which lease objects are managed.
+	LeaseLabel string
 	// Path to kubeconfig (used by kubernetes client for lease listing)
 	KubeconfigPath string
 	// Content type of requests sent to apiserver.
@@ -132,6 +136,8 @@ func (o *GrpcProxyAgentOptions) Flags() *pflag.FlagSet {
 	flags.BoolVar(&o.SyncForever, "sync-forever", o.SyncForever, "If true, the agent continues syncing, in order to support server count changes.")
 	flags.IntVar(&o.XfrChannelSize, "xfr-channel-size", 150, "Set the size of the channel for transferring data between the agent and the proxy server.")
 	flags.BoolVar(&o.CountServerLeases, "count-server-leases", o.CountServerLeases, "Enables lease counting system to determine the number of proxy servers to connect to.")
+	flags.StringVar(&o.LeaseNamespace, "lease-namespace", o.LeaseNamespace, "Namespace where lease objects are managed.")
+	flags.StringVar(&o.LeaseLabel, "lease-label", o.LeaseLabel, "The labels on which the lease objects are managed.")
 	flags.StringVar(&o.KubeconfigPath, "kubeconfig", o.KubeconfigPath, "Path to the kubeconfig file")
 	flags.StringVar(&o.APIContentType, "kube-api-content-type", o.APIContentType, "Content type of requests sent to apiserver.")
 	return flags
@@ -159,6 +165,9 @@ func (o *GrpcProxyAgentOptions) Print() {
 	klog.V(1).Infof("AgentIdentifiers set to %s.\n", util.PrettyPrintURL(o.AgentIdentifiers))
 	klog.V(1).Infof("WarnOnChannelLimit set to %t.\n", o.WarnOnChannelLimit)
 	klog.V(1).Infof("SyncForever set to %v.\n", o.SyncForever)
+	klog.V(1).Infof("CountServerLeases set to %v.\n", o.CountServerLeases)
+	klog.V(1).Infof("LeaseNamespace set to %s.\n", o.LeaseNamespace)
+	klog.V(1).Infof("LeaseLabel set to %s.\n", o.LeaseLabel)
 	klog.V(1).Infof("ChannelSize set to %d.\n", o.XfrChannelSize)
 	klog.V(1).Infof("APIContentType set to %v.\n", o.APIContentType)
 }
@@ -216,6 +225,13 @@ func (o *GrpcProxyAgentOptions) Validate() error {
 			return fmt.Errorf("error checking KubeconfigPath %q, got %v", o.KubeconfigPath, err)
 		}
 	}
+	// Validate labels provided.
+	if o.CountServerLeases {
+		_, err := util.ParseLabels(o.LeaseLabel)
+		if err != nil {
+			return err
+		}
+	}
 
 	return nil
 }
@@ -263,6 +279,8 @@ func NewGrpcProxyAgentOptions() *GrpcProxyAgentOptions {
 		SyncForever:               false,
 		XfrChannelSize:            150,
 		CountServerLeases:         false,
+		LeaseNamespace:            "kube-system",
+		LeaseLabel:                "k8s-app=konnectivity-server",
 		KubeconfigPath:            "",
 		APIContentType:            runtime.ContentTypeProtobuf,
 	}

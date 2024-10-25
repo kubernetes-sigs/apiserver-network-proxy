@@ -53,7 +53,6 @@ import (
 
 const (
 	ReadHeaderTimeout   = 60 * time.Second
-	LeaseNamespace      = "kube-system"
 	LeaseInformerResync = time.Second * 10
 )
 
@@ -163,11 +162,11 @@ func (a *Agent) runProxyConnection(o *options.GrpcProxyAgentOptions, drainCh, st
 		if err != nil {
 			return nil, fmt.Errorf("failed to create kubernetes clientset: %v", err)
 		}
-		leaseInformer := agent.NewLeaseInformerWithMetrics(k8sClient, LeaseNamespace, LeaseInformerResync)
+		leaseInformer := agent.NewLeaseInformerWithMetrics(k8sClient, o.LeaseNamespace, LeaseInformerResync)
 		go leaseInformer.Run(stopCh)
 		cache.WaitForCacheSync(stopCh, leaseInformer.HasSynced)
 		leaseLister := coordinationv1lister.NewLeaseLister(leaseInformer.GetIndexer())
-		serverLeaseSelector, _ := labels.Parse("k8s-app=konnectivity-server")
+		serverLeaseSelector, _ := labels.Parse(o.LeaseLabel)
 		serverLeaseCounter := agent.NewServerLeaseCounter(
 			clock.RealClock{},
 			leaseLister,
