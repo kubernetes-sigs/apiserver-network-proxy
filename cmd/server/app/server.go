@@ -57,7 +57,6 @@ const (
 	LeaseDuration        = 30 * time.Second
 	LeaseRenewalInterval = 15 * time.Second
 	LeaseGCInterval      = 15 * time.Second
-	LeaseNamespace       = "kube-system"
 )
 
 func NewProxyCommand(p *Proxy, o *options.ProxyRunOptions) *cobra.Command {
@@ -156,6 +155,11 @@ func (p *Proxy) Run(o *options.ProxyRunOptions, stopCh <-chan struct{}) error {
 	}
 	defer p.agentServer.Stop()
 
+	labels, err := util.ParseLabels(o.LeaseLabel)
+	if err != nil {
+		return err
+	}
+
 	if o.EnableLeaseController {
 		leaseController := leases.NewController(
 			k8sClient,
@@ -164,8 +168,8 @@ func (p *Proxy) Run(o *options.ProxyRunOptions, stopCh <-chan struct{}) error {
 			LeaseRenewalInterval,
 			LeaseGCInterval,
 			fmt.Sprintf("konnectivity-proxy-server-%v", o.ServerID),
-			LeaseNamespace,
-			map[string]string{"k8s-app": "konnectivity-server"},
+			o.LeaseNamespace,
+			labels,
 		)
 		klog.V(1).Infoln("Starting lease acquisition and garbage collection controller.")
 		leaseController.Run(ctx)
