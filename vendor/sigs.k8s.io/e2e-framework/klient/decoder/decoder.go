@@ -74,7 +74,7 @@ func DecodeEachFile(ctx context.Context, fsys fs.FS, pattern string, handlerFn H
 		}
 		defer f.Close()
 		if err := DecodeEach(ctx, f, handlerFn, options...); err != nil {
-			return err
+			return fmt.Errorf("failed to decode file %q: %w", file, err)
 		}
 		if err := f.Close(); err != nil {
 			return err
@@ -109,7 +109,7 @@ func DeleteWithManifestDir(ctx context.Context, r *resources.Resources, dirPath,
 	return err
 }
 
-// Decode a stream of documents of any Kind using either the innate typing of the scheme.
+// DecodeEach a stream of documents of any Kind using either the innate typing of the scheme.
 // Falls back to the unstructured.Unstructured type if a matching type cannot be found for the Kind.
 //
 // If handlerFn returns an error, decoding is halted.
