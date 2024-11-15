@@ -218,15 +218,25 @@ func (cs *ClientSet) sync() {
 }
 
 func (cs *ClientSet) ServerCount() int {
-	var serverCount int
+	countFromLeases := 0
 	if cs.leaseCounter != nil {
-		serverCount = cs.leaseCounter.Count()
-	} else {
-		serverCount = cs.lastReceivedServerCount
+		countFromLeases = cs.leaseCounter.Count()
+	}
+	countFromResponses := cs.lastReceivedServerCount
+
+	serverCount := countFromLeases
+	countSource := "KNP server lease count"
+	if countFromResponses > serverCount {
+		serverCount = countFromResponses
+		countSource = "KNP server response headers"
+	}
+	if serverCount == 0 {
+		serverCount = 1
+		countSource = "fallback to 1"
 	}
 
 	if serverCount != cs.lastServerCount {
-		klog.Warningf("change detected in proxy server count (was: %d, now: %d)", cs.lastServerCount, serverCount)
+		klog.Warningf("change detected in proxy server count (was: %d, now: %d, source: %q)", cs.lastServerCount, serverCount, countSource)
 		cs.lastServerCount = serverCount
 	}
 
