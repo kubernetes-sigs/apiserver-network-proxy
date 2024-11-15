@@ -156,6 +156,10 @@ func TestValidate(t *testing.T) {
 			fieldMap: map[string]interface{}{"XfrChannelSize": -10},
 			expected: fmt.Errorf("channel size -10 must be greater than 0"),
 		},
+		"ServerCountSource": {
+			fieldMap: map[string]interface{}{"ServerCountSource": "foobar"},
+			expected: fmt.Errorf("--server-count-source must be one of '', 'default', 'max', got foobar"),
+		},
 	} {
 		t.Run(desc, func(t *testing.T) {
 			testAgentOptions := NewGrpcProxyAgentOptions()
