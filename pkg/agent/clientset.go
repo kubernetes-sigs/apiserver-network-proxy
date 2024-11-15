@@ -39,7 +39,7 @@ type ClientSet struct {
 	agentID string // ID of this agent
 	address string // proxy server address. Assuming HA proxy server
 
-	leaseCounter            *ServerLeaseCounter // counts number of proxy server leases
+	leaseCounter            ServerCounter // counts number of proxy server leases
 	lastReceivedServerCount int                 // last server count received from a proxy server
 	lastServerCount         int                 // last server count value from either lease system or proxy server, former takes priority
 
@@ -147,7 +147,7 @@ type ClientSetConfig struct {
 	WarnOnChannelLimit      bool
 	SyncForever             bool
 	XfrChannelSize          int
-	ServerLeaseCounter      *ServerLeaseCounter
+	ServerLeaseCounter      ServerCounter
 }
 
 func (cc *ClientSetConfig) NewAgentClientSet(drainCh, stopCh <-chan struct{}) *ClientSet {
