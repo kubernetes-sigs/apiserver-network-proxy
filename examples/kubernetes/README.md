@@ -12,7 +12,7 @@ kubectl apply -f examples/kubernetes/kubia.yaml
 ```
 
 # Initialize environment variables
-*CLUSTER_CERT* and *CLUSTER_KEY* are certificates used for starting [kubernetes API server](https://kubernetes.io/docs/concepts/cluster-administration/certificates/)
+*CLUSTER_CERT* and *CLUSTER_KEY* are certificates used for starting [kubernetes API server](https://kubernetes.io/docs/concepts/architecture/#kube-apiserver)
 
 ```bash
 CLUSTER_IP=$(kubectl config view --minify -o jsonpath='{.clusters[0].cluster.server}' | sed -n "s/https\:\/\/\(\S*\).*$/\1/p")
