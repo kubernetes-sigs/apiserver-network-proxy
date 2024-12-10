@@ -83,6 +83,8 @@ type ProxyRunOptions struct {
 	AuthenticationAudience string
 	// Path to kubeconfig (used by kubernetes client)
 	KubeconfigPath string
+	// Use in cluster config or not (used by kubernetes client)
+	UseInCluster bool
 	// Client maximum QPS.
 	KubeconfigQPS float32
 	// Client maximum burst for throttle.
@@ -142,6 +144,7 @@ func (o *ProxyRunOptions) Flags() *pflag.FlagSet {
 	flags.StringVar(&o.AgentNamespace, "agent-namespace", o.AgentNamespace, "Expected agent's namespace during agent authentication (used with agent-service-account, authentication-audience, kubeconfig).")
 	flags.StringVar(&o.AgentServiceAccount, "agent-service-account", o.AgentServiceAccount, "Expected agent's service account during agent authentication (used with agent-namespace, authentication-audience, kubeconfig).")
 	flags.StringVar(&o.KubeconfigPath, "kubeconfig", o.KubeconfigPath, "absolute path to the kubeconfig file (used with agent-namespace, agent-service-account, authentication-audience).")
+	flags.BoolVar(&o.UseInCluster, "use-in-cluster", o.UseInCluster, "Use in-cluster config to setup kubernetes client.")
 	flags.Float32Var(&o.KubeconfigQPS, "kubeconfig-qps", o.KubeconfigQPS, "Maximum client QPS (proxy server uses this client to authenticate agent tokens).")
 	flags.IntVar(&o.KubeconfigBurst, "kubeconfig-burst", o.KubeconfigBurst, "Maximum client burst (proxy server uses this client to authenticate agent tokens).")
 	flags.StringVar(&o.APIContentType, "kube-api-content-type", o.APIContentType, "Content type of requests sent to apiserver.")
@@ -289,8 +292,8 @@ func (o *ProxyRunOptions) Validate() error {
 	}
 
 	// validate agent authentication params
-	// all 4 parameters must be empty or must have value (except KubeconfigPath that might be empty)
-	if o.AgentNamespace != "" || o.AgentServiceAccount != "" || o.AuthenticationAudience != "" || o.KubeconfigPath != "" {
+	// all 3 parameters must be empty or must have value
+	if o.AgentNamespace != "" || o.AgentServiceAccount != "" || o.AuthenticationAudience != "" {
 		if o.ClusterCaCert != "" {
 			return fmt.Errorf("ClusterCaCert can not be used when service account authentication is enabled")
 		}
@@ -303,13 +306,19 @@ func (o *ProxyRunOptions) Validate() error {
 		if o.AuthenticationAudience == "" {
 			return fmt.Errorf("AuthenticationAudience cannot be empty when agent authentication is enabled")
 		}
-		if o.KubeconfigPath != "" {
-			if _, err := os.Stat(o.KubeconfigPath); os.IsNotExist(err) {
-				return fmt.Errorf("error checking KubeconfigPath %q, got %v", o.KubeconfigPath, err)
-			}
-		}
 	}
 
+	// either use kubeconfig path or incluster config for kubernetes client
+	if util.IsRunningInKubernetes() {
+		if (len(o.KubeconfigPath) > 0) == o.UseInCluster {
+			return fmt.Errorf("set only one of --use-in-cluster or --kubeconfig")
+		}
+
+		if _, err := os.Stat(o.KubeconfigPath); os.IsNotExist(err) {
+			return fmt.Errorf("checking KubeconfigPath %q, got %v", o.KubeconfigPath, err)
+		}
+
+	}
 	// validate the proxy strategies
 	if len(o.ProxyStrategies) == 0 {
 		return fmt.Errorf("ProxyStrategies cannot be empty")
