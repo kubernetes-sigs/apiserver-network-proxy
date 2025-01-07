@@ -29,48 +29,48 @@ func (f *FakeServerCounter) Count() int {
 }
 
 func TestServerCount(t *testing.T) {
-	testCases := []struct{
-		name string
+	testCases := []struct {
+		name              string
 		serverCountSource string
-		leaseCounter ServerCounter
-		responseCount int
-		want int
-	} {
+		leaseCounter      ServerCounter
+		responseCount     int
+		want              int
+	}{
 		{
-			name: "higher from response",
+			name:              "higher from response",
 			serverCountSource: "max",
-			responseCount: 42,
-			leaseCounter: &FakeServerCounter{24},
-			want: 42,
+			responseCount:     42,
+			leaseCounter:      &FakeServerCounter{24},
+			want:              42,
 		},
 		{
-			name: "higher from leases",
+			name:              "higher from leases",
 			serverCountSource: "max",
-			responseCount: 3,
-			leaseCounter: &FakeServerCounter{6},
-			want: 6,
+			responseCount:     3,
+			leaseCounter:      &FakeServerCounter{6},
+			want:              6,
 		},
 		{
-			name: "both zero",
+			name:              "both zero",
 			serverCountSource: "max",
-			responseCount: 0,
-			leaseCounter: &FakeServerCounter{0},
-			want: 1,
+			responseCount:     0,
+			leaseCounter:      &FakeServerCounter{0},
+			want:              1,
 		},
 
 		{
-			name: "response picked by default when no lease counter",
+			name:              "response picked by default when no lease counter",
 			serverCountSource: "default",
-			responseCount: 3,
-			leaseCounter: nil,
-			want: 3,
+			responseCount:     3,
+			leaseCounter:      nil,
+			want:              3,
 		},
 		{
-			name: "lease counter always picked when present",
+			name:              "lease counter always picked when present",
 			serverCountSource: "default",
-			responseCount: 6,
-			leaseCounter: &FakeServerCounter{3},
-			want: 3,
+			responseCount:     6,
+			leaseCounter:      &FakeServerCounter{3},
+			want:              3,
 		},
 	}
 
@@ -78,10 +78,9 @@ func TestServerCount(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 
 			cs := &ClientSet{
-				clients: make(map[string]*Client),
-				leaseCounter: tc.leaseCounter,
+				clients:           make(map[string]*Client),
+				leaseCounter:      tc.leaseCounter,
 				serverCountSource: tc.serverCountSource,
-
 			}
 			cs.lastReceivedServerCount = tc.responseCount
 			if got := cs.ServerCount(); got != tc.want {
