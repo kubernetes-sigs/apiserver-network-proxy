@@ -18,6 +18,7 @@ package agent
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -151,6 +152,9 @@ type Client struct {
 	serviceAccountTokenPath string
 
 	warnOnChannelLimit bool
+
+	// Here for testing
+	readBlockInterval time.Duration
 }
 
 func newAgentClient(address, agentID, agentIdentifiers string, cs *ClientSet, opts ...grpc.DialOption) (*Client, int, error) {
@@ -166,6 +170,7 @@ func newAgentClient(address, agentID, agentIdentifiers string, cs *ClientSet, op
 		serviceAccountTokenPath: cs.serviceAccountTokenPath,
 		connManager:             newConnectionManager(),
 		warnOnChannelLimit:      cs.warnOnChannelLimit,
+		readBlockInterval:       15 * time.Second,
 	}
 	serverCount, err := a.Connect()
 	if err != nil {
@@ -538,10 +543,19 @@ func (a *Client) remoteToProxy(connID int64, eConn *endpointConn) {
 	}
 
 	for {
+		select {
+		case <-a.stopCh:
+			return
+		default:
+		}
+		timeout := time.Now().Add(a.readBlockInterval)
+		eConn.conn.SetReadDeadline(timeout)
 		n, err := eConn.conn.Read(buf[:])
 		klog.V(5).InfoS("received data from remote", "bytes", n, "connectionID", connID)
 
-		if err == io.EOF {
+		if errors.Is(err, os.ErrDeadlineExceeded) {
+			continue
+		} else if err == io.EOF {
 			klog.V(2).InfoS("remote connection EOF", "connectionID", connID)
 			return
 		} else if err != nil {
