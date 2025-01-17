@@ -293,7 +293,7 @@ func TestProxyHandle_RequestDeadlineExceeded_GRPC(t *testing.T) {
 		select {
 		case <-tunnel.Done():
 			t.Log("Tunnel closed successfully")
-		case <-time.After(wait.ForeverTestTimeout):
+		case <-time.After(framework.ForeverTestTimeout):
 			t.Errorf("Timed out waiting for tunnel to close")
 		}
 	}()
@@ -343,7 +343,7 @@ func TestProxyDial_RequestCancelled_GRPC(t *testing.T) {
 
 		select {
 		case <-tunnel.Done():
-		case <-time.After(wait.ForeverTestTimeout):
+		case <-time.After(framework.ForeverTestTimeout):
 			t.Errorf("Timed out waiting for tunnel to close")
 		}
 	}()
@@ -405,7 +405,7 @@ func TestProxyDial_RequestCancelled_Concurrent_GRPC(t *testing.T) {
 
 		select {
 		case <-tunnel.Done():
-		case <-time.After(wait.ForeverTestTimeout):
+		case <-time.After(framework.ForeverTestTimeout):
 			t.Errorf("Timed out waiting for tunnel to close")
 		}
 	}
@@ -427,7 +427,7 @@ func TestProxyDial_RequestCancelled_Concurrent_GRPC(t *testing.T) {
 
 	// Wait for the closed connections to propogate
 	var endpointConnsErr, goLeaksErr error
-	wait.PollImmediate(time.Second, wait.ForeverTestTimeout, func() (done bool, err error) {
+	wait.PollImmediate(time.Second, framework.ForeverTestTimeout, func() (done bool, err error) {
 		endpointConnsErr = a.Metrics().ExpectAgentEndpointConnections(0)
 		goLeaksErr = goleak.Find(ignoredGoRoutines...)
 		return endpointConnsErr == nil && goLeaksErr == nil, nil
@@ -489,7 +489,7 @@ func TestProxyDial_AgentTimeout_GRPC(t *testing.T) {
 
 		select {
 		case <-tunnel.Done():
-		case <-time.After(wait.ForeverTestTimeout):
+		case <-time.After(framework.ForeverTestTimeout):
 			t.Errorf("Timed out waiting for tunnel to close")
 		}
 	}()
@@ -965,7 +965,7 @@ func waitForConnectedServerCount(t testing.TB, expectedServerCount int, a framew
 // agents (backends). This assumes the ProxyServer is using a single ProxyStrategy.
 func waitForConnectedAgentCount(t testing.TB, expectedAgentCount int, ps framework.ProxyServer) {
 	t.Helper()
-	err := wait.PollImmediate(100*time.Millisecond, wait.ForeverTestTimeout, func() (bool, error) {
+	err := wait.PollImmediate(100*time.Millisecond, framework.ForeverTestTimeout, func() (bool, error) {
 		count, err := ps.ConnectedBackends()
 		if err != nil {
 			return false, err

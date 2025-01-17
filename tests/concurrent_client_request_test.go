@@ -27,7 +27,7 @@ import (
 	"testing"
 	"time"
 
-	"k8s.io/apimachinery/pkg/util/wait"
+	"sigs.k8s.io/apiserver-network-proxy/tests/framework"
 )
 
 type simpleServer struct {
@@ -59,7 +59,7 @@ func getTestClient(front string, t *testing.T) *http.Client {
 		Transport: &http.Transport{
 			DialContext: tunnel.DialContext,
 		},
-		Timeout: wait.ForeverTestTimeout,
+		Timeout: framework.ForeverTestTimeout,
 	}
 }
 
