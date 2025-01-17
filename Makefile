@@ -24,7 +24,7 @@ ALL_ARCH ?= amd64 arm arm64 ppc64le s390x
 # The output type could either be docker (local), or registry.
 OUTPUT_TYPE ?= docker
 GO_TOOLCHAIN ?= golang
-GO_VERSION ?= 1.22.7
+GO_VERSION ?= 1.23.0
 BASEIMAGE ?= gcr.io/distroless/static-debian11:nonroot
 
 ifeq ($(GOPATH),)
@@ -33,7 +33,7 @@ endif
 GOOS ?= $(shell go env GOOS)
 GOARCH ?= $(shell go env GOARCH)
 INSTALL_LOCATION:=$(shell go env GOPATH)/bin
-GOLANGCI_LINT_VERSION ?= 1.56.2
+GOLANGCI_LINT_VERSION ?= 1.60.1
 GOSEC_VERSION ?= 2.13.1
 
 REGISTRY ?= gcr.io/$(shell gcloud config get-value project)
@@ -125,7 +125,7 @@ bin/proxy-server:
 .PHONY: lint
 lint:
 	curl -sSfL https://raw.githubusercontent.com/golangci/golangci-lint/master/install.sh | sh -s -- -b $(INSTALL_LOCATION) v$(GOLANGCI_LINT_VERSION)
-	$(INSTALL_LOCATION)/golangci-lint run --verbose
+	$(INSTALL_LOCATION)/golangci-lint run --config ./.golangci.yaml --verbose
 
 ## --------------------------------------
 ## Go

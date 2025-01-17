@@ -467,7 +467,7 @@ func (p *Proxy) runHealthServer(o *options.ProxyRunOptions, server *server.Proxy
 			return
 		}
 		w.WriteHeader(500)
-		fmt.Fprintf(w, msg)
+		fmt.Fprint(w, msg)
 	})
 
 	muxHandler := http.NewServeMux()

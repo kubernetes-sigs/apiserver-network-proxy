@@ -32,8 +32,8 @@ import (
 
 const (
 	fromResponses = "KNP server response headers"
-	fromLeases = "KNP lease count"
-	fromFallback = "fallback to 1"
+	fromLeases    = "KNP lease count"
+	fromFallback  = "fallback to 1"
 )
 
 // ClientSet consists of clients connected to each instance of an HA proxy server.
@@ -46,8 +46,8 @@ type ClientSet struct {
 	address string // proxy server address. Assuming HA proxy server
 
 	leaseCounter            ServerCounter // counts number of proxy server leases
-	lastReceivedServerCount int                 // last server count received from a proxy server
-	lastServerCount         int                 // last server count value from either lease system or proxy server, former takes priority
+	lastReceivedServerCount int           // last server count received from a proxy server
+	lastServerCount         int           // last server count value from either lease system or proxy server, former takes priority
 
 	// unless it is an HA server. Initialized when the ClientSet creates
 	// the first client. When syncForever is set, it will be the most recently seen.
@@ -73,7 +73,7 @@ type ClientSet struct {
 	warnOnChannelLimit bool
 	xfrChannelSize     int
 
-	syncForever bool // Continue syncing (support dynamic server count).
+	syncForever       bool // Continue syncing (support dynamic server count).
 	serverCountSource string
 }
 
