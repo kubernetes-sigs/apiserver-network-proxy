@@ -73,7 +73,7 @@ func (*InProcessProxyServerRunner) Start(t testing.TB, opts ProxyServerOpts) (Pr
 	}()
 
 	healthAddr := net.JoinHostPort(o.HealthBindAddress, strconv.Itoa(o.HealthPort))
-	if err := wait.PollImmediateWithContext(ctx, 100*time.Millisecond, wait.ForeverTestTimeout, func(context.Context) (bool, error) {
+	if err := wait.PollImmediateWithContext(ctx, 100*time.Millisecond, ForeverTestTimeout, func(context.Context) (bool, error) {
 		return checkLiveness(healthAddr), nil
 	}); err != nil {
 		close(stopCh)
