@@ -135,7 +135,7 @@ func TestAgentTokenAuthenticationErrorsToken(t *testing.T) {
 
 	for _, tc := range testCases {
 		t.Run(tc.desc, func(t *testing.T) {
-			kcs := k8sfake.NewSimpleClientset()
+			kcs := k8sfake.NewClientset()
 
 			kcs.AuthenticationV1().(*fakeauthenticationv1.FakeAuthenticationV1).Fake.PrependReactor("create", "tokenreviews", func(_ k8stesting.Action) (handled bool, ret runtime.Object, err error) {
 				tr := &authv1.TokenReview{
