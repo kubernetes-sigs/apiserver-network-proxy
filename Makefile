@@ -76,7 +76,7 @@ fast-test:
 # Unit tests with fuller coverage, invoked by CI system.
 .PHONY: test
 test:
-	go test -mod=vendor -race -covermode=atomic -coverprofile=konnectivity.out $(shell go list ./... | grep -v -e "/e2e$$" -e "/e2e/.*") && go tool cover -html=konnectivity.out -o=konnectivity.html
+	go test -v -mod=vendor -race -covermode=atomic -coverprofile=konnectivity.out $(shell go list ./... | grep -v -e "/e2e$$" -e "/e2e/.*") && go tool cover -html=konnectivity.out -o=konnectivity.html
 	cd konnectivity-client && go test -race -covermode=atomic -coverprofile=client.out ./... && go tool cover -html=client.out -o=client.html
 
 .PHONY: test-integration
