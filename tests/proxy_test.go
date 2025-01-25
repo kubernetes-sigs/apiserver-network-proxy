@@ -105,17 +105,26 @@ type delayedServer struct {
 	maxWait time.Duration
 }
 
-func newDelayedServer() *delayedServer {
+// randomDuration returns a random duration in the [min, max) interval
+func randomDuration(min, max time.Duration) time.Duration {
+	d := min
+	if max != min {
+		d += time.Duration(rand.Int63n(int64(max - min)))
+	}
+	return d
+}
+
+func newDelayedServer(minWait time.Duration, maxWait time.Duration) *delayedServer {
 	return &delayedServer{
-		minWait: 500 * time.Millisecond,
-		maxWait: 2 * time.Second,
+		minWait: minWait,
+		maxWait: maxWait,
 	}
 }
 
-var _ = newDelayedServer() // Suppress unused lint error.
+var _ = newDelayedServer(time.Second, time.Second) // Suppress unused lint error.
 
 func (s *delayedServer) ServeHTTP(w http.ResponseWriter, _ *http.Request) {
-	delay := time.Duration(rand.Int63n(int64(s.maxWait-s.minWait))) + s.minWait /* #nosec G404 */
+	delay := randomDuration(s.minWait, s.maxWait)
 	time.Sleep(delay)
 	w.Write([]byte("hello"))
 }
@@ -350,7 +359,8 @@ func TestProxyDial_RequestCancelled_GRPC(t *testing.T) {
 func TestProxyDial_RequestCancelled_Concurrent_GRPC(t *testing.T) {
 	expectCleanShutdown(t)
 
-	slowServer := newDelayedServer()
+	// An HTTP server that always waits 3 seconds before replying
+	slowServer := newDelayedServer(3*time.Second, 3*time.Second)
 	server := httptest.NewServer(slowServer)
 	defer server.Close()
 
@@ -409,8 +419,12 @@ func TestProxyDial_RequestCancelled_Concurrent_GRPC(t *testing.T) {
 	const concurrentConns = 50
 	wg.Add(concurrentConns)
 	for i := 0; i < concurrentConns; i++ {
-		cancelDelayMs := rand.Int63n(1000) + 5 /* #nosec G404 */
-		go dialFn(i, time.Duration(cancelDelayMs)*time.Millisecond)
+		// The delay before we cancel the HTTP request:
+		// * at least 1 second for the HTTP connection to establish
+		// * less than 2 seconds so that we cancel during the 3 second delay in our slowServer
+		// TODO: Can we try to cancel during the dial?  Or after the HTTP request has returned?
+		cancelDelay := randomDuration(time.Second, 2*time.Second)
+		go dialFn(i, cancelDelay)
 	}
 	wg.Wait()
 
