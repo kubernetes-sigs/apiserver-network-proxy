@@ -174,8 +174,8 @@ func newAgentClient(address, agentID, agentIdentifiers string, cs *ClientSet, op
 	return a, serverCount, nil
 }
 
-// Connect makes the grpc dial to the proxy server. It returns the serverID
-// it connects to.
+// Connect makes the grpc dial to the proxy server. It returns the count
+// of the number of servers this agent should connected to.
 func (a *Client) Connect() (int, error) {
 	conn, err := grpc.Dial(a.address, a.opts...)
 	if err != nil {
