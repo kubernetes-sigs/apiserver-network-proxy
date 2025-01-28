@@ -25,7 +25,7 @@ ALL_ARCH ?= amd64 arm arm64 ppc64le s390x
 OUTPUT_TYPE ?= docker
 GO_TOOLCHAIN ?= golang
 GO_VERSION ?= 1.22.5
-BASEIMAGE ?= gcr.io/distroless/static-debian11:nonroot
+BASEIMAGE ?= gcr.io/distroless/static-debian12:nonroot
 
 ifeq ($(GOPATH),)
 export GOPATH := $(shell go env GOPATH)
