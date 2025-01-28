@@ -26,7 +26,7 @@ RELEASE_ARCH_LIST = amd64 arm64
 OUTPUT_TYPE ?= docker
 GO_TOOLCHAIN ?= golang
 GO_VERSION ?= 1.21.9
-BASEIMAGE ?= gcr.io/distroless/static-debian11:nonroot
+BASEIMAGE ?= gcr.io/distroless/static-debian12:nonroot
 
 ifeq ($(GOPATH),)
 export GOPATH := $(shell go env GOPATH)
