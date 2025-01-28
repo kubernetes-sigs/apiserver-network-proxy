@@ -18,8 +18,8 @@ RELEASE_ARCH_LIST = amd64 arm64
 # The output type could either be docker (local), or registry.
 OUTPUT_TYPE ?= docker
 GO_TOOLCHAIN ?= golang
-GO_VERSION ?= 1.21.6
-BASEIMAGE ?= gcr.io/distroless/static-debian11:nonroot
+GO_VERSION ?= 1.23.0
+BASEIMAGE ?= gcr.io/distroless/static-debian12:nonroot
 
 ifeq ($(GOPATH),)
 export GOPATH := $(shell go env GOPATH)
