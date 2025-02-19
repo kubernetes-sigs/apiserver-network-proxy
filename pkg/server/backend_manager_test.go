@@ -22,8 +22,8 @@ import (
 	"reflect"
 	"testing"
 
-	"github.com/golang/mock/gomock"
 	"github.com/stretchr/testify/assert"
+	"go.uber.org/mock/gomock"
 	"google.golang.org/grpc/metadata"
 
 	agentmock "sigs.k8s.io/apiserver-network-proxy/proto/agent/mocks"
