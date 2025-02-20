@@ -61,9 +61,9 @@ Please ensure the go bin directory (usually `~/go/bin`) is in your `PATH`.
 
 The [```mockgen```](https://github.com/uber-go/mock) tool must be installed on your system.
 
-Currently, we are using go.uber.org/mock/mockgen@v0.4.0
+Currently, we are using go.uber.org/mock/mockgen@v0.5.0
 
-`go install go.uber.org/mock/mockgen@v0.4.0`
+`go install go.uber.org/mock/mockgen@v0.5.0`
 
 ### Protoc
 
