@@ -15,6 +15,7 @@ env:
   # TODO: match BASEIMAGE with Makefile default (nonroot variant)
   BASEIMAGE: "gcr.io/distroless/static-debian11"
   KIND_CLUSTER_NAME: "kind"
+  KIND_VERSION: "v0.27.0"
 
 jobs:
   build:
@@ -67,7 +68,7 @@ jobs:
     steps:
     - name: Install kind
       run: |
-        curl -Lo ./kind https://kind.sigs.k8s.io/dl/v0.23.0/kind-linux-amd64
+        curl -Lo ./kind https://kind.sigs.k8s.io/dl/${KIND_VERSION}/kind-linux-amd64
         chmod +x ./kind
         sudo mv ./kind /usr/local/bin/kind
     - name: Check out code
@@ -129,7 +130,7 @@ jobs:
         # kubectl
         curl -L https://dl.k8s.io/${{ matrix.k8s }}/bin/linux/amd64/kubectl -o ${TMP_DIR}/kubectl
         # kind
-        curl -Lo ${TMP_DIR}/kind https://kind.sigs.k8s.io/dl/v0.20.0/kind-linux-amd64
+        curl -Lo ${TMP_DIR}/kind https://kind.sigs.k8s.io/dl/${KIND_VERSION}/kind-linux-amd64
         # Install
         sudo cp ${TMP_DIR}/ginkgo /usr/local/bin/ginkgo
         sudo cp ${TMP_DIR}/e2e.test /usr/local/bin/e2e.test
@@ -274,7 +275,7 @@ jobs:
     - name: Export logs
       if: always()
       run: |
-        /usr/local/bin/kind export logs --name ${KIND_CLUSTER_NAME} --loglevel=debug ./_artifacts/logs
+        /usr/local/bin/kind export logs --name ${KIND_CLUSTER_NAME} -v 4 ./_artifacts/logs
 
     - name: Upload logs
       if: always()
