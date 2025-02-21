@@ -262,5 +262,7 @@ func agentOptions(t testing.TB, opts AgentOpts) (*agentopts.GrpcProxyAgentOption
 	o.HealthServerPort = ports[0]
 	o.AdminServerPort = ports[1]
 
+	o.KeepaliveTime = 5 * time.Second
+
 	return o, nil
 }
