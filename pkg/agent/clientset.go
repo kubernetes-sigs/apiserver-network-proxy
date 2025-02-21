@@ -30,6 +30,12 @@ import (
 	"sigs.k8s.io/apiserver-network-proxy/pkg/agent/metrics"
 )
 
+const (
+	fromResponses = "KNP server response headers"
+	fromLeases = "KNP lease count"
+	fromFallback = "fallback to 1"
+)
+
 // ClientSet consists of clients connected to each instance of an HA proxy server.
 type ClientSet struct {
 	mu      sync.Mutex         //protects the clients.
@@ -39,7 +45,7 @@ type ClientSet struct {
 	agentID string // ID of this agent
 	address string // proxy server address. Assuming HA proxy server
 
-	leaseCounter            *ServerLeaseCounter // counts number of proxy server leases
+	leaseCounter            ServerCounter // counts number of proxy server leases
 	lastReceivedServerCount int                 // last server count received from a proxy server
 	lastServerCount         int                 // last server count value from either lease system or proxy server, former takes priority
 
@@ -68,6 +74,7 @@ type ClientSet struct {
 	xfrChannelSize     int
 
 	syncForever bool // Continue syncing (support dynamic server count).
+	serverCountSource string
 }
 
 func (cs *ClientSet) ClientsCount() int {
@@ -147,7 +154,8 @@ type ClientSetConfig struct {
 	WarnOnChannelLimit      bool
 	SyncForever             bool
 	XfrChannelSize          int
-	ServerLeaseCounter      *ServerLeaseCounter
+	ServerLeaseCounter      ServerCounter
+	ServerCountSource       string
 }
 
 func (cc *ClientSetConfig) NewAgentClientSet(drainCh, stopCh <-chan struct{}) *ClientSet {
@@ -167,6 +175,7 @@ func (cc *ClientSetConfig) NewAgentClientSet(drainCh, stopCh <-chan struct{}) *C
 		xfrChannelSize:          cc.XfrChannelSize,
 		stopCh:                  stopCh,
 		leaseCounter:            cc.ServerLeaseCounter,
+		serverCountSource:       cc.ServerCountSource,
 	}
 }
 
@@ -218,15 +227,41 @@ func (cs *ClientSet) sync() {
 }
 
 func (cs *ClientSet) ServerCount() int {
+
 	var serverCount int
-	if cs.leaseCounter != nil {
-		serverCount = cs.leaseCounter.Count()
-	} else {
-		serverCount = cs.lastReceivedServerCount
+	var countSourceLabel string
+
+	switch cs.serverCountSource {
+	case "", "default":
+		if cs.leaseCounter != nil {
+			serverCount = cs.leaseCounter.Count()
+			countSourceLabel = fromLeases
+		} else {
+			serverCount = cs.lastReceivedServerCount
+			countSourceLabel = fromResponses
+		}
+	case "max":
+		countFromLeases := 0
+		if cs.leaseCounter != nil {
+			countFromLeases = cs.leaseCounter.Count()
+		}
+		countFromResponses := cs.lastReceivedServerCount
+
+		serverCount = countFromLeases
+		countSourceLabel = fromLeases
+		if countFromResponses > serverCount {
+			serverCount = countFromResponses
+			countSourceLabel = fromResponses
+		}
+		if serverCount == 0 {
+			serverCount = 1
+			countSourceLabel = fromFallback
+		}
+
 	}
 
 	if serverCount != cs.lastServerCount {
-		klog.Warningf("change detected in proxy server count (was: %d, now: %d)", cs.lastServerCount, serverCount)
+		klog.Warningf("change detected in proxy server count (was: %d, now: %d, source: %q)", cs.lastServerCount, serverCount, countSourceLabel)
 		cs.lastServerCount = serverCount
 	}
 

@@ -36,6 +36,10 @@ import (
 	coordinationv1lister "k8s.io/client-go/listers/coordination/v1"
 )
 
+type ServerCounter interface {
+	Count() int
+}
+
 // A ServerLeaseCounter counts leases in the k8s apiserver to determine the
 // current proxy server count.
 type ServerLeaseCounter struct {
