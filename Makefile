@@ -164,13 +164,13 @@ easy-rsa: easy-rsa.tar.gz
 
 cfssl:
 	@if ! command -v cfssl &> /dev/null; then \
-		curl --retry 10 -L -o cfssl https://github.com/cloudflare/cfssl/releases/download/v1.5.0/cfssl_1.5.0_$(GOOS)_$(GOARCH); \
+		curl --retry 10 -L -o cfssl https://github.com/cloudflare/cfssl/releases/download/v1.6.5/cfssl_1.6.5_$(GOOS)_$(GOARCH); \
 		chmod +x cfssl; \
 	fi
 
 cfssljson:
 	@if ! command -v cfssljson &> /dev/null; then \
-		curl --retry 10 -L -o cfssljson https://github.com/cloudflare/cfssl/releases/download/v1.5.0/cfssljson_1.5.0_$(GOOS)_$(GOARCH); \
+		curl --retry 10 -L -o cfssljson https://github.com/cloudflare/cfssl/releases/download/v1.6.5/cfssljson_1.6.5_$(GOOS)_$(GOARCH); \
 		chmod +x cfssljson; \
 	fi
 
