@@ -167,5 +167,8 @@ func serverOptions(t testing.TB, opts ProxyServerOpts) (*serveropts.ProxyRunOpti
 	o.HealthPort = ports[1]
 	o.AdminPort = ports[2]
 
+	o.KeepaliveTime = 5 * time.Second
+	o.FrontendKeepaliveTime = 5 * time.Second
+
 	return o, nil
 }
