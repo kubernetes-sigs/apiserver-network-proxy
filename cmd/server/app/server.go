@@ -105,7 +105,7 @@ func (p *Proxy) Run(o *options.ProxyRunOptions, stopCh <-chan struct{}) error {
 	defer cancel()
 
 	var k8sClient *kubernetes.Clientset
-	if o.AgentNamespace != "" {
+	if o.NeedsKubernetesClient {
 		config, err := clientcmd.BuildConfigFromFlags("", o.KubeconfigPath)
 		if err != nil {
 			return fmt.Errorf("failed to load kubernetes client config: %v", err)
