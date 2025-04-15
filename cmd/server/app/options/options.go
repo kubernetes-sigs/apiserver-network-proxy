@@ -112,6 +112,8 @@ type ProxyRunOptions struct {
 	LeaseNamespace string
 	// Lease Labels
 	LeaseLabel string
+	// Needs kubernetes client
+	NeedsKubernetesClient bool
 }
 
 func (o *ProxyRunOptions) Flags() *pflag.FlagSet {
@@ -287,29 +289,27 @@ func (o *ProxyRunOptions) Validate() error {
 	if o.EnableContentionProfiling && !o.EnableProfiling {
 		return fmt.Errorf("if --enable-contention-profiling is set, --enable-profiling must also be set")
 	}
-
-	// validate agent authentication params
-	// all 4 parameters must be empty or must have value (except KubeconfigPath that might be empty)
-	if o.AgentNamespace != "" || o.AgentServiceAccount != "" || o.AuthenticationAudience != "" || o.KubeconfigPath != "" {
+	usingServiceAccountAuth := o.AgentNamespace != "" || o.AgentServiceAccount != "" || o.AuthenticationAudience != ""
+	if usingServiceAccountAuth {
 		if o.ClusterCaCert != "" {
-			return fmt.Errorf("ClusterCaCert can not be used when service account authentication is enabled")
+			return fmt.Errorf("--cluster-ca-cert can not be used when agent authentication is enabled")
 		}
 		if o.AgentNamespace == "" {
-			return fmt.Errorf("AgentNamespace cannot be empty when agent authentication is enabled")
+			return fmt.Errorf("--agent-namespace cannot be empty when agent authentication is enabled")
 		}
 		if o.AgentServiceAccount == "" {
-			return fmt.Errorf("AgentServiceAccount cannot be empty when agent authentication is enabled")
+			return fmt.Errorf("--agent-service-account cannot be empty when agent authentication is enabled")
 		}
 		if o.AuthenticationAudience == "" {
-			return fmt.Errorf("AuthenticationAudience cannot be empty when agent authentication is enabled")
-		}
-		if o.KubeconfigPath != "" {
-			if _, err := os.Stat(o.KubeconfigPath); os.IsNotExist(err) {
-				return fmt.Errorf("error checking KubeconfigPath %q, got %v", o.KubeconfigPath, err)
-			}
+			return fmt.Errorf("--authentication-audience cannot be empty when agent authentication is enabled")
 		}
 	}
-
+	// Validate kubeconfig path if provided
+	if o.KubeconfigPath != "" {
+		if _, err := os.Stat(o.KubeconfigPath); os.IsNotExist(err) {
+			return fmt.Errorf("checking KubeconfigPath %q, got %v", o.KubeconfigPath, err)
+		}
+	}
 	// validate the proxy strategies
 	if len(o.ProxyStrategies) == 0 {
 		return fmt.Errorf("ProxyStrategies cannot be empty")
@@ -337,6 +337,8 @@ func (o *ProxyRunOptions) Validate() error {
 			return err
 		}
 	}
+
+	o.NeedsKubernetesClient = usingServiceAccountAuth || o.EnableLeaseController
 
 	return nil
 }
