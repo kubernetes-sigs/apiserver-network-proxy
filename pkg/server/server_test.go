@@ -135,7 +135,7 @@ func TestAgentTokenAuthenticationErrorsToken(t *testing.T) {
 		t.Run(tc.desc, func(t *testing.T) {
 			kcs := k8sfake.NewSimpleClientset()
 
-			kcs.AuthenticationV1().(*fakeauthenticationv1.FakeAuthenticationV1).Fake.PrependReactor("create", "tokenreviews", func(action k8stesting.Action) (handled bool, ret runtime.Object, err error) {
+			kcs.AuthenticationV1().(*fakeauthenticationv1.FakeAuthenticationV1).Fake.PrependReactor("create", "tokenreviews", func(_ k8stesting.Action) (handled bool, ret runtime.Object, err error) {
 				tr := &authv1.TokenReview{
 					Status: authv1.TokenReviewStatus{
 						Authenticated: tc.authenticated,
@@ -553,7 +553,7 @@ func TestServerProxyRecvChanFull(t *testing.T) {
 }
 
 func TestServerProxyNoDial(t *testing.T) {
-	baseServerProxyTestWithBackend(t, func(frontendConn, agentConn *agentmock.MockAgentService_ConnectServer) {
+	baseServerProxyTestWithBackend(t, func(frontendConn, _ *agentmock.MockAgentService_ConnectServer) {
 		const connectID = 123456
 		data := &client.Packet{
 			Type: client.PacketType_DATA,

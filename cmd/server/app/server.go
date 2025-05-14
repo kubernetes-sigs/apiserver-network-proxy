@@ -58,7 +58,7 @@ func NewProxyCommand(p *Proxy, o *options.ProxyRunOptions) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:  "proxy",
 		Long: `A gRPC proxy server, receives requests from the API server and forwards to the agent.`,
-		RunE: func(cmd *cobra.Command, args []string) error {
+		RunE: func(_ *cobra.Command, _ []string) error {
 			stopCh := SetupSignalHandler()
 			return p.Run(o, stopCh)
 		},
@@ -132,7 +132,7 @@ func (p *Proxy) Run(o *options.ProxyRunOptions, stopCh <-chan struct{}) error {
 	if err != nil {
 		return err
 	}
-	p.server = server.NewProxyServer(o.ServerID, ps, int(o.ServerCount), authOpt)
+	p.server = server.NewProxyServer(o.ServerID, ps, o.ServerCount, authOpt)
 
 	frontendStop, err := p.runFrontendServer(ctx, o, p.server)
 	if err != nil {
@@ -325,7 +325,7 @@ func (p *Proxy) runMTLSFrontendServer(ctx context.Context, o *options.ProxyRunOp
 		}
 		labels := runpprof.Labels(
 			"core", "mtlsGrpcFrontend",
-			"port", strconv.FormatUint(uint64(o.ServerPort), 10),
+			"port", strconv.Itoa(o.ServerPort),
 		)
 		go runpprof.Do(context.Background(), labels, func(context.Context) { grpcServer.Serve(lis) })
 		stop = grpcServer.GracefulStop
@@ -348,7 +348,7 @@ func (p *Proxy) runMTLSFrontendServer(ctx context.Context, o *options.ProxyRunOp
 		}
 		labels := runpprof.Labels(
 			"core", "mtlsHttpFrontend",
-			"port", strconv.FormatUint(uint64(o.ServerPort), 10),
+			"port", strconv.Itoa(o.ServerPort),
 		)
 		go runpprof.Do(context.Background(), labels, func(context.Context) {
 			err := server.ListenAndServeTLS("", "") // empty files defaults to tlsConfig
@@ -385,7 +385,7 @@ func (p *Proxy) runAgentServer(o *options.ProxyRunOptions, server *server.ProxyS
 	}
 	labels := runpprof.Labels(
 		"core", "agentListener",
-		"port", strconv.FormatUint(uint64(o.AgentPort), 10),
+		"port", strconv.Itoa(o.AgentPort),
 	)
 	go runpprof.Do(context.Background(), labels, func(context.Context) { grpcServer.Serve(lis) })
 	p.agentServer = grpcServer
@@ -415,7 +415,7 @@ func (p *Proxy) runAdminServer(o *options.ProxyRunOptions, _ *server.ProxyServer
 
 	labels := runpprof.Labels(
 		"core", "adminListener",
-		"port", strconv.FormatUint(uint64(o.AdminPort), 10),
+		"port", strconv.Itoa(o.AdminPort),
 	)
 	go runpprof.Do(context.Background(), labels, func(context.Context) {
 		err := p.adminServer.ListenAndServe()
@@ -429,10 +429,10 @@ func (p *Proxy) runAdminServer(o *options.ProxyRunOptions, _ *server.ProxyServer
 }
 
 func (p *Proxy) runHealthServer(o *options.ProxyRunOptions, server *server.ProxyServer) error {
-	livenessHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	livenessHandler := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		fmt.Fprintf(w, "ok")
 	})
-	readinessHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	readinessHandler := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		ready, msg := server.Readiness.Ready()
 		if ready {
 			w.WriteHeader(200)
@@ -457,7 +457,7 @@ func (p *Proxy) runHealthServer(o *options.ProxyRunOptions, server *server.Proxy
 
 	labels := runpprof.Labels(
 		"core", "healthListener",
-		"port", strconv.FormatUint(uint64(o.HealthPort), 10),
+		"port", strconv.Itoa(o.HealthPort),
 	)
 	go runpprof.Do(context.Background(), labels, func(context.Context) {
 		err := p.healthServer.ListenAndServe()
