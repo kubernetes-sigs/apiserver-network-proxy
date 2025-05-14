@@ -12,7 +12,7 @@ permissions:
 
 env:
   GO_VERSION: v1.23.6
-  GOLANGCI_LINT_VERSION: v1.60.1
+  GOLANGCI_LINT_VERSION: v2.1
 
 jobs:
   golangci:
@@ -24,7 +24,7 @@ jobs:
         with:
           go-version: ${{ env.GO_VERSION }}
       - name: golangci-lint
-        uses: golangci/golangci-lint-action@v6
+        uses: golangci/golangci-lint-action@v8
         with:
           version: ${{ env.GOLANGCI_LINT_VERSION }}
           args: --verbose
