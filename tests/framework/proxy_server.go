@@ -139,7 +139,7 @@ func serverOptions(t testing.TB, opts ProxyServerOpts) (*serveropts.ProxyRunOpti
 	t.Helper()
 	o := serveropts.NewProxyRunOptions()
 
-	o.ServerCount = uint(opts.ServerCount)
+	o.ServerCount = opts.ServerCount
 	o.Mode = opts.Mode
 
 	uid := uuid.New().String()

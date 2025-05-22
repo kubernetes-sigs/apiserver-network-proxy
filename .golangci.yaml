@@ -1,20 +1,37 @@
-run:
-  timeout: 5m
+version: "2"
 linters:
-  disable-all: true
+  default: none
   enable:
-  - gofmt
-  - revive
-  - gosec
-  - govet
-  - unused
+    - gosec
+    - govet
+    - revive
+    - unused
+  exclusions:
+    generated: lax
+    presets:
+      - comments
+      - common-false-positives
+      - legacy
+      - std-error-handling
+    rules:
+      - linters:
+          - gosec
+        path: _test\.go
+      - linters:
+          - gosec
+        path: ^tests/
+    paths:
+      - third_party$
+      - builtin$
+      - examples$
 issues:
   fix: true
-  exclude-rules:
-    # Don't run security checks on test files
-    - path: _test\.go
-      linters:
-        - gosec
-    - path: ^tests/
-      linters:
-        - gosec
+formatters:
+  enable:
+    - gofmt
+  exclusions:
+    generated: lax
+    paths:
+      - third_party$
+      - builtin$
+      - examples$
