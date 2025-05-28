@@ -105,11 +105,13 @@ type delayedServer struct {
 	maxWait time.Duration
 }
 
-// randomDuration returns a random duration in the [min, max) interval
-func randomDuration(min, max time.Duration) time.Duration {
-	d := min
-	if max != min {
-		d += time.Duration(rand.Int63n(int64(max - min)))
+// randomDuration returns a random duration in the [lower, upper) interval
+// Cannot use min/max because linter gives the following error.
+// "redefines-builtin-id: redefinition of the built-in function min (revive)"
+func randomDuration(lower, upper time.Duration) time.Duration {
+	d := lower
+	if upper != lower {
+		d += time.Duration(rand.Int63n(int64(upper - lower)))
 	}
 	return d
 }
