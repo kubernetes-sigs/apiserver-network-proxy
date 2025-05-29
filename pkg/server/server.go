@@ -135,9 +135,8 @@ func (c *ProxyClientConnection) send(pkt *client.Packet) error {
 				return c.CloseHTTP()
 			}
 			return nil
-		} else {
-			return fmt.Errorf("attempt to send via unrecognized connection type %v", pkt.Type)
 		}
+		return fmt.Errorf("attempt to send via unrecognized connection type %v", pkt.Type)
 	}
 	return fmt.Errorf("attempt to send via unrecognized connection mode %q", c.Mode)
 }

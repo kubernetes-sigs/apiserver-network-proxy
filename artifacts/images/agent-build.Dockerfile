@@ -5,7 +5,7 @@ ARG GO_TOOLCHAIN
 ARG GO_VERSION
 ARG BASEIMAGE
 
-FROM --platform=linux/${BUILDARCH} ${GO_TOOLCHAIN}:${GO_VERSION} as builder
+FROM --platform=linux/${BUILDARCH} ${GO_TOOLCHAIN}:${GO_VERSION} AS builder
 
 # Copy in the go src
 WORKDIR /go/src/sigs.k8s.io/apiserver-network-proxy

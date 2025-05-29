@@ -52,7 +52,7 @@ func TestDefaultServerOptions(t *testing.T) {
 	assertDefaultValue(t, "FrontendKeepaliveTime", defaultServerOptions.FrontendKeepaliveTime, 1*time.Hour)
 	assertDefaultValue(t, "EnableProfiling", defaultServerOptions.EnableProfiling, false)
 	assertDefaultValue(t, "EnableContentionProfiling", defaultServerOptions.EnableContentionProfiling, false)
-	assertDefaultValue(t, "ServerCount", defaultServerOptions.ServerCount, uint(1))
+	assertDefaultValue(t, "ServerCount", defaultServerOptions.ServerCount, 1)
 	assertDefaultValue(t, "AgentNamespace", defaultServerOptions.AgentNamespace, "")
 	assertDefaultValue(t, "AgentServiceAccount", defaultServerOptions.AgentServiceAccount, "")
 	assertDefaultValue(t, "KubeconfigPath", defaultServerOptions.KubeconfigPath, "")
