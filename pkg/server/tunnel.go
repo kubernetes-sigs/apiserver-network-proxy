@@ -40,7 +40,7 @@ func (t *Tunnel) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	defer metrics.Metrics.HTTPConnectionDec()
 
 	klog.V(2).InfoS("Received request for host", "method", r.Method, "host", r.Host, "userAgent", r.UserAgent())
-	if r.TLS != nil {
+	if r.TLS != nil && len(r.TLS.PeerCertificates) > 0 {
 		klog.V(2).InfoS("TLS", "commonName", r.TLS.PeerCertificates[0].Subject.CommonName)
 	}
 	if r.Method != http.MethodConnect {
