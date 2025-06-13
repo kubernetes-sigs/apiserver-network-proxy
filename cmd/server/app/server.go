@@ -422,7 +422,17 @@ func (p *Proxy) runAgentServer(o *options.ProxyRunOptions, server *server.ProxyS
 
 func (p *Proxy) runAdminServer(o *options.ProxyRunOptions, _ *server.ProxyServer) error {
 	muxHandler := http.NewServeMux()
-	muxHandler.Handle("/metrics", promhttp.Handler())
+	muxHandler.Handle("/metrics", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		host, _, err := net.SplitHostPort(r.Host)
+		// The port number may be omitted if the admin server is running on port
+		// 80, the default port for HTTP
+		if err != nil {
+			host = r.Host
+		}
+		dest := *r.URL
+		dest.Host = net.JoinHostPort(host, strconv.Itoa(o.HealthPort))
+		http.Redirect(w, r, dest.String(), http.StatusMovedPermanently)
+	}))
 	if o.EnableProfiling {
 		muxHandler.HandleFunc("/debug/pprof", util.RedirectTo("/debug/pprof/"))
 		muxHandler.HandleFunc("/debug/pprof/", netpprof.Index)
@@ -471,6 +481,7 @@ func (p *Proxy) runHealthServer(o *options.ProxyRunOptions, server *server.Proxy
 	})
 
 	muxHandler := http.NewServeMux()
+	muxHandler.Handle("/metrics", promhttp.Handler())
 	muxHandler.HandleFunc("/healthz", livenessHandler)
 	// "/ready" is deprecated but being maintained for backward compatibility
 	muxHandler.HandleFunc("/ready", readinessHandler)
