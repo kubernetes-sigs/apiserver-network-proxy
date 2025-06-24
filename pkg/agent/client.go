@@ -356,7 +356,7 @@ func (a *Client) Serve() {
 			} else {
 				select {
 				case <-a.stopCh:
-					klog.V(5).InfoS("could not read stream because agent client is shutting down", "err", err)
+					klog.V(5).InfoS("could not read stream because agent client is shutting down", "serverID", a.serverID, "agentID", a.agentID, "err", err)
 				default:
 					// If stopCh is not closed, this is a legitimate, unexpected error.
 					klog.ErrorS(err, "could not read stream", "serverID", a.serverID, "agentID", a.agentID)
@@ -414,11 +414,11 @@ func (a *Client) Serve() {
 				}
 				if err := a.Send(closePkt); err != nil {
 					if err == io.EOF {
-						klog.V(2).InfoS("received EOF; connection already closed", "connectionID", connID, "err", err)
+						klog.V(2).InfoS("received EOF; connection already closed", "connectionID", connID, "dialID", dialReq.Random, "err", err)
 					} else if _, ok := a.connManager.Get(connID); !ok {
-						klog.V(5).InfoS("connection already closed", "connectionID", connID, "err", err)
+						klog.V(5).InfoS("connection already closed", "connectionID", connID, "dialID", dialReq.Random, "err", err)
 					} else {
-						klog.ErrorS(err, "close response failure", "")
+						klog.ErrorS(err, "close response failure", "connectionID", connID, "dialID", dialReq.Random)
 					}
 				}
 				close(dataCh)
