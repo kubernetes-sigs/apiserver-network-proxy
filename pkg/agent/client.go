@@ -414,7 +414,7 @@ func (a *Client) Serve() {
 				}
 				if err := a.Send(closePkt); err != nil {
 					if err == io.EOF {
-						klog.V(2).InfoS("received EOF; connection already closed", "connectionID", connID, "dialID", dialReq.Random, "err", err)
+						klog.V(4).InfoS("received EOF; connection already closed", "connectionID", connID, "dialID", dialReq.Random, "err", err)
 					} else if _, ok := a.connManager.Get(connID); !ok {
 						klog.V(5).InfoS("connection already closed", "connectionID", connID, "dialID", dialReq.Random, "err", err)
 					} else {
