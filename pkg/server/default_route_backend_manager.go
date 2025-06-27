@@ -32,7 +32,7 @@ var _ BackendManager = &DefaultRouteBackendManager{}
 func NewDefaultRouteBackendManager() *DefaultRouteBackendManager {
 	return &DefaultRouteBackendManager{
 		DefaultBackendStorage: NewDefaultBackendStorage(
-			[]header.IdentifierType{header.DefaultRoute})}
+			[]header.IdentifierType{header.DefaultRoute}, "DefaultRouteBackendManager")}
 }
 
 // Backend tries to get a backend that advertises default route, with random selection.
