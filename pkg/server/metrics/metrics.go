@@ -51,6 +51,7 @@ type ServerMetrics struct {
 	grpcConnections      *prometheus.GaugeVec
 	httpConnections      prometheus.Gauge
 	backend              *prometheus.GaugeVec
+	totalBackendCount    *prometheus.GaugeVec
 	pendingDials         *prometheus.GaugeVec
 	establishedConns     *prometheus.GaugeVec
 	fullRecvChannels     *prometheus.GaugeVec
@@ -113,6 +114,17 @@ func newServerMetrics() *ServerMetrics {
 			Help:      "Number of konnectivity agent connected to the proxy server",
 		},
 		[]string{},
+	)
+	totalBackendCount := prometheus.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Namespace: Namespace,
+			Subsystem: Subsystem,
+			Name:      "ready_backend_connections_total",
+			Help:      "Total number of konnectivity agent connected to the proxy server",
+		},
+		[]string{
+			"manager",
+		},
 	)
 	pendingDials := prometheus.NewGaugeVec(
 		prometheus.GaugeOpts{
@@ -203,6 +215,7 @@ func newServerMetrics() *ServerMetrics {
 	prometheus.MustRegister(grpcConnections)
 	prometheus.MustRegister(httpConnections)
 	prometheus.MustRegister(backend)
+	prometheus.MustRegister(totalBackendCount)
 	prometheus.MustRegister(pendingDials)
 	prometheus.MustRegister(establishedConns)
 	prometheus.MustRegister(fullRecvChannels)
@@ -220,6 +233,7 @@ func newServerMetrics() *ServerMetrics {
 		grpcConnections:      grpcConnections,
 		httpConnections:      httpConnections,
 		backend:              backend,
+		totalBackendCount:    totalBackendCount,
 		pendingDials:         pendingDials,
 		establishedConns:     establishedConns,
 		fullRecvChannels:     fullRecvChannels,
@@ -240,6 +254,7 @@ func (s *ServerMetrics) Reset() {
 	s.frontendLatencies.Reset()
 	s.grpcConnections.Reset()
 	s.backend.Reset()
+	s.totalBackendCount.Reset()
 	s.pendingDials.Reset()
 	s.establishedConns.Reset()
 	s.fullRecvChannels.Reset()
@@ -282,6 +297,11 @@ func (s *ServerMetrics) HTTPConnectionDec() { s.httpConnections.Dec() }
 // SetBackendCount sets the number of backend connection.
 func (s *ServerMetrics) SetBackendCount(count int) {
 	s.backend.WithLabelValues().Set(float64(count))
+}
+
+// SetTotalBackendCount sets the total number of backend connection.
+func (s *ServerMetrics) SetTotalBackendCount(managerName string, count int) {
+	s.totalBackendCount.WithLabelValues(managerName).Set(float64(count))
 }
 
 // SetPendingDialCount sets the number of pending dials.

@@ -32,7 +32,7 @@ var _ BackendManager = &DestHostBackendManager{}
 func NewDestHostBackendManager() *DestHostBackendManager {
 	return &DestHostBackendManager{
 		DefaultBackendStorage: NewDefaultBackendStorage(
-			[]header.IdentifierType{header.IPv4, header.IPv6, header.Host})}
+			[]header.IdentifierType{header.IPv4, header.IPv6, header.Host}, "DestHostBackendManager")}
 }
 
 func (dibm *DestHostBackendManager) AddBackend(backend *Backend) {

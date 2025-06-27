@@ -271,24 +271,30 @@ type DefaultBackendStorage struct {
 	// e.g., when associating to the DestHostBackendManager, it can only use the
 	// identifiers of types, IPv4, IPv6 and Host.
 	idTypes []header.IdentifierType
+	// managerName is the kind of backend manager this storage belongs to.
+	// It is used to record metrics.
+	managerName string
 }
 
 // NewDefaultBackendManager returns a DefaultBackendManager.
 func NewDefaultBackendManager() *DefaultBackendManager {
 	return &DefaultBackendManager{
 		DefaultBackendStorage: NewDefaultBackendStorage(
-			[]header.IdentifierType{header.UID})}
+			[]header.IdentifierType{header.UID}, "DefaultBackendManager")}
 }
 
 // NewDefaultBackendStorage returns a DefaultBackendStorage
-func NewDefaultBackendStorage(idTypes []header.IdentifierType) *DefaultBackendStorage {
+func NewDefaultBackendStorage(idTypes []header.IdentifierType, managerName string) *DefaultBackendStorage {
 	// Set an explicit value, so that the metric is emitted even when
 	// no agent ever successfully connects.
 	metrics.Metrics.SetBackendCount(0)
+	metrics.Metrics.SetTotalBackendCount(managerName, 0)
+
 	return &DefaultBackendStorage{
-		backends: make(map[string][]*Backend),
-		random:   rand.New(rand.NewSource(time.Now().UnixNano())), /* #nosec G404 */
-		idTypes:  idTypes,
+		backends:    make(map[string][]*Backend),
+		random:      rand.New(rand.NewSource(time.Now().UnixNano())), /* #nosec G404 */
+		idTypes:     idTypes,
+		managerName: managerName,
 	}
 }
 
@@ -318,6 +324,7 @@ func (s *DefaultBackendStorage) addBackend(identifier string, idType header.Iden
 	}
 	s.backends[identifier] = []*Backend{backend}
 	metrics.Metrics.SetBackendCount(len(s.backends))
+	metrics.Metrics.SetTotalBackendCount(s.managerName, len(s.backends))
 	s.agentIDs = append(s.agentIDs, identifier)
 }
 
@@ -359,6 +366,7 @@ func (s *DefaultBackendStorage) removeBackend(identifier string, idType header.I
 		klog.V(1).InfoS("Could not find connection matching identifier to remove", "agentID", identifier, "idType", idType)
 	}
 	metrics.Metrics.SetBackendCount(len(s.backends))
+	metrics.Metrics.SetTotalBackendCount(s.managerName, len(s.backends))
 }
 
 // NumBackends resturns the number of available backends
