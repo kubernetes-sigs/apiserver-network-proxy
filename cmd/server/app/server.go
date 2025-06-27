@@ -46,6 +46,7 @@ import (
 	"sigs.k8s.io/apiserver-network-proxy/konnectivity-client/proto/client"
 	"sigs.k8s.io/apiserver-network-proxy/pkg/server"
 	"sigs.k8s.io/apiserver-network-proxy/pkg/server/leases"
+	"sigs.k8s.io/apiserver-network-proxy/pkg/server/proxystrategies"
 	"sigs.k8s.io/apiserver-network-proxy/pkg/util"
 	"sigs.k8s.io/apiserver-network-proxy/proto/agent"
 )
@@ -134,7 +135,7 @@ func (p *Proxy) Run(o *options.ProxyRunOptions, stopCh <-chan struct{}) error {
 		AuthenticationAudience: o.AuthenticationAudience,
 	}
 	klog.V(1).Infoln("Starting frontend server for client connections.")
-	ps, err := server.ParseProxyStrategies(o.ProxyStrategies)
+	ps, err := proxystrategies.ParseProxyStrategies(o.ProxyStrategies)
 	if err != nil {
 		return err
 	}

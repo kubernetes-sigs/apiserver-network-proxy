@@ -41,6 +41,7 @@ import (
 	commonmetrics "sigs.k8s.io/apiserver-network-proxy/konnectivity-client/pkg/common/metrics"
 	"sigs.k8s.io/apiserver-network-proxy/konnectivity-client/proto/client"
 	"sigs.k8s.io/apiserver-network-proxy/pkg/server/metrics"
+	"sigs.k8s.io/apiserver-network-proxy/pkg/server/proxystrategies"
 	"sigs.k8s.io/apiserver-network-proxy/pkg/util"
 	"sigs.k8s.io/apiserver-network-proxy/proto/agent"
 	"sigs.k8s.io/apiserver-network-proxy/proto/header"
@@ -213,7 +214,7 @@ type ProxyServer struct {
 	AgentAuthenticationOptions *AgentTokenAuthenticationOptions
 
 	// TODO: move strategies into BackendStorage
-	proxyStrategies []ProxyStrategy
+	proxyStrategies []proxystrategies.ProxyStrategy
 	xfrChannelSize  int
 }
 
@@ -230,11 +231,11 @@ var _ agent.AgentServiceServer = &ProxyServer{}
 
 var _ client.ProxyServiceServer = &ProxyServer{}
 
-func genContext(proxyStrategies []ProxyStrategy, reqHost string) context.Context {
+func genContext(proxyStrategies []proxystrategies.ProxyStrategy, reqHost string) context.Context {
 	ctx := context.Background()
 	for _, ps := range proxyStrategies {
 		switch ps {
-		case ProxyStrategyDestHost:
+		case proxystrategies.ProxyStrategyDestHost:
 			addr := util.RemovePortFromHost(reqHost)
 			ctx = context.WithValue(ctx, destHostKey, addr)
 		}
@@ -373,15 +374,15 @@ func (s *ProxyServer) removeEstablishedForStream(streamUID string) []*ProxyClien
 }
 
 // NewProxyServer creates a new ProxyServer instance
-func NewProxyServer(serverID string, proxyStrategies []ProxyStrategy, serverCount int, agentAuthenticationOptions *AgentTokenAuthenticationOptions, channelSize int) *ProxyServer {
+func NewProxyServer(serverID string, proxyStrategies []proxystrategies.ProxyStrategy, serverCount int, agentAuthenticationOptions *AgentTokenAuthenticationOptions, channelSize int) *ProxyServer {
 	var bms []BackendManager
 	for _, ps := range proxyStrategies {
 		switch ps {
-		case ProxyStrategyDestHost:
+		case proxystrategies.ProxyStrategyDestHost:
 			bms = append(bms, NewDestHostBackendManager())
-		case ProxyStrategyDefault:
+		case proxystrategies.ProxyStrategyDefault:
 			bms = append(bms, NewDefaultBackendManager())
-		case ProxyStrategyDefaultRoute:
+		case proxystrategies.ProxyStrategyDefaultRoute:
 			bms = append(bms, NewDefaultRouteBackendManager())
 		default:
 			klog.ErrorS(nil, "Unknown proxy strategy", "strategy", ps)

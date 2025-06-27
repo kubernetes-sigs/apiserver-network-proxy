@@ -22,7 +22,6 @@ import (
 	"io"
 	"math/rand"
 	"slices"
-	"strings"
 	"sync"
 	"time"
 
@@ -32,71 +31,10 @@ import (
 	commonmetrics "sigs.k8s.io/apiserver-network-proxy/konnectivity-client/pkg/common/metrics"
 	client "sigs.k8s.io/apiserver-network-proxy/konnectivity-client/proto/client"
 	"sigs.k8s.io/apiserver-network-proxy/pkg/server/metrics"
+	"sigs.k8s.io/apiserver-network-proxy/pkg/server/proxystrategies"
 	"sigs.k8s.io/apiserver-network-proxy/proto/agent"
 	"sigs.k8s.io/apiserver-network-proxy/proto/header"
 )
-
-type ProxyStrategy int
-
-const (
-	// With this strategy the Proxy Server will randomly pick a backend from
-	// the current healthy backends to establish the tunnel over which to
-	// forward requests.
-	ProxyStrategyDefault ProxyStrategy = iota + 1
-	// With this strategy the Proxy Server will pick a backend that has the same
-	// associated host as the request.Host to establish the tunnel.
-	ProxyStrategyDestHost
-	// ProxyStrategyDefaultRoute will only forward traffic to agents that have explicity advertised
-	// they serve the default route through an agent identifier. Typically used in combination with destHost
-	ProxyStrategyDefaultRoute
-)
-
-func (ps ProxyStrategy) String() string {
-	switch ps {
-	case ProxyStrategyDefault:
-		return "default"
-	case ProxyStrategyDestHost:
-		return "destHost"
-	case ProxyStrategyDefaultRoute:
-		return "defaultRoute"
-	}
-	panic(fmt.Sprintf("unhandled ProxyStrategy: %d", ps))
-}
-
-func ParseProxyStrategy(s string) (ProxyStrategy, error) {
-	switch s {
-	case ProxyStrategyDefault.String():
-		return ProxyStrategyDefault, nil
-	case ProxyStrategyDestHost.String():
-		return ProxyStrategyDestHost, nil
-	case ProxyStrategyDefaultRoute.String():
-		return ProxyStrategyDefaultRoute, nil
-	default:
-		return 0, fmt.Errorf("unknown proxy strategy: %s", s)
-	}
-}
-
-// GenProxyStrategiesFromStr generates the list of proxy strategies from the
-// comma-seperated string, i.e., destHost.
-func ParseProxyStrategies(proxyStrategies string) ([]ProxyStrategy, error) {
-	var result []ProxyStrategy
-
-	strs := strings.Split(proxyStrategies, ",")
-	for _, s := range strs {
-		if len(s) == 0 {
-			continue
-		}
-		ps, err := ParseProxyStrategy(s)
-		if err != nil {
-			return nil, err
-		}
-		result = append(result, ps)
-	}
-	if len(result) == 0 {
-		return nil, fmt.Errorf("proxy strategies cannot be empty")
-	}
-	return result, nil
-}
 
 // Backend abstracts a connected Konnectivity agent.
 //
@@ -271,30 +209,31 @@ type DefaultBackendStorage struct {
 	// e.g., when associating to the DestHostBackendManager, it can only use the
 	// identifiers of types, IPv4, IPv6 and Host.
 	idTypes []header.IdentifierType
-	// managerName is the kind of backend manager this storage belongs to.
+	// proxyStrategy is the proxy strategy of the backend manager this storage
+	// belongs to.
 	// It is used to record metrics.
-	managerName string
+	proxyStrategy proxystrategies.ProxyStrategy
 }
 
 // NewDefaultBackendManager returns a DefaultBackendManager.
 func NewDefaultBackendManager() *DefaultBackendManager {
 	return &DefaultBackendManager{
 		DefaultBackendStorage: NewDefaultBackendStorage(
-			[]header.IdentifierType{header.UID}, "DefaultBackendManager")}
+			[]header.IdentifierType{header.UID}, proxystrategies.ProxyStrategyDefault)}
 }
 
 // NewDefaultBackendStorage returns a DefaultBackendStorage
-func NewDefaultBackendStorage(idTypes []header.IdentifierType, managerName string) *DefaultBackendStorage {
+func NewDefaultBackendStorage(idTypes []header.IdentifierType, proxyStrategy proxystrategies.ProxyStrategy) *DefaultBackendStorage {
 	// Set an explicit value, so that the metric is emitted even when
 	// no agent ever successfully connects.
 	metrics.Metrics.SetBackendCount(0)
-	metrics.Metrics.SetTotalBackendCount(managerName, 0)
+	metrics.Metrics.SetTotalBackendCount(proxyStrategy, 0)
 
 	return &DefaultBackendStorage{
-		backends:    make(map[string][]*Backend),
-		random:      rand.New(rand.NewSource(time.Now().UnixNano())), /* #nosec G404 */
-		idTypes:     idTypes,
-		managerName: managerName,
+		backends:      make(map[string][]*Backend),
+		random:        rand.New(rand.NewSource(time.Now().UnixNano())), /* #nosec G404 */
+		idTypes:       idTypes,
+		proxyStrategy: proxyStrategy,
 	}
 }
 
@@ -324,7 +263,7 @@ func (s *DefaultBackendStorage) addBackend(identifier string, idType header.Iden
 	}
 	s.backends[identifier] = []*Backend{backend}
 	metrics.Metrics.SetBackendCount(len(s.backends))
-	metrics.Metrics.SetTotalBackendCount(s.managerName, len(s.backends))
+	metrics.Metrics.SetTotalBackendCount(s.proxyStrategy, len(s.backends))
 	s.agentIDs = append(s.agentIDs, identifier)
 }
 
@@ -366,7 +305,7 @@ func (s *DefaultBackendStorage) removeBackend(identifier string, idType header.I
 		klog.V(1).InfoS("Could not find connection matching identifier to remove", "agentID", identifier, "idType", idType)
 	}
 	metrics.Metrics.SetBackendCount(len(s.backends))
-	metrics.Metrics.SetTotalBackendCount(s.managerName, len(s.backends))
+	metrics.Metrics.SetTotalBackendCount(s.proxyStrategy, len(s.backends))
 }
 
 // NumBackends resturns the number of available backends
