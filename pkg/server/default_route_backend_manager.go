@@ -20,6 +20,7 @@ import (
 	"context"
 
 	"k8s.io/klog/v2"
+	"sigs.k8s.io/apiserver-network-proxy/pkg/server/proxystrategies"
 	"sigs.k8s.io/apiserver-network-proxy/proto/header"
 )
 
@@ -32,7 +33,7 @@ var _ BackendManager = &DefaultRouteBackendManager{}
 func NewDefaultRouteBackendManager() *DefaultRouteBackendManager {
 	return &DefaultRouteBackendManager{
 		DefaultBackendStorage: NewDefaultBackendStorage(
-			[]header.IdentifierType{header.DefaultRoute}, "DefaultRouteBackendManager")}
+			[]header.IdentifierType{header.DefaultRoute}, proxystrategies.ProxyStrategyDefaultRoute)}
 }
 
 // Backend tries to get a backend that advertises default route, with random selection.

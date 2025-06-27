@@ -24,6 +24,7 @@ import (
 
 	commonmetrics "sigs.k8s.io/apiserver-network-proxy/konnectivity-client/pkg/common/metrics"
 	"sigs.k8s.io/apiserver-network-proxy/konnectivity-client/proto/client"
+	"sigs.k8s.io/apiserver-network-proxy/pkg/server/proxystrategies"
 )
 
 const (
@@ -123,7 +124,7 @@ func newServerMetrics() *ServerMetrics {
 			Help:      "Total number of konnectivity agent connected to the proxy server",
 		},
 		[]string{
-			"manager",
+			"proxy_strategy",
 		},
 	)
 	pendingDials := prometheus.NewGaugeVec(
@@ -300,8 +301,8 @@ func (s *ServerMetrics) SetBackendCount(count int) {
 }
 
 // SetTotalBackendCount sets the total number of backend connection.
-func (s *ServerMetrics) SetTotalBackendCount(managerName string, count int) {
-	s.totalBackendCount.WithLabelValues(managerName).Set(float64(count))
+func (s *ServerMetrics) SetTotalBackendCount(proxyStrategy proxystrategies.ProxyStrategy, count int) {
+	s.totalBackendCount.WithLabelValues(proxyStrategy.String()).Set(float64(count))
 }
 
 // SetPendingDialCount sets the number of pending dials.

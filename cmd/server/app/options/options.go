@@ -27,6 +27,7 @@ import (
 	"k8s.io/klog/v2"
 
 	"sigs.k8s.io/apiserver-network-proxy/pkg/server"
+	"sigs.k8s.io/apiserver-network-proxy/pkg/server/proxystrategies"
 	"sigs.k8s.io/apiserver-network-proxy/pkg/util"
 )
 
@@ -314,7 +315,7 @@ func (o *ProxyRunOptions) Validate() error {
 	if len(o.ProxyStrategies) == 0 {
 		return fmt.Errorf("ProxyStrategies cannot be empty")
 	}
-	if _, err := server.ParseProxyStrategies(o.ProxyStrategies); err != nil {
+	if _, err := proxystrategies.ParseProxyStrategies(o.ProxyStrategies); err != nil {
 		return fmt.Errorf("invalid proxy strategies: %v", err)
 	}
 	if o.XfrChannelSize <= 0 {

@@ -20,6 +20,7 @@ import (
 	"context"
 
 	"k8s.io/klog/v2"
+	"sigs.k8s.io/apiserver-network-proxy/pkg/server/proxystrategies"
 	"sigs.k8s.io/apiserver-network-proxy/proto/header"
 )
 
@@ -32,7 +33,7 @@ var _ BackendManager = &DestHostBackendManager{}
 func NewDestHostBackendManager() *DestHostBackendManager {
 	return &DestHostBackendManager{
 		DefaultBackendStorage: NewDefaultBackendStorage(
-			[]header.IdentifierType{header.IPv4, header.IPv6, header.Host}, "DestHostBackendManager")}
+			[]header.IdentifierType{header.IPv4, header.IPv6, header.Host}, proxystrategies.ProxyStrategyDestHost)}
 }
 
 func (dibm *DestHostBackendManager) AddBackend(backend *Backend) {
