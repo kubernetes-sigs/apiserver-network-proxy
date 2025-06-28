@@ -616,14 +616,17 @@ func prepareFrontendConn(ctrl *gomock.Controller) *agentmock.MockAgentService_Co
 	return frontendConn
 }
 
-func prepareAgentConnMD(t testing.TB, ctrl *gomock.Controller, proxyServer *ProxyServer) (*agentmock.MockAgentService_ConnectServer, *Backend) {
+func prepareAgentConnMD(t testing.TB, ctrl *gomock.Controller, proxyServer *ProxyServer, agentidentifiers []string) (*agentmock.MockAgentService_ConnectServer, *Backend) {
 	t.Helper()
+	if agentidentifiers == nil {
+		agentidentifiers = []string{}
+	}
 	// prepare the the connection to agent of proxy-server
 	agentConn := agentmock.NewMockAgentService_ConnectServer(ctrl)
 	agentConnMD := metadata.MD{
 		":authority":       []string{"127.0.0.1:8091"},
 		"agentid":          []string{uuid.New().String()},
-		"agentidentifiers": []string{},
+		"agentidentifiers": agentidentifiers,
 		"content-type":     []string{"application/grpc"},
 		"user-agent":       []string{"grpc-go/1.42.0"},
 	}
@@ -658,7 +661,7 @@ func baseServerProxyTestWithBackend(t *testing.T, validate func(*agentmock.MockA
 	// prepare proxy server
 	proxyServer := NewProxyServer(uuid.New().String(), []proxystrategies.ProxyStrategy{proxystrategies.ProxyStrategyDefault}, 1, &AgentTokenAuthenticationOptions{}, xfrChannelSize)
 
-	agentConn, _ := prepareAgentConnMD(t, ctrl, proxyServer)
+	agentConn, _ := prepareAgentConnMD(t, ctrl, proxyServer, nil)
 
 	validate(frontendConn, agentConn)
 
@@ -865,11 +868,32 @@ func TestReadyBackendsMetric(t *testing.T) {
 	p := NewProxyServer(uuid.New().String(), []proxystrategies.ProxyStrategy{proxystrategies.ProxyStrategyDefault}, 1, &AgentTokenAuthenticationOptions{}, xfrChannelSize)
 	assertReadyBackendsMetric(t, 0)
 
-	_, backend := prepareAgentConnMD(t, ctrl, p)
+	_, backend := prepareAgentConnMD(t, ctrl, p, nil)
 	assertReadyBackendsMetric(t, 1)
 
 	p.removeBackend(backend)
 	assertReadyBackendsMetric(t, 0)
+}
+
+func TestTotalReadyBackendsMetric(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+
+	metrics.Metrics.Reset()
+
+	p := NewProxyServer(uuid.New().String(), []proxystrategies.ProxyStrategy{proxystrategies.ProxyStrategyDefault, proxystrategies.ProxyStrategyDestHost}, 1, &AgentTokenAuthenticationOptions{}, xfrChannelSize)
+	assertTotalReadyBackendsMetric(t, map[string]int{proxystrategies.ProxyStrategyDefault.String(): 0, proxystrategies.ProxyStrategyDestHost.String(): 0})
+
+	_, backend1 := prepareAgentConnMD(t, ctrl, p, nil)
+	assertTotalReadyBackendsMetric(t, map[string]int{proxystrategies.ProxyStrategyDefault.String(): 1, proxystrategies.ProxyStrategyDestHost.String(): 0})
+
+	// Add a backend with IPv4 agent identifier.
+	_, backend2 := prepareAgentConnMD(t, ctrl, p, []string{"host=localhost"})
+	assertTotalReadyBackendsMetric(t, map[string]int{proxystrategies.ProxyStrategyDefault.String(): 2, proxystrategies.ProxyStrategyDestHost.String(): 1})
+
+	p.removeBackend(backend1)
+	p.removeBackend(backend2)
+	assertTotalReadyBackendsMetric(t, map[string]int{proxystrategies.ProxyStrategyDefault.String(): 0, proxystrategies.ProxyStrategyDestHost.String(): 0})
 }
 
 func dialReqPkt(dialID int64) *client.Packet {
@@ -930,6 +954,13 @@ func assertReadyBackendsMetric(t testing.TB, expect int) {
 	t.Helper()
 	if err := metricstest.DefaultTester.ExpectServerReadyBackends(expect); err != nil {
 		t.Errorf("Expected %d %s metric: %v", expect, "ready_backend_connections", err)
+	}
+}
+
+func assertTotalReadyBackendsMetric(t testing.TB, expect map[string]int) {
+	t.Helper()
+	if err := metricstest.DefaultTester.ExpectServerTotalReadyBackends(expect); err != nil {
+		t.Errorf("Expected %s metric for each proxy strategy %+v, but got error: %v", "ready_backend_connections_total", expect, err)
 	}
 }
 
