@@ -422,6 +422,7 @@ func (p *Proxy) runAgentServer(o *options.ProxyRunOptions, server *server.ProxyS
 
 func (p *Proxy) runAdminServer(o *options.ProxyRunOptions, _ *server.ProxyServer) error {
 	muxHandler := http.NewServeMux()
+	// /metrics moved to HealthServer but being maintained here for backward compatibility
 	muxHandler.Handle("/metrics", promhttp.Handler())
 	if o.EnableProfiling {
 		muxHandler.HandleFunc("/debug/pprof", util.RedirectTo("/debug/pprof/"))
@@ -471,6 +472,7 @@ func (p *Proxy) runHealthServer(o *options.ProxyRunOptions, server *server.Proxy
 	})
 
 	muxHandler := http.NewServeMux()
+	muxHandler.Handle("/metrics", promhttp.Handler())
 	muxHandler.HandleFunc("/healthz", livenessHandler)
 	// "/ready" is deprecated but being maintained for backward compatibility
 	muxHandler.HandleFunc("/ready", readinessHandler)
