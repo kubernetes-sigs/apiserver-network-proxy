@@ -112,7 +112,7 @@ func newServerMetrics() *ServerMetrics {
 			Namespace: Namespace,
 			Subsystem: Subsystem,
 			Name:      "ready_backend_connections",
-			Help:      "Number of konnectivity agent connected to the proxy server",
+			Help:      "Number of konnectivity agent connected to the proxy server. DEPRECATED, please use ready_backend_connections_total",
 		},
 		[]string{},
 	)
@@ -295,8 +295,8 @@ func (s *ServerMetrics) HTTPConnectionInc() { s.httpConnections.Inc() }
 // HTTPConnectionDec decrements a finished HTTP CONNECTION connection.
 func (s *ServerMetrics) HTTPConnectionDec() { s.httpConnections.Dec() }
 
-// SetBackendCount sets the number of backend connection.
-func (s *ServerMetrics) SetBackendCount(count int) {
+// SetBackendCountDeprecated sets the number of backend connection.
+func (s *ServerMetrics) SetBackendCountDeprecated(count int) {
 	s.backend.WithLabelValues().Set(float64(count))
 }
 

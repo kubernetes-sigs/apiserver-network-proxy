@@ -226,7 +226,7 @@ func NewDefaultBackendManager() *DefaultBackendManager {
 func NewDefaultBackendStorage(idTypes []header.IdentifierType, proxyStrategy proxystrategies.ProxyStrategy) *DefaultBackendStorage {
 	// Set an explicit value, so that the metric is emitted even when
 	// no agent ever successfully connects.
-	metrics.Metrics.SetBackendCount(0)
+	metrics.Metrics.SetBackendCountDeprecated(0)
 	metrics.Metrics.SetTotalBackendCount(proxyStrategy, 0)
 
 	return &DefaultBackendStorage{
@@ -262,7 +262,7 @@ func (s *DefaultBackendStorage) addBackend(identifier string, idType header.Iden
 		return
 	}
 	s.backends[identifier] = []*Backend{backend}
-	metrics.Metrics.SetBackendCount(len(s.backends))
+	metrics.Metrics.SetBackendCountDeprecated(len(s.backends))
 	metrics.Metrics.SetTotalBackendCount(s.proxyStrategy, len(s.backends))
 	s.agentIDs = append(s.agentIDs, identifier)
 }
@@ -304,7 +304,7 @@ func (s *DefaultBackendStorage) removeBackend(identifier string, idType header.I
 	if !found {
 		klog.V(1).InfoS("Could not find connection matching identifier to remove", "agentID", identifier, "idType", idType)
 	}
-	metrics.Metrics.SetBackendCount(len(s.backends))
+	metrics.Metrics.SetBackendCountDeprecated(len(s.backends))
 	metrics.Metrics.SetTotalBackendCount(s.proxyStrategy, len(s.backends))
 }
 

@@ -38,7 +38,7 @@ const (
 	serverPendingDialsSample = `konnectivity_network_proxy_server_pending_backend_dials{} %d`
 
 	serverReadyBackendsHeader = `
-# HELP konnectivity_network_proxy_server_ready_backend_connections Number of konnectivity agent connected to the proxy server
+# HELP konnectivity_network_proxy_server_ready_backend_connections Number of konnectivity agent connected to the proxy server. DEPRECATED, please use ready_backend_connections_total
 # TYPE konnectivity_network_proxy_server_ready_backend_connections gauge`
 	serverReadyBackendsSample = `konnectivity_network_proxy_server_ready_backend_connections{} %d`
 
