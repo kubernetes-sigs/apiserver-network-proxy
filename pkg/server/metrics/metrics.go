@@ -112,7 +112,7 @@ func newServerMetrics() *ServerMetrics {
 			Namespace: Namespace,
 			Subsystem: Subsystem,
 			Name:      "ready_backend_connections",
-			Help:      "Number of konnectivity agent connected to the proxy server. DEPRECATED, please use ready_backend_connections_total",
+			Help:      "Number of konnectivity agent connected to the proxy server. DEPRECATED, please use ready_backends",
 		},
 		[]string{},
 	)
@@ -120,8 +120,8 @@ func newServerMetrics() *ServerMetrics {
 		prometheus.GaugeOpts{
 			Namespace: Namespace,
 			Subsystem: Subsystem,
-			Name:      "ready_backend_connections_total",
-			Help:      "Total number of konnectivity agent connected to the proxy server",
+			Name:      "ready_backends",
+			Help:      "Number of konnectivity agent connected to the proxy server",
 		},
 		[]string{
 			"proxy_strategy",

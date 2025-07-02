@@ -960,7 +960,7 @@ func assertReadyBackendsMetric(t testing.TB, expect int) {
 func assertTotalReadyBackendsMetric(t testing.TB, expect map[string]int) {
 	t.Helper()
 	if err := metricstest.DefaultTester.ExpectServerTotalReadyBackends(expect); err != nil {
-		t.Errorf("Expected %s metric for each proxy strategy %+v, but got error: %v", "ready_backend_connections_total", expect, err)
+		t.Errorf("Expected %s metric for each proxy strategy %+v, but got error: %v", "ready_backends", expect, err)
 	}
 }
 
