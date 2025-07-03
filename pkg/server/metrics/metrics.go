@@ -24,6 +24,7 @@ import (
 
 	commonmetrics "sigs.k8s.io/apiserver-network-proxy/konnectivity-client/pkg/common/metrics"
 	"sigs.k8s.io/apiserver-network-proxy/konnectivity-client/proto/client"
+	"sigs.k8s.io/apiserver-network-proxy/pkg/server/proxystrategies"
 )
 
 const (
@@ -51,6 +52,7 @@ type ServerMetrics struct {
 	grpcConnections      *prometheus.GaugeVec
 	httpConnections      prometheus.Gauge
 	backend              *prometheus.GaugeVec
+	totalBackendCount    *prometheus.GaugeVec
 	pendingDials         *prometheus.GaugeVec
 	establishedConns     *prometheus.GaugeVec
 	fullRecvChannels     *prometheus.GaugeVec
@@ -110,9 +112,20 @@ func newServerMetrics() *ServerMetrics {
 			Namespace: Namespace,
 			Subsystem: Subsystem,
 			Name:      "ready_backend_connections",
-			Help:      "Number of konnectivity agent connected to the proxy server",
+			Help:      "Number of konnectivity agent connected to the proxy server. DEPRECATED, please use ready_backends",
 		},
 		[]string{},
+	)
+	totalBackendCount := prometheus.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Namespace: Namespace,
+			Subsystem: Subsystem,
+			Name:      "ready_backends",
+			Help:      "Number of konnectivity agent connected to the proxy server",
+		},
+		[]string{
+			"proxy_strategy",
+		},
 	)
 	pendingDials := prometheus.NewGaugeVec(
 		prometheus.GaugeOpts{
@@ -203,6 +216,7 @@ func newServerMetrics() *ServerMetrics {
 	prometheus.MustRegister(grpcConnections)
 	prometheus.MustRegister(httpConnections)
 	prometheus.MustRegister(backend)
+	prometheus.MustRegister(totalBackendCount)
 	prometheus.MustRegister(pendingDials)
 	prometheus.MustRegister(establishedConns)
 	prometheus.MustRegister(fullRecvChannels)
@@ -220,6 +234,7 @@ func newServerMetrics() *ServerMetrics {
 		grpcConnections:      grpcConnections,
 		httpConnections:      httpConnections,
 		backend:              backend,
+		totalBackendCount:    totalBackendCount,
 		pendingDials:         pendingDials,
 		establishedConns:     establishedConns,
 		fullRecvChannels:     fullRecvChannels,
@@ -240,6 +255,7 @@ func (s *ServerMetrics) Reset() {
 	s.frontendLatencies.Reset()
 	s.grpcConnections.Reset()
 	s.backend.Reset()
+	s.totalBackendCount.Reset()
 	s.pendingDials.Reset()
 	s.establishedConns.Reset()
 	s.fullRecvChannels.Reset()
@@ -279,9 +295,14 @@ func (s *ServerMetrics) HTTPConnectionInc() { s.httpConnections.Inc() }
 // HTTPConnectionDec decrements a finished HTTP CONNECTION connection.
 func (s *ServerMetrics) HTTPConnectionDec() { s.httpConnections.Dec() }
 
-// SetBackendCount sets the number of backend connection.
-func (s *ServerMetrics) SetBackendCount(count int) {
+// SetBackendCountDeprecated sets the number of backend connection.
+func (s *ServerMetrics) SetBackendCountDeprecated(count int) {
 	s.backend.WithLabelValues().Set(float64(count))
+}
+
+// SetTotalBackendCount sets the total number of backend connection.
+func (s *ServerMetrics) SetTotalBackendCount(proxyStrategy proxystrategies.ProxyStrategy, count int) {
+	s.totalBackendCount.WithLabelValues(proxyStrategy.String()).Set(float64(count))
 }
 
 // SetPendingDialCount sets the number of pending dials.
