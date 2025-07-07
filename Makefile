@@ -57,16 +57,11 @@ PROXY_SERVER_IP ?= 127.0.0.1
 
 KIND_IMAGE ?= kindest/node:v1.30.2
 CONNECTION_MODE ?= grpc
-
-MOCKGEN_VERSION := $(shell mockgen -version)
-DESIRED_MOCKGEN := "v0.5.2"
 ## --------------------------------------
 ## Testing
 ## --------------------------------------
 .PHONY: mock_gen
 mock_gen:
-	echo "Mock gen is set to $(MOCKGEN_VERSION)"
-	if [ "$(MOCKGEN_VERSION)" != $(DESIRED_MOCKGEN) ]; then echo "Error need mockgen version $(DESIRED_VERSION)"; exit 1; fi
 	mkdir -p proto/agent/mocks
 	mockgen --build_flags=--mod=mod sigs.k8s.io/apiserver-network-proxy/proto/agent AgentService_ConnectServer > proto/agent/mocks/agent_mock.go
 	cat hack/go-license-header.txt proto/agent/mocks/agent_mock.go > proto/agent/mocks/agent_mock.licensed.go
