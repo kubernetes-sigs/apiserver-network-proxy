@@ -104,10 +104,12 @@ func (t *Tunnel) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		connected: connected,
 		start:     time.Now(),
 		backend:   backend,
+		dialID:    random,
+		agentID:   backend.GetAgentID(),
 	}
 	t.Server.PendingDial.Add(random, connection)
 	if err := backend.Send(dialRequest); err != nil {
-		klog.ErrorS(err, "failed to tunnel dial request")
+		klog.ErrorS(err, "failed to tunnel dial request", "host", r.Host, "dialID", connection.dialID, "agentID", connection.agentID)
 		return
 	}
 	ctxt := backend.Context()
@@ -142,22 +144,22 @@ func (t *Tunnel) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		conn.Close()
 	}()
 
-	klog.V(3).InfoS("Starting proxy to host", "host", r.Host)
-	pkt := make([]byte, 1<<15) // Match GRPC Window size
-
 	connID := connection.connectID
 	agentID := connection.agentID
+	klog.V(3).InfoS("Starting proxy to host", "host", r.Host, "agentID", agentID, "connectionID", connID)
+
+	pkt := make([]byte, 1<<15) // Match GRPC Window size
 	var acc int
 
 	for {
 		n, err := bufrw.Read(pkt[:])
 		acc += n
 		if err == io.EOF {
-			klog.V(1).InfoS("EOF from host", "host", r.Host)
+			klog.V(1).InfoS("EOF from host", "host", r.Host, "agentID", agentID, "connectionID", connID)
 			break
 		}
 		if err != nil {
-			klog.ErrorS(err, "Received failure on connection")
+			klog.ErrorS(err, "Received failure on connection", "host", r.Host, "agentID", agentID, "connectionID", connID)
 			break
 		}
 
@@ -172,7 +174,7 @@ func (t *Tunnel) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 		err = backend.Send(packet)
 		if err != nil {
-			klog.ErrorS(err, "error sending packet")
+			klog.ErrorS(err, "error sending packet", "host", r.Host, "agentID", agentID, "connectionID", connID)
 			break
 		}
 		klog.V(5).InfoS("Forwarding data on tunnel to agent",
