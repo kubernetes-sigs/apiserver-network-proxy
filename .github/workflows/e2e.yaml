@@ -13,9 +13,9 @@ on:
 env:
   GO_TOOLCHAIN: "golang"
   # TODO: match BASEIMAGE with Makefile default (nonroot variant)
-  BASEIMAGE: "gcr.io/distroless/static-debian11"
+  BASEIMAGE: "gcr.io/distroless/static-debian12"
   KIND_CLUSTER_NAME: "kind"
-  KIND_VERSION: "v0.27.0"
+  KIND_VERSION: "v0.29.0"
 
 jobs:
   build:
