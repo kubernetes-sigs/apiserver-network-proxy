@@ -92,6 +92,7 @@ func TestSingleServer_SingleAgent_StaticCount(t *testing.T) {
 	feature = feature.Assess("konnectivity server has a connected client", assertServersAreConnected(1))
 	feature = feature.Assess("konnectivity agent is connected to a server", assertAgentsAreConnected(1))
 	feature = feature.Assess("agents correctly count 1 server", assertAgentKnownServerCount(1))
+	feature = feature.Assess("server count metric is set correctly", assertServerCountMetric(1))
 	feature = feature.Teardown(deleteDeployment(agentDeployment))
 	feature = feature.Teardown(deleteDeployment(serverDeployment))
 
@@ -113,6 +114,7 @@ func TestMultiServer_MultiAgent_StaticCount(t *testing.T) {
 	feature = feature.Assess("all servers connected to all clients", assertServersAreConnected(replicas))
 	feature = feature.Assess("all agents connected to all servers", assertAgentsAreConnected(replicas))
 	feature = feature.Assess("agents correctly count all servers", assertAgentKnownServerCount(replicas))
+	feature = feature.Assess("server count metric is set correctly", assertServerCountMetric(replicas))
 	feature = feature.Teardown(deleteDeployment(agentDeployment))
 	feature = feature.Teardown(deleteDeployment(serverDeployment))
 

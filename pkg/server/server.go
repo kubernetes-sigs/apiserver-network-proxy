@@ -389,6 +389,8 @@ func NewProxyServer(serverID string, proxyStrategies []proxystrategies.ProxyStra
 		}
 	}
 
+	metrics.Metrics.SetServerCount(serverCount)
+
 	return &ProxyServer{
 		established:                make(map[string](map[int64]*ProxyClientConnection)),
 		PendingDial:                NewPendingDialManager(),

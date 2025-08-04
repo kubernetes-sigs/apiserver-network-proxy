@@ -138,3 +138,29 @@ func assertAgentKnownServerCount(expectedServerCount int) func(context.Context, 
 		return ctx
 	}
 }
+
+// assertServerCountMetric asserts that the server count metric is set to the expected value.
+func assertServerCountMetric(expectedServerCount int) func(context.Context, *testing.T, *envconf.Config) context.Context {
+	return func(ctx context.Context, t *testing.T, cfg *envconf.Config) context.Context {
+		client := cfg.Client()
+
+		serverPods := &corev1.PodList{}
+		err := client.Resources().List(ctx, serverPods, resources.WithLabelSelector("k8s-app=konnectivity-server"))
+		if err != nil {
+			t.Fatalf("couldn't get server pods (label selector 'k8s-app=konnectivity-server'): %v", err)
+		}
+
+		for _, serverPod := range serverPods.Items {
+			serverCount, err := getMetricsGaugeValue(cfg.Client().RESTConfig(), serverPod.Namespace, serverPod.Name, 8095, "konnectivity_network_proxy_server_server_count")
+			if err != nil {
+				t.Fatalf("couldn't get server metric 'konnectivity_network_proxy_server_server_count' for pod %v: %v", serverPod.Name, err)
+			}
+
+			if serverCount != expectedServerCount {
+				t.Errorf("incorrect server count metric (want: %v, got: %v)", expectedServerCount, serverCount)
+			}
+		}
+
+		return ctx
+	}
+}

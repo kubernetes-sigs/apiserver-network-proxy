@@ -64,6 +64,7 @@ type ServerMetrics struct {
 	leaseDeletes         *prometheus.CounterVec
 	leaseListLatencies   *prometheus.HistogramVec
 	leaseLists           *prometheus.CounterVec
+	serverCount          prometheus.Gauge
 }
 
 // newServerMetrics create a new ServerMetrics, configured with default metric names.
@@ -209,6 +210,14 @@ func newServerMetrics() *ServerMetrics {
 		},
 		[]string{"http_status_code", "reason"},
 	)
+	serverCount := prometheus.NewGauge(
+		prometheus.GaugeOpts{
+			Namespace: Namespace,
+			Subsystem: Subsystem,
+			Name:      "server_count",
+			Help:      "Number of proxy server instances in the cluster",
+		},
+	)
 	streamPackets := commonmetrics.MakeStreamPacketsTotalMetric(Namespace, Subsystem)
 	streamErrors := commonmetrics.MakeStreamErrorsTotalMetric(Namespace, Subsystem)
 	prometheus.MustRegister(endpointLatencies)
@@ -228,6 +237,7 @@ func newServerMetrics() *ServerMetrics {
 	prometheus.MustRegister(leaseDeletes)
 	prometheus.MustRegister(leaseListLatencies)
 	prometheus.MustRegister(leaseLists)
+	prometheus.MustRegister(serverCount)
 	return &ServerMetrics{
 		endpointLatencies:    endpointLatencies,
 		frontendLatencies:    frontendLatencies,
@@ -246,6 +256,7 @@ func newServerMetrics() *ServerMetrics {
 		leaseDeletes:         leaseDeletes,
 		leaseListLatencies:   leaseListLatencies,
 		leaseLists:           leaseLists,
+		serverCount:          serverCount,
 	}
 }
 
@@ -313,6 +324,11 @@ func (s *ServerMetrics) SetPendingDialCount(count int) {
 // SetEstablishedConnCount sets the number of established connections.
 func (s *ServerMetrics) SetEstablishedConnCount(count int) {
 	s.establishedConns.WithLabelValues().Set(float64(count))
+}
+
+// SetServerCount sets the number of proxy server instances in the cluster.
+func (s *ServerMetrics) SetServerCount(count int) {
+	s.serverCount.Set(float64(count))
 }
 
 // FullRecvChannel retrieves the metric for counting full receive channels.
