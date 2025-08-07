@@ -719,7 +719,7 @@ func (s *ProxyServer) Connect(stream agent.AgentService_ConnectServer) error {
 	}
 	agentID := backend.GetAgentID()
 
-	klog.V(5).InfoS("Connect request from agent", "agentID", agentID, "serverID", s.serverID)
+	klog.V(2).InfoS("Connect request from agent", "agentID", agentID, "serverID", s.serverID)
 	labels := runpprof.Labels(
 		"serverCount", strconv.Itoa(s.serverCount),
 		"agentID", agentID,
@@ -946,7 +946,7 @@ func (s *ProxyServer) serveRecvBackend(backend *Backend, agentID string, recvCh 
 			klog.V(5).InfoS("Ignoring unrecognized packet from backend", "packet", pkt, "agentID", agentID)
 		}
 	}
-	klog.V(5).InfoS("Close backend of agent", "agentID", agentID)
+	klog.V(3).InfoS("Close backend of agent", "agentID", agentID)
 }
 
 func (s *ProxyServer) sendBackendClose(backend *Backend, connectID int64, random int64, reason string) {
