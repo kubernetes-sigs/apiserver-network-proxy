@@ -299,10 +299,10 @@ func containIDType(idTypes []header.IdentifierType, idType header.IdentifierType
 // addBackend adds a backend.
 func (s *DefaultBackendStorage) addBackend(identifier string, idType header.IdentifierType, backend *Backend) {
 	if !containIDType(s.idTypes, idType) {
-		klog.V(4).InfoS("fail to add backend", "backend", identifier, "error", &ErrWrongIDType{idType, s.idTypes})
+		klog.V(3).InfoS("fail to add backend", "backend", identifier, "error", &ErrWrongIDType{idType, s.idTypes})
 		return
 	}
-	klog.V(5).InfoS("Register backend for agent", "agentID", identifier)
+	klog.V(2).InfoS("Register backend for agent", "agentID", identifier)
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	_, ok := s.backends[identifier]
@@ -327,7 +327,7 @@ func (s *DefaultBackendStorage) removeBackend(identifier string, idType header.I
 		klog.ErrorS(&ErrWrongIDType{idType, s.idTypes}, "fail to remove backend")
 		return
 	}
-	klog.V(5).InfoS("Remove connection for agent", "agentID", identifier)
+	klog.V(2).InfoS("Remove connection for agent", "agentID", identifier)
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	backends, ok := s.backends[identifier]
@@ -400,7 +400,7 @@ func (s *DefaultBackendStorage) GetRandomBackend() (*Backend, error) {
 		return nil, &ErrNotFound{}
 	}
 	agentID := s.agentIDs[s.random.Intn(len(s.agentIDs))]
-	klog.V(5).InfoS("Pick agent as backend", "agentID", agentID)
+	klog.V(3).InfoS("Pick agent as backend", "agentID", agentID)
 	// always return the first connection to an agent, because the agent
 	// will close later connections if there are multiple.
 	return s.backends[agentID][0], nil
