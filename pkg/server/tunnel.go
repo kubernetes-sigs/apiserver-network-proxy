@@ -60,14 +60,6 @@ func (t *Tunnel) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Send the HTTP 200 OK status after a successful hijack
-	_, err = conn.Write([]byte("HTTP/1.1 200 Connection Established\r\n\r\n"))
-	if err != nil {
-		klog.ErrorS(err, "failed to send 200 connection established")
-		conn.Close()
-		return
-	}
-
 	var closeOnce sync.Once
 	defer closeOnce.Do(func() { conn.Close() })
 
@@ -110,11 +102,17 @@ func (t *Tunnel) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	t.Server.PendingDial.Add(random, connection)
 	if err := backend.Send(dialRequest); err != nil {
 		klog.ErrorS(err, "failed to tunnel dial request", "host", r.Host, "dialID", connection.dialID, "agentID", connection.agentID)
+		// Send proper HTTP error response
+		conn.Write([]byte(fmt.Sprintf("HTTP/1.1 502 Bad Gateway\r\nContent-Type: text/plain; charset=utf-8\r\n\r\nFailed to tunnel dial request: %v\r\n", err)))
+		conn.Close()
 		return
 	}
 	ctxt := backend.Context()
 	if ctxt.Err() != nil {
-		klog.ErrorS(err, "context reports failure")
+		klog.ErrorS(ctxt.Err(), "context reports failure")
+		conn.Write([]byte(fmt.Sprintf("HTTP/1.1 502 Bad Gateway\r\nContent-Type: text/plain; charset=utf-8\r\n\r\nBackend context error: %v\r\n", ctxt.Err())))
+		conn.Close()
+		return
 	}
 
 	select {
@@ -125,6 +123,15 @@ func (t *Tunnel) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	select {
 	case <-connection.connected: // Waiting for response before we begin full communication.
+		// Now that connection is established, send 200 OK to switch to tunnel mode
+		_, err = conn.Write([]byte("HTTP/1.1 200 Connection Established\r\n\r\n"))
+		if err != nil {
+			klog.ErrorS(err, "failed to send 200 connection established", "host", r.Host, "agentID", connection.agentID)
+			conn.Close()
+			return
+		}
+		klog.V(3).InfoS("Connection established, sent 200 OK", "host", r.Host, "agentID", connection.agentID, "connectionID", connection.connectID)
+
 	case <-closed: // Connection was closed before being established
 	}
 
