@@ -40,7 +40,7 @@ func (t *Tunnel) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	defer metrics.Metrics.HTTPConnectionDec()
 
 	klog.V(2).InfoS("Received request for host", "method", r.Method, "host", r.Host, "userAgent", r.UserAgent())
-	if r.TLS != nil {
+	if r.TLS != nil && len(r.TLS.PeerCertificates) > 0 {
 		klog.V(2).InfoS("TLS", "commonName", r.TLS.PeerCertificates[0].Subject.CommonName)
 	}
 	if r.Method != http.MethodConnect {
@@ -57,14 +57,6 @@ func (t *Tunnel) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	conn, bufrw, err := hijacker.Hijack()
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
-		return
-	}
-
-	// Send the HTTP 200 OK status after a successful hijack
-	_, err = conn.Write([]byte("HTTP/1.1 200 Connection Established\r\n\r\n"))
-	if err != nil {
-		klog.ErrorS(err, "failed to send 200 connection established")
-		conn.Close()
 		return
 	}
 
@@ -104,15 +96,23 @@ func (t *Tunnel) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		connected: connected,
 		start:     time.Now(),
 		backend:   backend,
+		dialID:    random,
+		agentID:   backend.GetAgentID(),
 	}
 	t.Server.PendingDial.Add(random, connection)
 	if err := backend.Send(dialRequest); err != nil {
-		klog.ErrorS(err, "failed to tunnel dial request")
+		klog.ErrorS(err, "failed to tunnel dial request", "host", r.Host, "dialID", connection.dialID, "agentID", connection.agentID)
+		// Send proper HTTP error response
+		conn.Write([]byte(fmt.Sprintf("HTTP/1.1 502 Bad Gateway\r\nContent-Type: text/plain; charset=utf-8\r\n\r\nFailed to tunnel dial request: %v\r\n", err)))
+		conn.Close()
 		return
 	}
 	ctxt := backend.Context()
 	if ctxt.Err() != nil {
-		klog.ErrorS(err, "context reports failure")
+		klog.ErrorS(ctxt.Err(), "context reports failure")
+		conn.Write([]byte(fmt.Sprintf("HTTP/1.1 502 Bad Gateway\r\nContent-Type: text/plain; charset=utf-8\r\n\r\nBackend context error: %v\r\n", ctxt.Err())))
+		conn.Close()
+		return
 	}
 
 	select {
@@ -123,6 +123,15 @@ func (t *Tunnel) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	select {
 	case <-connection.connected: // Waiting for response before we begin full communication.
+		// Now that connection is established, send 200 OK to switch to tunnel mode
+		_, err = conn.Write([]byte("HTTP/1.1 200 Connection Established\r\n\r\n"))
+		if err != nil {
+			klog.ErrorS(err, "failed to send 200 connection established", "host", r.Host, "agentID", connection.agentID)
+			conn.Close()
+			return
+		}
+		klog.V(3).InfoS("Connection established, sent 200 OK", "host", r.Host, "agentID", connection.agentID, "connectionID", connection.connectID)
+
 	case <-closed: // Connection was closed before being established
 	}
 
@@ -142,22 +151,22 @@ func (t *Tunnel) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		conn.Close()
 	}()
 
-	klog.V(3).InfoS("Starting proxy to host", "host", r.Host)
-	pkt := make([]byte, 1<<15) // Match GRPC Window size
-
 	connID := connection.connectID
 	agentID := connection.agentID
+	klog.V(3).InfoS("Starting proxy to host", "host", r.Host, "agentID", agentID, "connectionID", connID)
+
+	pkt := make([]byte, 1<<15) // Match GRPC Window size
 	var acc int
 
 	for {
 		n, err := bufrw.Read(pkt[:])
 		acc += n
 		if err == io.EOF {
-			klog.V(1).InfoS("EOF from host", "host", r.Host)
+			klog.V(1).InfoS("EOF from host", "host", r.Host, "agentID", agentID, "connectionID", connID)
 			break
 		}
 		if err != nil {
-			klog.ErrorS(err, "Received failure on connection")
+			klog.ErrorS(err, "Received failure on connection", "host", r.Host, "agentID", agentID, "connectionID", connID)
 			break
 		}
 
@@ -172,7 +181,7 @@ func (t *Tunnel) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 		err = backend.Send(packet)
 		if err != nil {
-			klog.ErrorS(err, "error sending packet")
+			klog.ErrorS(err, "error sending packet", "host", r.Host, "agentID", agentID, "connectionID", connID)
 			break
 		}
 		klog.V(5).InfoS("Forwarding data on tunnel to agent",

@@ -689,7 +689,7 @@ func TestFailedDNSLookupProxy_HTTPCONN(t *testing.T) {
 		t.Error(err)
 	}
 
-	urlString := "http://thissssssxxxxx.com:80"
+	urlString := "http://thisdefinitelydoesnotexist.com:80"
 	serverURL, _ := url.Parse(urlString)
 
 	// Send HTTP-Connect request
@@ -705,36 +705,12 @@ func TestFailedDNSLookupProxy_HTTPCONN(t *testing.T) {
 		t.Errorf("reading HTTP response from CONNECT: %v", err)
 	}
 
-	if res.StatusCode != 200 {
-		t.Errorf("expect 200; got %d", res.StatusCode)
-	}
-	if br.Buffered() > 0 {
-		t.Error("unexpected extra buffer")
-	}
-	dialer := func(_, _ string) (net.Conn, error) {
-		return conn, nil
+	if res.StatusCode != 502 {
+		t.Errorf("expect 502; got %d", res.StatusCode)
 	}
 
-	c := &http.Client{
-		Transport: &http.Transport{
-			Dial: dialer,
-		},
-	}
-
-	resp, err := c.Get(urlString)
-	if err != nil {
-		t.Error(err)
-	}
-
-	if resp.StatusCode != 503 {
-		t.Errorf("expect 503; got %d", res.StatusCode)
-	}
-
-	body, err := io.ReadAll(resp.Body)
-	resp.Body.Close()
-	if !strings.Contains(err.Error(), "connection reset by peer") {
-		t.Error(err)
-	}
+	body, err := io.ReadAll(res.Body)
+	res.Body.Close()
 
 	if !strings.Contains(string(body), "no such host") {
 		t.Errorf("Unexpected error: %v", err)
@@ -779,37 +755,21 @@ func TestFailedDial_HTTPCONN(t *testing.T) {
 	br := bufio.NewReader(conn)
 	res, err := http.ReadResponse(br, nil)
 	if err != nil {
-		t.Fatalf("reading HTTP response from CONNECT: %v", err)
-	}
-	if res.StatusCode != 200 {
-		t.Fatalf("expect 200; got %d", res.StatusCode)
+		t.Errorf("reading HTTP response from CONNECT: %v", err)
 	}
 
-	dialer := func(_, _ string) (net.Conn, error) {
-		return conn, nil
+	if res.StatusCode != 502 {
+		t.Errorf("expect 502; got %d", res.StatusCode)
 	}
 
-	c := &http.Client{
-		Transport: &http.Transport{
-			Dial: dialer,
-		},
-	}
-
-	resp, err := c.Get(server.URL)
+	body, err := io.ReadAll(res.Body)
+	res.Body.Close()
 	if err != nil {
-		t.Fatal(err)
-	}
-
-	body, err := io.ReadAll(resp.Body)
-	resp.Body.Close()
-	if err == nil {
 		t.Fatalf("Expected error reading response body; response=%q", body)
-	} else if !strings.Contains(err.Error(), "connection reset by peer") {
-		t.Error(err)
 	}
 
 	if !strings.Contains(string(body), "connection refused") {
-		t.Errorf("Unexpected error: %v", err)
+		t.Errorf("Expected 'connection refused' in error body, got: %s", string(body))
 	}
 
 	if err := ps.Metrics().ExpectServerDialFailure(metricsserver.DialFailureErrorResponse, 1); err != nil {

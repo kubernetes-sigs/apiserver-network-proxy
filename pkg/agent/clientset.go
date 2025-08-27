@@ -96,15 +96,12 @@ func (cs *ClientSet) HealthyClientsCount() int {
 
 }
 
-func (cs *ClientSet) hasIDLocked(serverID string) bool {
-	_, ok := cs.clients[serverID]
-	return ok
-}
-
+// HasID returns true if the ClientSet has a client to the specified serverID.
 func (cs *ClientSet) HasID(serverID string) bool {
 	cs.mu.Lock()
 	defer cs.mu.Unlock()
-	return cs.hasIDLocked(serverID)
+	_, exists := cs.clients[serverID]
+	return exists
 }
 
 type DuplicateServerError struct {
@@ -115,20 +112,19 @@ func (dse *DuplicateServerError) Error() string {
 	return "duplicate server: " + dse.ServerID
 }
 
-func (cs *ClientSet) addClientLocked(serverID string, c *Client) error {
-	if cs.hasIDLocked(serverID) {
+// AddClient adds the specified client to our set of clients.
+// If we already have a connection with the same serverID, we will return *DuplicateServerError.
+func (cs *ClientSet) AddClient(serverID string, c *Client) error {
+	cs.mu.Lock()
+	defer cs.mu.Unlock()
+
+	_, exists := cs.clients[serverID]
+	if exists {
 		return &DuplicateServerError{ServerID: serverID}
 	}
 	cs.clients[serverID] = c
 	metrics.Metrics.SetServerConnectionsCount(len(cs.clients))
 	return nil
-
-}
-
-func (cs *ClientSet) AddClient(serverID string, c *Client) error {
-	cs.mu.Lock()
-	defer cs.mu.Unlock()
-	return cs.addClientLocked(serverID, c)
 }
 
 func (cs *ClientSet) RemoveClient(serverID string) {
