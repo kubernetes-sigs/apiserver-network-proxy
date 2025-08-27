@@ -107,6 +107,53 @@ const (
 	destHostKey key = iota
 )
 
+// mapDialErrorToHTTPStatus maps common TCP/network error strings to appropriate HTTP status codes
+func mapDialErrorToHTTPStatus(errStr string) int {
+	// Convert to lowercase for case-insensitive matching
+	errLower := strings.ToLower(errStr)
+
+	// Check each error pattern and return appropriate status code
+	switch {
+	// Timeouts - backend didn't respond in time -> 504 Gateway Timeout
+	case strings.Contains(errLower, "i/o timeout"),
+		strings.Contains(errLower, "deadline exceeded"),
+		strings.Contains(errLower, "context deadline exceeded"),
+		strings.Contains(errLower, "timeout"):
+		return 504
+
+	// Resource exhaustion errors -> 503 Service Unavailable
+	case strings.Contains(errLower, "too many open files"),
+		strings.Contains(errLower, "socket: too many open files"):
+		return 503
+
+	// Connection errors -> 502 Bad Gateway
+	case strings.Contains(errLower, "connection refused"),
+		strings.Contains(errLower, "connection reset by peer"),
+		strings.Contains(errLower, "broken pipe"),
+		strings.Contains(errLower, "network is unreachable"),
+		strings.Contains(errLower, "no route to host"),
+		strings.Contains(errLower, "host is unreachable"),
+		strings.Contains(errLower, "network is down"):
+		return 502
+
+	// DNS resolution failures -> 502 Bad Gateway
+	case strings.Contains(errLower, "no such host"),
+		strings.Contains(errLower, "name resolution"),
+		strings.Contains(errLower, "lookup") && strings.Contains(errLower, "no such host"):
+		return 502
+
+	// TLS/SSL errors -> 502 Bad Gateway
+	case strings.Contains(errLower, "tls"),
+		strings.Contains(errLower, "ssl"),
+		strings.Contains(errLower, "certificate"):
+		return 502
+
+	// Default to 502 Bad Gateway for unknown proxy errors
+	default:
+		return 502
+	}
+}
+
 func (c *ProxyClientConnection) send(pkt *client.Packet) error {
 	defer func(start time.Time) { metrics.Metrics.ObserveFrontendWriteLatency(time.Since(start)) }(time.Now())
 	if c.Mode == ModeGRPC {
@@ -121,11 +168,21 @@ func (c *ProxyClientConnection) send(pkt *client.Packet) error {
 			_, err := c.HTTP.Write(pkt.GetData().Data)
 			return err
 		} else if pkt.Type == client.PacketType_DIAL_RSP {
-			if pkt.GetDialResponse().Error != "" {
-				body := bytes.NewBufferString(pkt.GetDialResponse().Error)
+			dialErr := pkt.GetDialResponse().Error
+			if dialErr != "" {
+				// // Map the error to appropriate HTTP status code
+				statusCode := mapDialErrorToHTTPStatus(dialErr)
+				statusText := http.StatusText(statusCode)
+				body := bytes.NewBufferString(dialErr)
 				t := http.Response{
-					StatusCode: 503,
+					StatusCode: statusCode,
+					Status:     fmt.Sprintf("%d %s", statusCode, statusText),
 					Body:       io.NopCloser(body),
+					Header: http.Header{
+						"Content-Type": []string{"text/plain; charset=utf-8"},
+					},
+					Proto:      "HTTP/1.1",
+					ProtoMinor: 1,
 				}
 
 				t.Write(c.HTTP)
@@ -718,7 +775,7 @@ func (s *ProxyServer) Connect(stream agent.AgentService_ConnectServer) error {
 	}
 	agentID := backend.GetAgentID()
 
-	klog.V(5).InfoS("Connect request from agent", "agentID", agentID, "serverID", s.serverID)
+	klog.V(2).InfoS("Connect request from agent", "agentID", agentID, "serverID", s.serverID)
 	labels := runpprof.Labels(
 		"serverCount", strconv.Itoa(s.serverCount),
 		"agentID", agentID,
@@ -945,7 +1002,7 @@ func (s *ProxyServer) serveRecvBackend(backend *Backend, agentID string, recvCh 
 			klog.V(5).InfoS("Ignoring unrecognized packet from backend", "packet", pkt, "agentID", agentID)
 		}
 	}
-	klog.V(5).InfoS("Close backend of agent", "agentID", agentID)
+	klog.V(3).InfoS("Close backend of agent", "agentID", agentID)
 }
 
 func (s *ProxyServer) sendBackendClose(backend *Backend, connectID int64, random int64, reason string) {
