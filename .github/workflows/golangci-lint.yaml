@@ -11,7 +11,7 @@ permissions:
   contents: read
 
 env:
-  GO_VERSION: v1.24.3
+  GO_VERSION: v1.24.7
   GOLANGCI_LINT_VERSION: v2.1.6
 
 jobs:
