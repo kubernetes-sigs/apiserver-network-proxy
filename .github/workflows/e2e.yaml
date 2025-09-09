@@ -23,7 +23,7 @@ jobs:
     runs-on: ubuntu-24.04
     steps:
     - name: Check out code
-      uses: actions/checkout@v4
+      uses: actions/checkout@v5
     - name: Set up Go
       uses: actions/setup-go@v5
       with:
@@ -72,7 +72,7 @@ jobs:
         chmod +x ./kind
         sudo mv ./kind /usr/local/bin/kind
     - name: Check out code
-      uses: actions/checkout@v4
+      uses: actions/checkout@v5
     - name: Set up Go
       uses: actions/setup-go@v5
       with:
@@ -112,7 +112,7 @@ jobs:
       IP_FAMILY: ${{ matrix.ipFamily }}
     steps:
     - name: Check out code
-      uses: actions/checkout@v4
+      uses: actions/checkout@v5
 
     - name: Enable ipv4 and ipv6 forwarding
       run: |
