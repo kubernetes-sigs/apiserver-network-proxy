@@ -214,11 +214,14 @@ func (cs *ClientSet) connectOnce() error {
 			"current", cs.serverCount, "serverID", c.serverID, "actual", serverCount)
 
 	}
-	cs.serverCount = serverCount
 	if err := cs.AddClient(c.serverID, c); err != nil {
 		c.Close()
 		return err
 	}
+	// By moving the update to here, we only accept the server count from a server
+	// that we have successfully added to our active client set, implicitly ignoring
+	// stale data from duplicate connection attempts.
+	cs.serverCount = serverCount
 	klog.V(2).InfoS("sync added client connecting to proxy server", "serverID", c.serverID)
 
 	labels := runpprof.Labels(
