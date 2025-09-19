@@ -35,13 +35,13 @@ func main() {
 	flags := command.Flags()
 	flags.AddFlagSet(o.Flags())
 	local := flag.NewFlagSet(os.Args[0], flag.ExitOnError)
-	klog.InitFlags(local)
 	if local.Lookup("v") == nil {
 		err := local.Set("v", "4")
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "error setting klog flags: %v", err)
 		}
 	}
+	klog.InitFlags(local)
 	local.VisitAll(func(fl *flag.Flag) {
 		fl.Name = util.Normalize(fl.Name)
 		flags.AddGoFlag(fl)
