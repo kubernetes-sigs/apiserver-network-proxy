@@ -28,65 +28,93 @@ func (f *FakeServerCounter) Count() int {
 	return f.count
 }
 
-func TestServerCount(t *testing.T) {
+func TestAggregateServerCounter(t *testing.T) {
 	testCases := []struct {
-		name              string
-		serverCountSource string
-		leaseCounter      ServerCounter
-		responseCount     int
-		want              int
+		name            string
+		source          string
+		leaseCounter    ServerCounter
+		responseCounter ServerCounter
+		want            int
 	}{
 		{
-			name:              "higher from response",
-			serverCountSource: "max",
-			responseCount:     42,
-			leaseCounter:      &FakeServerCounter{24},
-			want:              42,
+			name:            "max: higher from response",
+			source:          "max",
+			leaseCounter:    &FakeServerCounter{count: 24},
+			responseCounter: &FakeServerCounter{count: 42},
+			want:            42,
 		},
 		{
-			name:              "higher from leases",
-			serverCountSource: "max",
-			responseCount:     3,
-			leaseCounter:      &FakeServerCounter{6},
-			want:              6,
+			name:            "max: higher from leases",
+			source:          "max",
+			leaseCounter:    &FakeServerCounter{count: 6},
+			responseCounter: &FakeServerCounter{count: 3},
+			want:            6,
 		},
 		{
-			name:              "both zero",
-			serverCountSource: "max",
-			responseCount:     0,
-			leaseCounter:      &FakeServerCounter{0},
-			want:              1,
-		},
-
-		{
-			name:              "response picked by default when no lease counter",
-			serverCountSource: "default",
-			responseCount:     3,
-			leaseCounter:      nil,
-			want:              3,
+			name:            "max: both zero",
+			source:          "max",
+			leaseCounter:    &FakeServerCounter{count: 0},
+			responseCounter: &FakeServerCounter{count: 0},
+			want:            1, // fallback
 		},
 		{
-			name:              "lease counter always picked when present",
-			serverCountSource: "default",
-			responseCount:     6,
-			leaseCounter:      &FakeServerCounter{3},
-			want:              3,
+			name:            "default: lease counter is nil",
+			source:          "default",
+			leaseCounter:    nil,
+			responseCounter: &FakeServerCounter{count: 3},
+			want:            3,
+		},
+		{
+			name:            "default: lease counter is present",
+			source:          "default",
+			leaseCounter:    &FakeServerCounter{count: 3},
+			responseCounter: &FakeServerCounter{count: 6},
+			want:            3, // lease count is preferred
+		},
+		{
+			name:            "default: lease count is zero",
+			source:          "default",
+			leaseCounter:    &FakeServerCounter{count: 0},
+			responseCounter: &FakeServerCounter{count: 6},
+			want:            1, // fallback
 		},
 	}
 
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
-
-			cs := &ClientSet{
-				clients:           make(map[string]*Client),
-				leaseCounter:      tc.leaseCounter,
-				serverCountSource: tc.serverCountSource,
-			}
-			cs.lastReceivedServerCount = tc.responseCount
-			if got := cs.ServerCount(); got != tc.want {
-				t.Errorf("cs.ServerCount() = %v, want: %v", got, tc.want)
+			agg := NewAggregateServerCounter(tc.leaseCounter, tc.responseCounter, tc.source)
+			if got := agg.Count(); got != tc.want {
+				t.Errorf("agg.Count() = %v, want: %v", got, tc.want)
 			}
 		})
 	}
+}
 
+func TestResponseBasedCounter(t *testing.T) {
+	testCases := []struct {
+		name          string
+		responseCount int
+		want          int
+	}{
+		{
+			name:          "non-zero count",
+			responseCount: 5,
+			want:          5,
+		},
+		{
+			name:          "zero count",
+			responseCount: 0,
+			want:          1, // fallback
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			cs := &ClientSet{lastReceivedServerCount: tc.responseCount}
+			rbc := NewResponseBasedCounter(cs)
+			if got := rbc.Count(); got != tc.want {
+				t.Errorf("rbc.Count() = %v, want: %v", got, tc.want)
+			}
+		})
+	}
 }

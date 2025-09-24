@@ -143,6 +143,7 @@ func (a *Agent) runProxyConnection(o *options.GrpcProxyAgentOptions, drainCh, st
 	}
 	cc := o.ClientSetConfig(dialOptions...)
 
+	var leaseCounter agent.ServerCounter
 	if o.CountServerLeases {
 		var config *rest.Config
 		if o.KubeconfigPath != "" {
@@ -167,15 +168,20 @@ func (a *Agent) runProxyConnection(o *options.GrpcProxyAgentOptions, drainCh, st
 		cache.WaitForCacheSync(stopCh, leaseInformer.HasSynced)
 		leaseLister := coordinationv1lister.NewLeaseLister(leaseInformer.GetIndexer())
 		serverLeaseSelector, _ := labels.Parse(o.LeaseLabel)
-		serverLeaseCounter := agent.NewServerLeaseCounter(
+		leaseCounter = agent.NewServerLeaseCounter(
 			clock.RealClock{},
 			leaseLister,
 			serverLeaseSelector,
 		)
-		cc.ServerLeaseCounter = serverLeaseCounter
 	}
 
 	cs := cc.NewAgentClientSet(drainCh, stopCh)
+	// Always create the response-based counter.
+	responseCounter := agent.NewResponseBasedCounter(cs)
+	// Create the aggregate counter which acts as the master strategy.
+	aggregateCounter := agent.NewAggregateServerCounter(leaseCounter, responseCounter, o.ServerCountSource)
+	cs.SetServerCounter(aggregateCounter)
+
 	cs.Serve()
 
 	return cs, nil
