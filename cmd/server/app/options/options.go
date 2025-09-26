@@ -27,6 +27,7 @@ import (
 	"k8s.io/klog/v2"
 
 	"sigs.k8s.io/apiserver-network-proxy/pkg/server"
+	"sigs.k8s.io/apiserver-network-proxy/pkg/server/proxystrategies"
 	"sigs.k8s.io/apiserver-network-proxy/pkg/util"
 )
 
@@ -74,7 +75,7 @@ type ProxyRunOptions struct {
 	// ID of this proxy server.
 	ServerID string
 	// Number of proxy server instances, should be 1 unless it is a HA proxy server.
-	ServerCount uint
+	ServerCount int
 	// Agent pod's namespace for token-based agent authentication
 	AgentNamespace string
 	// Agent pod's service account for token-based agent authentication
@@ -112,6 +113,8 @@ type ProxyRunOptions struct {
 	LeaseNamespace string
 	// Lease Labels
 	LeaseLabel string
+	// Needs kubernetes client
+	NeedsKubernetesClient bool
 }
 
 func (o *ProxyRunOptions) Flags() *pflag.FlagSet {
@@ -138,7 +141,7 @@ func (o *ProxyRunOptions) Flags() *pflag.FlagSet {
 	flags.BoolVar(&o.EnableProfiling, "enable-profiling", o.EnableProfiling, "enable pprof at host:admin-port/debug/pprof")
 	flags.BoolVar(&o.EnableContentionProfiling, "enable-contention-profiling", o.EnableContentionProfiling, "enable contention profiling at host:admin-port/debug/pprof/block. \"--enable-profiling\" must also be set.")
 	flags.StringVar(&o.ServerID, "server-id", o.ServerID, "The unique ID of this server. Can also be set by the 'PROXY_SERVER_ID' environment variable.")
-	flags.UintVar(&o.ServerCount, "server-count", o.ServerCount, "The number of proxy server instances, should be 1 unless it is an HA server.")
+	flags.IntVar(&o.ServerCount, "server-count", o.ServerCount, "The number of proxy server instances, should be 1 unless it is an HA server.")
 	flags.StringVar(&o.AgentNamespace, "agent-namespace", o.AgentNamespace, "Expected agent's namespace during agent authentication (used with agent-service-account, authentication-audience, kubeconfig).")
 	flags.StringVar(&o.AgentServiceAccount, "agent-service-account", o.AgentServiceAccount, "Expected agent's service account during agent authentication (used with agent-namespace, authentication-audience, kubeconfig).")
 	flags.StringVar(&o.KubeconfigPath, "kubeconfig", o.KubeconfigPath, "absolute path to the kubeconfig file (used with agent-namespace, agent-service-account, authentication-audience).")
@@ -287,34 +290,32 @@ func (o *ProxyRunOptions) Validate() error {
 	if o.EnableContentionProfiling && !o.EnableProfiling {
 		return fmt.Errorf("if --enable-contention-profiling is set, --enable-profiling must also be set")
 	}
-
-	// validate agent authentication params
-	// all 4 parameters must be empty or must have value (except KubeconfigPath that might be empty)
-	if o.AgentNamespace != "" || o.AgentServiceAccount != "" || o.AuthenticationAudience != "" || o.KubeconfigPath != "" {
+	usingServiceAccountAuth := o.AgentNamespace != "" || o.AgentServiceAccount != "" || o.AuthenticationAudience != ""
+	if usingServiceAccountAuth {
 		if o.ClusterCaCert != "" {
-			return fmt.Errorf("ClusterCaCert can not be used when service account authentication is enabled")
+			return fmt.Errorf("--cluster-ca-cert can not be used when agent authentication is enabled")
 		}
 		if o.AgentNamespace == "" {
-			return fmt.Errorf("AgentNamespace cannot be empty when agent authentication is enabled")
+			return fmt.Errorf("--agent-namespace cannot be empty when agent authentication is enabled")
 		}
 		if o.AgentServiceAccount == "" {
-			return fmt.Errorf("AgentServiceAccount cannot be empty when agent authentication is enabled")
+			return fmt.Errorf("--agent-service-account cannot be empty when agent authentication is enabled")
 		}
 		if o.AuthenticationAudience == "" {
-			return fmt.Errorf("AuthenticationAudience cannot be empty when agent authentication is enabled")
-		}
-		if o.KubeconfigPath != "" {
-			if _, err := os.Stat(o.KubeconfigPath); os.IsNotExist(err) {
-				return fmt.Errorf("error checking KubeconfigPath %q, got %v", o.KubeconfigPath, err)
-			}
+			return fmt.Errorf("--authentication-audience cannot be empty when agent authentication is enabled")
 		}
 	}
-
+	// Validate kubeconfig path if provided
+	if o.KubeconfigPath != "" {
+		if _, err := os.Stat(o.KubeconfigPath); os.IsNotExist(err) {
+			return fmt.Errorf("checking KubeconfigPath %q, got %v", o.KubeconfigPath, err)
+		}
+	}
 	// validate the proxy strategies
 	if len(o.ProxyStrategies) == 0 {
 		return fmt.Errorf("ProxyStrategies cannot be empty")
 	}
-	if _, err := server.ParseProxyStrategies(o.ProxyStrategies); err != nil {
+	if _, err := proxystrategies.ParseProxyStrategies(o.ProxyStrategies); err != nil {
 		return fmt.Errorf("invalid proxy strategies: %v", err)
 	}
 	if o.XfrChannelSize <= 0 {
@@ -337,6 +338,8 @@ func (o *ProxyRunOptions) Validate() error {
 			return err
 		}
 	}
+
+	o.NeedsKubernetesClient = usingServiceAccountAuth || o.EnableLeaseController
 
 	return nil
 }

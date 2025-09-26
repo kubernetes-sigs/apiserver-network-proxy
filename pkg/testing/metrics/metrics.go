@@ -38,9 +38,14 @@ const (
 	serverPendingDialsSample = `konnectivity_network_proxy_server_pending_backend_dials{} %d`
 
 	serverReadyBackendsHeader = `
-# HELP konnectivity_network_proxy_server_ready_backend_connections Number of konnectivity agent connected to the proxy server
+# HELP konnectivity_network_proxy_server_ready_backend_connections Number of konnectivity agent connected to the proxy server. DEPRECATED, please use ready_backends
 # TYPE konnectivity_network_proxy_server_ready_backend_connections gauge`
 	serverReadyBackendsSample = `konnectivity_network_proxy_server_ready_backend_connections{} %d`
+
+	serverTotalReadyBackendsHeader = `
+# HELP konnectivity_network_proxy_server_ready_backends Number of konnectivity agent connected to the proxy server
+# TYPE konnectivity_network_proxy_server_ready_backends gauge`
+	serverTotalReadyBackendsSample = `konnectivity_network_proxy_server_ready_backends{proxy_strategy="%s"} %d`
 
 	serverEstablishedConnsHeader = `
 # HELP konnectivity_network_proxy_server_established_connections Current number of established end-to-end connections (post-dial).
@@ -104,6 +109,14 @@ func (t *Tester) ExpectServerReadyBackends(v int) error {
 	expect := serverReadyBackendsHeader + "\n"
 	expect += fmt.Sprintf(serverReadyBackendsSample+"\n", v)
 	return t.ExpectMetric(server.Namespace, server.Subsystem, "ready_backend_connections", expect)
+}
+
+func (t *Tester) ExpectServerTotalReadyBackends(expected map[string]int) error {
+	expect := serverTotalReadyBackendsHeader + "\n"
+	for proxyStrategy, numOfBackends := range expected {
+		expect += fmt.Sprintf(serverTotalReadyBackendsSample+"\n", proxyStrategy, numOfBackends)
+	}
+	return t.ExpectMetric(server.Namespace, server.Subsystem, "ready_backends", expect)
 }
 
 func (t *Tester) ExpectServerEstablishedConns(v int) error {

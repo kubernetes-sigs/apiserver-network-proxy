@@ -4,26 +4,27 @@ on:
     branches:
       - master
       - release-0.31
+      - release-0.32
   pull_request:
 
 permissions:
   contents: read
 
 env:
-  GO_VERSION: v1.22
-  GOLANGCI_LINT_VERSION: v1.56
+  GO_VERSION: v1.24.7
+  GOLANGCI_LINT_VERSION: v2.1.6
 
 jobs:
   golangci:
     name: lint
     runs-on: ubuntu-22.04
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
+      - uses: actions/checkout@v5
+      - uses: actions/setup-go@v6
         with:
           go-version: ${{ env.GO_VERSION }}
       - name: golangci-lint
-        uses: golangci/golangci-lint-action@v6
+        uses: golangci/golangci-lint-action@v8
         with:
           version: ${{ env.GOLANGCI_LINT_VERSION }}
           args: --verbose

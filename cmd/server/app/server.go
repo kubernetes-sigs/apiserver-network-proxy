@@ -46,6 +46,7 @@ import (
 	"sigs.k8s.io/apiserver-network-proxy/konnectivity-client/proto/client"
 	"sigs.k8s.io/apiserver-network-proxy/pkg/server"
 	"sigs.k8s.io/apiserver-network-proxy/pkg/server/leases"
+	"sigs.k8s.io/apiserver-network-proxy/pkg/server/proxystrategies"
 	"sigs.k8s.io/apiserver-network-proxy/pkg/util"
 	"sigs.k8s.io/apiserver-network-proxy/proto/agent"
 )
@@ -105,7 +106,7 @@ func (p *Proxy) Run(o *options.ProxyRunOptions, stopCh <-chan struct{}) error {
 	defer cancel()
 
 	var k8sClient *kubernetes.Clientset
-	if o.AgentNamespace != "" {
+	if o.NeedsKubernetesClient {
 		config, err := clientcmd.BuildConfigFromFlags("", o.KubeconfigPath)
 		if err != nil {
 			return fmt.Errorf("failed to load kubernetes client config: %v", err)
@@ -134,11 +135,11 @@ func (p *Proxy) Run(o *options.ProxyRunOptions, stopCh <-chan struct{}) error {
 		AuthenticationAudience: o.AuthenticationAudience,
 	}
 	klog.V(1).Infoln("Starting frontend server for client connections.")
-	ps, err := server.ParseProxyStrategies(o.ProxyStrategies)
+	ps, err := proxystrategies.ParseProxyStrategies(o.ProxyStrategies)
 	if err != nil {
 		return err
 	}
-	p.server = server.NewProxyServer(o.ServerID, ps, int(o.ServerCount), authOpt, o.XfrChannelSize)
+	p.server = server.NewProxyServer(o.ServerID, ps, o.ServerCount, authOpt, o.XfrChannelSize)
 
 	frontendStop, err := p.runFrontendServer(ctx, o, p.server)
 	if err != nil {
@@ -352,7 +353,7 @@ func (p *Proxy) runMTLSFrontendServer(ctx context.Context, o *options.ProxyRunOp
 		}
 		labels := runpprof.Labels(
 			"core", "mtlsGrpcFrontend",
-			"port", strconv.FormatUint(uint64(o.ServerPort), 10),
+			"port", strconv.Itoa(o.ServerPort),
 		)
 		go runpprof.Do(context.Background(), labels, func(context.Context) { grpcServer.Serve(lis) })
 		stop = grpcServer.GracefulStop
@@ -375,7 +376,7 @@ func (p *Proxy) runMTLSFrontendServer(ctx context.Context, o *options.ProxyRunOp
 		}
 		labels := runpprof.Labels(
 			"core", "mtlsHttpFrontend",
-			"port", strconv.FormatUint(uint64(o.ServerPort), 10),
+			"port", strconv.Itoa(o.ServerPort),
 		)
 		go runpprof.Do(context.Background(), labels, func(context.Context) {
 			err := server.ListenAndServeTLS("", "") // empty files defaults to tlsConfig
@@ -412,7 +413,7 @@ func (p *Proxy) runAgentServer(o *options.ProxyRunOptions, server *server.ProxyS
 	}
 	labels := runpprof.Labels(
 		"core", "agentListener",
-		"port", strconv.FormatUint(uint64(o.AgentPort), 10),
+		"port", strconv.Itoa(o.AgentPort),
 	)
 	go runpprof.Do(context.Background(), labels, func(context.Context) { grpcServer.Serve(lis) })
 	p.agentServer = grpcServer
@@ -422,6 +423,7 @@ func (p *Proxy) runAgentServer(o *options.ProxyRunOptions, server *server.ProxyS
 
 func (p *Proxy) runAdminServer(o *options.ProxyRunOptions, _ *server.ProxyServer) error {
 	muxHandler := http.NewServeMux()
+	// /metrics moved to HealthServer but being maintained here for backward compatibility
 	muxHandler.Handle("/metrics", promhttp.Handler())
 	if o.EnableProfiling {
 		muxHandler.HandleFunc("/debug/pprof", util.RedirectTo("/debug/pprof/"))
@@ -442,7 +444,7 @@ func (p *Proxy) runAdminServer(o *options.ProxyRunOptions, _ *server.ProxyServer
 
 	labels := runpprof.Labels(
 		"core", "adminListener",
-		"port", strconv.FormatUint(uint64(o.AdminPort), 10),
+		"port", strconv.Itoa(o.AdminPort),
 	)
 	go runpprof.Do(context.Background(), labels, func(context.Context) {
 		err := p.adminServer.ListenAndServe()
@@ -467,10 +469,11 @@ func (p *Proxy) runHealthServer(o *options.ProxyRunOptions, server *server.Proxy
 			return
 		}
 		w.WriteHeader(500)
-		fmt.Fprintf(w, msg)
+		fmt.Fprint(w, msg)
 	})
 
 	muxHandler := http.NewServeMux()
+	muxHandler.Handle("/metrics", promhttp.Handler())
 	muxHandler.HandleFunc("/healthz", livenessHandler)
 	// "/ready" is deprecated but being maintained for backward compatibility
 	muxHandler.HandleFunc("/ready", readinessHandler)
@@ -484,7 +487,7 @@ func (p *Proxy) runHealthServer(o *options.ProxyRunOptions, server *server.Proxy
 
 	labels := runpprof.Labels(
 		"core", "healthListener",
-		"port", strconv.FormatUint(uint64(o.HealthPort), 10),
+		"port", strconv.Itoa(o.HealthPort),
 	)
 	go runpprof.Do(context.Background(), labels, func(context.Context) {
 		err := p.healthServer.ListenAndServe()

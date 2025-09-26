@@ -21,7 +21,10 @@ import (
 	"net"
 	"net/http"
 	"strconv"
+	"time"
 )
+
+var ForeverTestTimeout = time.Minute
 
 func checkReadiness(addr string) bool {
 	resp, err := http.Get(fmt.Sprintf("http://%s/readyz", addr))

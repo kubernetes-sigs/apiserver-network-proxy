@@ -32,48 +32,73 @@ import (
 
 const (
 	fromResponses = "KNP server response headers"
-	fromLeases = "KNP lease count"
-	fromFallback = "fallback to 1"
+	fromLeases    = "KNP lease count"
+	fromFallback  = "fallback to 1"
 )
 
 // ClientSet consists of clients connected to each instance of an HA proxy server.
 type ClientSet struct {
-	mu      sync.Mutex         //protects the clients.
-	clients map[string]*Client // map between serverID and the client
-	// connects to this server.
+	// mu guards access to the clients map
+	mu sync.Mutex
 
-	agentID string // ID of this agent
-	address string // proxy server address. Assuming HA proxy server
+	// clients is a map between serverID and the client
+	// connected to this server.
+	clients map[string]*Client
 
-	leaseCounter            ServerCounter // counts number of proxy server leases
-	lastReceivedServerCount int                 // last server count received from a proxy server
-	lastServerCount         int                 // last server count value from either lease system or proxy server, former takes priority
+	// agentID is "our ID" - the ID of this agent.
+	agentID string
 
-	// unless it is an HA server. Initialized when the ClientSet creates
-	// the first client. When syncForever is set, it will be the most recently seen.
-	syncInterval time.Duration // The interval by which the agent
-	// periodically checks that it has connections to all instances of the
-	// proxy server.
-	probeInterval time.Duration // The interval by which the agent
+	// Address is the proxy server address.  Assuming HA proxy server
+	address string
+
+	// leaseCounter counts number of proxy server leases
+	leaseCounter ServerCounter
+
+	// lastReceivedServerCount is the last serverCount value received when connecting to a proxy server
+	lastReceivedServerCount int
+
+	// lastServerCount is the most-recently observed serverCount value from either lease system or proxy server,
+	// former takes priority unless it is an HA server.
+	// Initialized when the ClientSet creates the first client.
+	// When syncForever is set, it will be the most recently seen.
+	lastServerCount int
+
+	// syncInterval is the interval at which the agent periodically checks
+	// that it has connections to all instances of the proxy server.
+	syncInterval time.Duration
+
+	//  The maximum interval for the syncInterval to back off to when unable to connect to the proxy server
+	syncIntervalCap time.Duration
+
+	// 	syncForever is true if we should continue syncing (support dynamic server count).
+	syncForever bool
+
+	// probeInterval is the interval at which the agent
 	// periodically checks if its connections to the proxy server is ready.
-	syncIntervalCap time.Duration // The maximum interval
-	// for the syncInterval to back off to when unable to connect to the proxy server
+	probeInterval time.Duration
 
 	dialOptions []grpc.DialOption
-	// file path contains service account token
+
+	// serviceAccountTokenPath is the file path to our kubernetes service account token
 	serviceAccountTokenPath string
+
 	// channel to signal that the agent is pending termination.
 	drainCh <-chan struct{}
+
 	// channel to signal shutting down the client set. Primarily for test.
 	stopCh <-chan struct{}
 
-	agentIdentifiers string // The identifiers of the agent, which will be used
+	// agentIdentifiers is the identifiers of the agent, which will be used
 	// by the server when choosing agent
+	agentIdentifiers string
 
 	warnOnChannelLimit bool
 	xfrChannelSize     int
 
-	syncForever bool // Continue syncing (support dynamic server count).
+	// serverCountSource controls how we compute the server count.
+	// The proxy server sends the serverCount header to each connecting agent,
+	// and the agent figures out from these observations how many
+	// agent-to-proxy-server connections it should maintain.
 	serverCountSource string
 }
 
@@ -96,15 +121,12 @@ func (cs *ClientSet) HealthyClientsCount() int {
 
 }
 
-func (cs *ClientSet) hasIDLocked(serverID string) bool {
-	_, ok := cs.clients[serverID]
-	return ok
-}
-
+// HasID returns true if the ClientSet has a client to the specified serverID.
 func (cs *ClientSet) HasID(serverID string) bool {
 	cs.mu.Lock()
 	defer cs.mu.Unlock()
-	return cs.hasIDLocked(serverID)
+	_, exists := cs.clients[serverID]
+	return exists
 }
 
 type DuplicateServerError struct {
@@ -115,20 +137,19 @@ func (dse *DuplicateServerError) Error() string {
 	return "duplicate server: " + dse.ServerID
 }
 
-func (cs *ClientSet) addClientLocked(serverID string, c *Client) error {
-	if cs.hasIDLocked(serverID) {
+// AddClient adds the specified client to our set of clients.
+// If we already have a connection with the same serverID, we will return *DuplicateServerError.
+func (cs *ClientSet) AddClient(serverID string, c *Client) error {
+	cs.mu.Lock()
+	defer cs.mu.Unlock()
+
+	_, exists := cs.clients[serverID]
+	if exists {
 		return &DuplicateServerError{ServerID: serverID}
 	}
 	cs.clients[serverID] = c
 	metrics.Metrics.SetServerConnectionsCount(len(cs.clients))
 	return nil
-
-}
-
-func (cs *ClientSet) AddClient(serverID string, c *Client) error {
-	cs.mu.Lock()
-	defer cs.mu.Unlock()
-	return cs.addClientLocked(serverID, c)
 }
 
 func (cs *ClientSet) RemoveClient(serverID string) {
@@ -279,11 +300,14 @@ func (cs *ClientSet) connectOnce() (int, error) {
 	if err != nil {
 		return serverCount, err
 	}
-	cs.lastReceivedServerCount = receivedServerCount
 	if err := cs.AddClient(c.serverID, c); err != nil {
 		c.Close()
 		return serverCount, err
 	}
+	// By moving the update to here, we only accept the server count from a server
+	// that we have successfully added to our active client set, implicitly ignoring
+	// stale data from duplicate connection attempts.
+	cs.lastReceivedServerCount = receivedServerCount
 	klog.V(2).InfoS("sync added client connecting to proxy server", "serverID", c.serverID)
 
 	labels := runpprof.Labels(

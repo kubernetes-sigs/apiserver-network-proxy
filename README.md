@@ -61,9 +61,9 @@ Please ensure the go bin directory (usually `~/go/bin`) is in your `PATH`.
 
 The [```mockgen```](https://github.com/uber-go/mock) tool must be installed on your system.
 
-Currently, we are using go.uber.org/mock/mockgen@v0.4.0
+Currently, we are using go.uber.org/mock/mockgen@v0.5.2
 
-`go install go.uber.org/mock/mockgen@v0.4.0`
+`go install go.uber.org/mock/mockgen@v0.5.2`
 
 ### Protoc
 
@@ -201,6 +201,11 @@ deploys the proxy agent on a worker node and the proxy server on a control plane
 
 See this [README.md](examples/kind-multinode/README.md) for a similar example that creates a `kind` cluster with a 
 user-configurable number of control plane and worker nodes and optionally sideloads custom proxy agent and server images.
+
+### Tutorials
+
+See this [Set up Konnectivity service](https://kubernetes.io/docs/tasks/extend-kubernetes/setup-konnectivity/) tutorial for
+an example of the Konnectivity service providing a TCP level proxy for the control plane to cluster communication.
 
 ### Clients
 

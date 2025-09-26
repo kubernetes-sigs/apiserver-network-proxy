@@ -24,8 +24,8 @@ ALL_ARCH ?= amd64 arm arm64 ppc64le s390x
 # The output type could either be docker (local), or registry.
 OUTPUT_TYPE ?= docker
 GO_TOOLCHAIN ?= golang
-GO_VERSION ?= 1.22.7
-BASEIMAGE ?= gcr.io/distroless/static-debian11:nonroot
+GO_VERSION ?= 1.24.7
+BASEIMAGE ?= gcr.io/distroless/static-debian12:nonroot
 
 ifeq ($(GOPATH),)
 export GOPATH := $(shell go env GOPATH)
@@ -33,7 +33,7 @@ endif
 GOOS ?= $(shell go env GOOS)
 GOARCH ?= $(shell go env GOARCH)
 INSTALL_LOCATION:=$(shell go env GOPATH)/bin
-GOLANGCI_LINT_VERSION ?= 1.56.2
+GOLANGCI_LINT_VERSION ?= 2.1.6
 GOSEC_VERSION ?= 2.13.1
 
 REGISTRY ?= gcr.io/$(shell gcloud config get-value project)
@@ -57,11 +57,17 @@ PROXY_SERVER_IP ?= 127.0.0.1
 
 KIND_IMAGE ?= kindest/node:v1.30.2
 CONNECTION_MODE ?= grpc
+
+MOCKGEN_VERSION := $(shell mockgen -version)
+DESIRED_MOCKGEN := "v0.5.2"
+
 ## --------------------------------------
 ## Testing
 ## --------------------------------------
 .PHONY: mock_gen
 mock_gen:
+	echo "Mock gen is set to $(MOCKGEN_VERSION)"
+	if [ "$(MOCKGEN_VERSION)" != $(DESIRED_MOCKGEN) ]; then echo "Error need mockgen version $(DESIRED_VERSION)"; exit 1; fi
 	mkdir -p proto/agent/mocks
 	mockgen --build_flags=--mod=mod sigs.k8s.io/apiserver-network-proxy/proto/agent AgentService_ConnectServer > proto/agent/mocks/agent_mock.go
 	cat hack/go-license-header.txt proto/agent/mocks/agent_mock.go > proto/agent/mocks/agent_mock.licensed.go
@@ -76,7 +82,7 @@ fast-test:
 # Unit tests with fuller coverage, invoked by CI system.
 .PHONY: test
 test:
-	go test -mod=vendor -race -covermode=atomic -coverprofile=konnectivity.out $(shell go list ./... | grep -v -e "/e2e$$" -e "/e2e/.*") && go tool cover -html=konnectivity.out -o=konnectivity.html
+	go test -v -mod=vendor -race -covermode=atomic -coverprofile=konnectivity.out $(shell go list ./... | grep -v -e "/e2e$$" -e "/e2e/.*") && go tool cover -html=konnectivity.out -o=konnectivity.html
 	cd konnectivity-client && go test -race -covermode=atomic -coverprofile=client.out ./... && go tool cover -html=client.out -o=client.html
 
 .PHONY: test-integration
@@ -125,7 +131,7 @@ bin/proxy-server:
 .PHONY: lint
 lint:
 	curl -sSfL https://raw.githubusercontent.com/golangci/golangci-lint/master/install.sh | sh -s -- -b $(INSTALL_LOCATION) v$(GOLANGCI_LINT_VERSION)
-	$(INSTALL_LOCATION)/golangci-lint run --verbose
+	$(INSTALL_LOCATION)/golangci-lint run --config ./.golangci.yaml --verbose
 
 ## --------------------------------------
 ## Go
@@ -164,13 +170,13 @@ easy-rsa: easy-rsa.tar.gz
 
 cfssl:
 	@if ! command -v cfssl &> /dev/null; then \
-		curl --retry 10 -L -o cfssl https://github.com/cloudflare/cfssl/releases/download/v1.5.0/cfssl_1.5.0_$(GOOS)_$(GOARCH); \
+		curl --retry 10 -L -o cfssl https://github.com/cloudflare/cfssl/releases/download/v1.6.5/cfssl_1.6.5_$(GOOS)_$(GOARCH); \
 		chmod +x cfssl; \
 	fi
 
 cfssljson:
 	@if ! command -v cfssljson &> /dev/null; then \
-		curl --retry 10 -L -o cfssljson https://github.com/cloudflare/cfssl/releases/download/v1.5.0/cfssljson_1.5.0_$(GOOS)_$(GOARCH); \
+		curl --retry 10 -L -o cfssljson https://github.com/cloudflare/cfssl/releases/download/v1.6.5/cfssljson_1.6.5_$(GOOS)_$(GOARCH); \
 		chmod +x cfssljson; \
 	fi
 

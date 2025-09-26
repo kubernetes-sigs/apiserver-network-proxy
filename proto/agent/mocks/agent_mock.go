@@ -37,6 +37,7 @@ import (
 type MockAgentService_ConnectServer struct {
 	ctrl     *gomock.Controller
 	recorder *MockAgentService_ConnectServerMockRecorder
+	isgomock struct{}
 }
 
 // MockAgentService_ConnectServerMockRecorder is the mock recorder for MockAgentService_ConnectServer.
@@ -86,17 +87,17 @@ func (mr *MockAgentService_ConnectServerMockRecorder) Recv() *gomock.Call {
 }
 
 // RecvMsg mocks base method.
-func (m *MockAgentService_ConnectServer) RecvMsg(arg0 any) error {
-	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "RecvMsg", arg0)
+func (m_2 *MockAgentService_ConnectServer) RecvMsg(m any) error {
+	m_2.ctrl.T.Helper()
+	ret := m_2.ctrl.Call(m_2, "RecvMsg", m)
 	ret0, _ := ret[0].(error)
 	return ret0
 }
 
 // RecvMsg indicates an expected call of RecvMsg.
-func (mr *MockAgentService_ConnectServerMockRecorder) RecvMsg(arg0 any) *gomock.Call {
+func (mr *MockAgentService_ConnectServerMockRecorder) RecvMsg(m any) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "RecvMsg", reflect.TypeOf((*MockAgentService_ConnectServer)(nil).RecvMsg), arg0)
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "RecvMsg", reflect.TypeOf((*MockAgentService_ConnectServer)(nil).RecvMsg), m)
 }
 
 // Send mocks base method.
@@ -128,17 +129,17 @@ func (mr *MockAgentService_ConnectServerMockRecorder) SendHeader(arg0 any) *gomo
 }
 
 // SendMsg mocks base method.
-func (m *MockAgentService_ConnectServer) SendMsg(arg0 any) error {
-	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "SendMsg", arg0)
+func (m_2 *MockAgentService_ConnectServer) SendMsg(m any) error {
+	m_2.ctrl.T.Helper()
+	ret := m_2.ctrl.Call(m_2, "SendMsg", m)
 	ret0, _ := ret[0].(error)
 	return ret0
 }
 
 // SendMsg indicates an expected call of SendMsg.
-func (mr *MockAgentService_ConnectServerMockRecorder) SendMsg(arg0 any) *gomock.Call {
+func (mr *MockAgentService_ConnectServerMockRecorder) SendMsg(m any) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "SendMsg", reflect.TypeOf((*MockAgentService_ConnectServer)(nil).SendMsg), arg0)
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "SendMsg", reflect.TypeOf((*MockAgentService_ConnectServer)(nil).SendMsg), m)
 }
 
 // SetHeader mocks base method.

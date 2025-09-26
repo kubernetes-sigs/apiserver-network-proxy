@@ -105,17 +105,28 @@ type delayedServer struct {
 	maxWait time.Duration
 }
 
-func newDelayedServer() *delayedServer {
+// randomDuration returns a random duration in the [lower, upper) interval
+// Cannot use min/max because linter gives the following error.
+// "redefines-builtin-id: redefinition of the built-in function min (revive)"
+func randomDuration(lower, upper time.Duration) time.Duration {
+	d := lower
+	if upper != lower {
+		d += time.Duration(rand.Int63n(int64(upper - lower)))
+	}
+	return d
+}
+
+func newDelayedServer(minWait time.Duration, maxWait time.Duration) *delayedServer {
 	return &delayedServer{
-		minWait: 500 * time.Millisecond,
-		maxWait: 2 * time.Second,
+		minWait: minWait,
+		maxWait: maxWait,
 	}
 }
 
-var _ = newDelayedServer() // Suppress unused lint error.
+var _ = newDelayedServer(time.Second, time.Second) // Suppress unused lint error.
 
 func (s *delayedServer) ServeHTTP(w http.ResponseWriter, _ *http.Request) {
-	delay := time.Duration(rand.Int63n(int64(s.maxWait-s.minWait))) + s.minWait /* #nosec G404 */
+	delay := randomDuration(s.minWait, s.maxWait)
 	time.Sleep(delay)
 	w.Write([]byte("hello"))
 }
@@ -293,7 +304,7 @@ func TestProxyHandle_RequestDeadlineExceeded_GRPC(t *testing.T) {
 		select {
 		case <-tunnel.Done():
 			t.Log("Tunnel closed successfully")
-		case <-time.After(wait.ForeverTestTimeout):
+		case <-time.After(framework.ForeverTestTimeout):
 			t.Errorf("Timed out waiting for tunnel to close")
 		}
 	}()
@@ -343,7 +354,7 @@ func TestProxyDial_RequestCancelled_GRPC(t *testing.T) {
 
 		select {
 		case <-tunnel.Done():
-		case <-time.After(wait.ForeverTestTimeout):
+		case <-time.After(framework.ForeverTestTimeout):
 			t.Errorf("Timed out waiting for tunnel to close")
 		}
 	}()
@@ -360,7 +371,8 @@ func TestProxyDial_RequestCancelled_GRPC(t *testing.T) {
 func TestProxyDial_RequestCancelled_Concurrent_GRPC(t *testing.T) {
 	expectCleanShutdown(t)
 
-	slowServer := newDelayedServer()
+	// An HTTP server that always waits 3 seconds before replying
+	slowServer := newDelayedServer(3*time.Second, 3*time.Second)
 	server := httptest.NewServer(slowServer)
 	defer server.Close()
 
@@ -405,7 +417,7 @@ func TestProxyDial_RequestCancelled_Concurrent_GRPC(t *testing.T) {
 
 		select {
 		case <-tunnel.Done():
-		case <-time.After(wait.ForeverTestTimeout):
+		case <-time.After(framework.ForeverTestTimeout):
 			t.Errorf("Timed out waiting for tunnel to close")
 		}
 	}
@@ -420,14 +432,18 @@ func TestProxyDial_RequestCancelled_Concurrent_GRPC(t *testing.T) {
 	const concurrentConns = 50
 	wg.Add(concurrentConns)
 	for i := 0; i < concurrentConns; i++ {
-		cancelDelayMs := rand.Int63n(1000) + 5 /* #nosec G404 */
-		go dialFn(i, time.Duration(cancelDelayMs)*time.Millisecond)
+		// The delay before we cancel the HTTP request:
+		// * at least 1 second for the HTTP connection to establish
+		// * less than 2 seconds so that we cancel during the 3 second delay in our slowServer
+		// TODO: Can we try to cancel during the dial?  Or after the HTTP request has returned?
+		cancelDelay := randomDuration(time.Second, 2*time.Second)
+		go dialFn(i, cancelDelay)
 	}
 	wg.Wait()
 
 	// Wait for the closed connections to propogate
 	var endpointConnsErr, goLeaksErr error
-	wait.PollImmediate(time.Second, wait.ForeverTestTimeout, func() (done bool, err error) {
+	wait.PollImmediate(time.Second, framework.ForeverTestTimeout, func() (done bool, err error) {
 		endpointConnsErr = a.Metrics().ExpectAgentEndpointConnections(0)
 		goLeaksErr = goleak.Find(ignoredGoRoutines...)
 		return endpointConnsErr == nil && goLeaksErr == nil, nil
@@ -489,7 +505,7 @@ func TestProxyDial_AgentTimeout_GRPC(t *testing.T) {
 
 		select {
 		case <-tunnel.Done():
-		case <-time.After(wait.ForeverTestTimeout):
+		case <-time.After(framework.ForeverTestTimeout):
 			t.Errorf("Timed out waiting for tunnel to close")
 		}
 	}()
@@ -673,7 +689,7 @@ func TestFailedDNSLookupProxy_HTTPCONN(t *testing.T) {
 		t.Error(err)
 	}
 
-	urlString := "http://thissssssxxxxx.com:80"
+	urlString := "http://thisdefinitelydoesnotexist.com:80"
 	serverURL, _ := url.Parse(urlString)
 
 	// Send HTTP-Connect request
@@ -689,36 +705,12 @@ func TestFailedDNSLookupProxy_HTTPCONN(t *testing.T) {
 		t.Errorf("reading HTTP response from CONNECT: %v", err)
 	}
 
-	if res.StatusCode != 200 {
-		t.Errorf("expect 200; got %d", res.StatusCode)
-	}
-	if br.Buffered() > 0 {
-		t.Error("unexpected extra buffer")
-	}
-	dialer := func(_, _ string) (net.Conn, error) {
-		return conn, nil
+	if res.StatusCode != 502 {
+		t.Errorf("expect 502; got %d", res.StatusCode)
 	}
 
-	c := &http.Client{
-		Transport: &http.Transport{
-			Dial: dialer,
-		},
-	}
-
-	resp, err := c.Get(urlString)
-	if err != nil {
-		t.Error(err)
-	}
-
-	if resp.StatusCode != 503 {
-		t.Errorf("expect 503; got %d", res.StatusCode)
-	}
-
-	body, err := io.ReadAll(resp.Body)
-	resp.Body.Close()
-	if !strings.Contains(err.Error(), "connection reset by peer") {
-		t.Error(err)
-	}
+	body, err := io.ReadAll(res.Body)
+	res.Body.Close()
 
 	if !strings.Contains(string(body), "no such host") {
 		t.Errorf("Unexpected error: %v", err)
@@ -763,37 +755,21 @@ func TestFailedDial_HTTPCONN(t *testing.T) {
 	br := bufio.NewReader(conn)
 	res, err := http.ReadResponse(br, nil)
 	if err != nil {
-		t.Fatalf("reading HTTP response from CONNECT: %v", err)
-	}
-	if res.StatusCode != 200 {
-		t.Fatalf("expect 200; got %d", res.StatusCode)
+		t.Errorf("reading HTTP response from CONNECT: %v", err)
 	}
 
-	dialer := func(_, _ string) (net.Conn, error) {
-		return conn, nil
+	if res.StatusCode != 502 {
+		t.Errorf("expect 502; got %d", res.StatusCode)
 	}
 
-	c := &http.Client{
-		Transport: &http.Transport{
-			Dial: dialer,
-		},
-	}
-
-	resp, err := c.Get(server.URL)
+	body, err := io.ReadAll(res.Body)
+	res.Body.Close()
 	if err != nil {
-		t.Fatal(err)
-	}
-
-	body, err := io.ReadAll(resp.Body)
-	resp.Body.Close()
-	if err == nil {
 		t.Fatalf("Expected error reading response body; response=%q", body)
-	} else if !strings.Contains(err.Error(), "connection reset by peer") {
-		t.Error(err)
 	}
 
 	if !strings.Contains(string(body), "connection refused") {
-		t.Errorf("Unexpected error: %v", err)
+		t.Errorf("Expected 'connection refused' in error body, got: %s", string(body))
 	}
 
 	if err := ps.Metrics().ExpectServerDialFailure(metricsserver.DialFailureErrorResponse, 1); err != nil {
@@ -965,7 +941,7 @@ func waitForConnectedServerCount(t testing.TB, expectedServerCount int, a framew
 // agents (backends). This assumes the ProxyServer is using a single ProxyStrategy.
 func waitForConnectedAgentCount(t testing.TB, expectedAgentCount int, ps framework.ProxyServer) {
 	t.Helper()
-	err := wait.PollImmediate(100*time.Millisecond, wait.ForeverTestTimeout, func() (bool, error) {
+	err := wait.PollImmediate(100*time.Millisecond, framework.ForeverTestTimeout, func() (bool, error) {
 		count, err := ps.ConnectedBackends()
 		if err != nil {
 			return false, err

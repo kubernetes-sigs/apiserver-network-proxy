@@ -78,7 +78,7 @@ func (*InProcessAgentRunner) Start(t testing.TB, opts AgentOpts) (Agent, error) 
 	}()
 
 	healthAddr := net.JoinHostPort(o.HealthServerHost, strconv.Itoa(o.HealthServerPort))
-	if err := wait.PollImmediateWithContext(ctx, 100*time.Millisecond, wait.ForeverTestTimeout, func(context.Context) (bool, error) {
+	if err := wait.PollImmediateWithContext(ctx, 100*time.Millisecond, ForeverTestTimeout, func(context.Context) (bool, error) {
 		return checkLiveness(healthAddr), nil
 	}); err != nil {
 		close(stopCh)
@@ -215,7 +215,7 @@ func (a *externalAgent) Metrics() metricstest.AgentTester {
 }
 
 func (a *externalAgent) waitForLiveness() error {
-	err := wait.PollImmediate(100*time.Millisecond, wait.ForeverTestTimeout, func() (bool, error) {
+	err := wait.PollImmediate(100*time.Millisecond, ForeverTestTimeout, func() (bool, error) {
 		resp, err := http.Get(fmt.Sprintf("http://%s/healthz", a.healthAddr))
 		if err != nil {
 			return false, nil

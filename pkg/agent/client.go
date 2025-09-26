@@ -174,8 +174,8 @@ func newAgentClient(address, agentID, agentIdentifiers string, cs *ClientSet, op
 	return a, serverCount, nil
 }
 
-// Connect makes the grpc dial to the proxy server. It returns the serverID
-// it connects to.
+// Connect makes the grpc dial to the proxy server. It returns the count
+// of the number of servers this agent should connected to.
 func (a *Client) Connect() (int, error) {
 	conn, err := grpc.Dial(a.address, a.opts...)
 	if err != nil {
@@ -354,7 +354,13 @@ func (a *Client) Serve() {
 			if status.Code(err) == codes.Canceled {
 				klog.V(2).InfoS("stream canceled", "serverID", a.serverID, "agentID", a.agentID)
 			} else {
-				klog.ErrorS(err, "could not read stream", "serverID", a.serverID, "agentID", a.agentID)
+				select {
+				case <-a.stopCh:
+					klog.V(5).InfoS("could not read stream because agent client is shutting down", "serverID", a.serverID, "agentID", a.agentID, "err", err)
+				default:
+					// If stopCh is not closed, this is a legitimate, unexpected error.
+					klog.ErrorS(err, "could not read stream", "serverID", a.serverID, "agentID", a.agentID)
+				}
 			}
 			return
 		}
@@ -407,7 +413,13 @@ func (a *Client) Serve() {
 					closePkt.GetCloseResponse().ConnectID = connID
 				}
 				if err := a.Send(closePkt); err != nil {
-					klog.ErrorS(err, "close response failure", "")
+					if err == io.EOF {
+						klog.V(4).InfoS("received EOF; connection already closed", "connectionID", connID, "dialID", dialReq.Random, "err", err)
+					} else if _, ok := a.connManager.Get(connID); !ok {
+						klog.V(5).InfoS("connection already closed", "connectionID", connID, "dialID", dialReq.Random, "err", err)
+					} else {
+						klog.ErrorS(err, "close response failure", "connectionID", connID, "dialID", dialReq.Random)
+					}
 				}
 				close(dataCh)
 				a.connManager.Delete(connID)

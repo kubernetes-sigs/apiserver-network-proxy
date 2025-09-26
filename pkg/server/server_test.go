@@ -39,6 +39,7 @@ import (
 
 	client "sigs.k8s.io/apiserver-network-proxy/konnectivity-client/proto/client"
 	"sigs.k8s.io/apiserver-network-proxy/pkg/server/metrics"
+	"sigs.k8s.io/apiserver-network-proxy/pkg/server/proxystrategies"
 	metricstest "sigs.k8s.io/apiserver-network-proxy/pkg/testing/metrics"
 	agentmock "sigs.k8s.io/apiserver-network-proxy/proto/agent/mocks"
 	"sigs.k8s.io/apiserver-network-proxy/proto/header"
@@ -169,7 +170,7 @@ func TestAgentTokenAuthenticationErrorsToken(t *testing.T) {
 				conn.EXPECT().Recv().Return(nil, io.EOF)
 			}
 
-			p := NewProxyServer("", []ProxyStrategy{ProxyStrategyDefault}, 1, &AgentTokenAuthenticationOptions{
+			p := NewProxyServer("", []proxystrategies.ProxyStrategy{proxystrategies.ProxyStrategyDefault}, 1, &AgentTokenAuthenticationOptions{
 				Enabled:             true,
 				KubernetesClient:    kcs,
 				AgentNamespace:      tc.wantNamespace,
@@ -197,7 +198,7 @@ func TestRemovePendingDialForStream(t *testing.T) {
 	pending3 := &ProxyClientConnection{frontend: &GrpcFrontend{streamUID: streamUID}}
 	pending4 := &ProxyClientConnection{frontend: &GrpcFrontend{streamUID: "different-uid"}}
 	pending5 := &ProxyClientConnection{frontend: &GrpcFrontend{streamUID: ""}}
-	p := NewProxyServer("", []ProxyStrategy{ProxyStrategyDefault}, 1, nil, xfrChannelSize)
+	p := NewProxyServer("", []proxystrategies.ProxyStrategy{proxystrategies.ProxyStrategyDefault}, 1, nil, xfrChannelSize)
 	p.PendingDial.Add(1, pending1)
 	p.PendingDial.Add(2, pending2)
 	p.PendingDial.Add(3, pending3)
@@ -225,7 +226,7 @@ func TestAddRemoveFrontends(t *testing.T) {
 	agent2ConnID2 := new(ProxyClientConnection)
 	agent3ConnID1 := new(ProxyClientConnection)
 
-	p := NewProxyServer("", []ProxyStrategy{ProxyStrategyDefault}, 1, nil, xfrChannelSize)
+	p := NewProxyServer("", []proxystrategies.ProxyStrategy{proxystrategies.ProxyStrategyDefault}, 1, nil, xfrChannelSize)
 	p.addEstablished("agent1", int64(1), agent1ConnID1)
 	p.removeEstablished("agent1", int64(1))
 	expectedFrontends := make(map[string]map[int64]*ProxyClientConnection)
@@ -233,7 +234,7 @@ func TestAddRemoveFrontends(t *testing.T) {
 		t.Errorf("expected %v, got %v", e, a)
 	}
 
-	p = NewProxyServer("", []ProxyStrategy{ProxyStrategyDefault}, 1, nil, xfrChannelSize)
+	p = NewProxyServer("", []proxystrategies.ProxyStrategy{proxystrategies.ProxyStrategyDefault}, 1, nil, xfrChannelSize)
 	p.addEstablished("agent1", int64(1), agent1ConnID1)
 	p.addEstablished("agent1", int64(2), agent1ConnID2)
 	p.addEstablished("agent2", int64(1), agent2ConnID1)
@@ -263,7 +264,7 @@ func TestAddRemoveBackends_DefaultStrategy(t *testing.T) {
 	backend2, _ := NewBackend(mockAgentConn(ctrl, "agent2", []string{}))
 	backend3, _ := NewBackend(mockAgentConn(ctrl, "agent3", []string{}))
 
-	p := NewProxyServer("", []ProxyStrategy{ProxyStrategyDefault}, 1, nil, xfrChannelSize)
+	p := NewProxyServer("", []proxystrategies.ProxyStrategy{proxystrategies.ProxyStrategyDefault}, 1, nil, xfrChannelSize)
 
 	p.addBackend(backend1)
 
@@ -295,7 +296,7 @@ func TestAddRemoveBackends_DefaultRouteStrategy(t *testing.T) {
 	backend2, _ := NewBackend(mockAgentConn(ctrl, "agent2", []string{"default-route=false"}))
 	backend3, _ := NewBackend(mockAgentConn(ctrl, "agent3", []string{"default-route=true"}))
 
-	p := NewProxyServer("", []ProxyStrategy{ProxyStrategyDefaultRoute}, 1, nil, xfrChannelSize)
+	p := NewProxyServer("", []proxystrategies.ProxyStrategy{proxystrategies.ProxyStrategyDefaultRoute}, 1, nil, xfrChannelSize)
 
 	p.addBackend(backend1)
 
@@ -337,7 +338,7 @@ func TestAddRemoveBackends_DestHostStrategy(t *testing.T) {
 	backend2, _ := NewBackend(mockAgentConn(ctrl, "agent2", []string{"default-route=true"}))
 	backend3, _ := NewBackend(mockAgentConn(ctrl, "agent3", []string{"host=node2.mydomain.com&ipv4=5.6.7.8&ipv6=::"}))
 
-	p := NewProxyServer("", []ProxyStrategy{ProxyStrategyDestHost}, 1, nil, xfrChannelSize)
+	p := NewProxyServer("", []proxystrategies.ProxyStrategy{proxystrategies.ProxyStrategyDestHost}, 1, nil, xfrChannelSize)
 
 	p.addBackend(backend1)
 	p.addBackend(backend2)
@@ -384,7 +385,7 @@ func TestAddRemoveBackends_DestHostSanitizeRequest(t *testing.T) {
 	backend1, _ := NewBackend(mockAgentConn(ctrl, "agent1", []string{"host=localhost&host=node1.mydomain.com&ipv4=1.2.3.4&ipv6=9878::7675:1292:9183:7562"}))
 	backend2, _ := NewBackend(mockAgentConn(ctrl, "agent2", []string{"host=node2.mydomain.com&ipv4=5.6.7.8&ipv6=::"}))
 
-	p := NewProxyServer("", []ProxyStrategy{ProxyStrategyDestHost}, 1, nil, xfrChannelSize)
+	p := NewProxyServer("", []proxystrategies.ProxyStrategy{proxystrategies.ProxyStrategyDestHost}, 1, nil, xfrChannelSize)
 
 	p.addBackend(backend1)
 	p.addBackend(backend2)
@@ -408,7 +409,7 @@ func TestAddRemoveBackends_DestHostWithDefault(t *testing.T) {
 	backend2, _ := NewBackend(mockAgentConn(ctrl, "agent2", []string{"default-route=false"}))
 	backend3, _ := NewBackend(mockAgentConn(ctrl, "agent3", []string{"host=node2.mydomain.com&ipv4=5.6.7.8&ipv6=::"}))
 
-	p := NewProxyServer("", []ProxyStrategy{ProxyStrategyDestHost, ProxyStrategyDefault}, 1, nil, xfrChannelSize)
+	p := NewProxyServer("", []proxystrategies.ProxyStrategy{proxystrategies.ProxyStrategyDestHost, proxystrategies.ProxyStrategyDefault}, 1, nil, xfrChannelSize)
 
 	p.addBackend(backend1)
 	p.addBackend(backend2)
@@ -461,7 +462,7 @@ func TestAddRemoveBackends_DestHostWithDuplicateIdents(t *testing.T) {
 	backend2, _ := NewBackend(mockAgentConn(ctrl, "agent2", []string{"host=localhost&host=node1.mydomain.com&ipv4=1.2.3.4&ipv6=9878::7675:1292:9183:7562"}))
 	backend3, _ := NewBackend(mockAgentConn(ctrl, "agent3", []string{"host=localhost&host=node2.mydomain.com&ipv4=5.6.7.8&ipv6=::"}))
 
-	p := NewProxyServer("", []ProxyStrategy{ProxyStrategyDestHost, ProxyStrategyDefault}, 1, nil, xfrChannelSize)
+	p := NewProxyServer("", []proxystrategies.ProxyStrategy{proxystrategies.ProxyStrategyDestHost, proxystrategies.ProxyStrategyDefault}, 1, nil, xfrChannelSize)
 
 	p.addBackend(backend1)
 	p.addBackend(backend2)
@@ -518,7 +519,7 @@ func TestEstablishedConnsMetric(t *testing.T) {
 	agent2ConnID2 := new(ProxyClientConnection)
 	agent3ConnID1 := new(ProxyClientConnection)
 
-	p := NewProxyServer("", []ProxyStrategy{ProxyStrategyDefault}, 1, nil, xfrChannelSize)
+	p := NewProxyServer("", []proxystrategies.ProxyStrategy{proxystrategies.ProxyStrategyDefault}, 1, nil, xfrChannelSize)
 	p.addEstablished("agent1", int64(1), agent1ConnID1)
 	assertEstablishedConnsMetric(t, 1)
 	p.addEstablished("agent1", int64(2), agent1ConnID2)
@@ -550,7 +551,7 @@ func TestRemoveEstablishedForBackendConn(t *testing.T) {
 	agent2ConnID1 := &ProxyClientConnection{backend: backend2}
 	agent2ConnID2 := &ProxyClientConnection{backend: backend2}
 	agent3ConnID1 := &ProxyClientConnection{backend: backend3}
-	p := NewProxyServer("", []ProxyStrategy{ProxyStrategyDefault}, 1, nil, xfrChannelSize)
+	p := NewProxyServer("", []proxystrategies.ProxyStrategy{proxystrategies.ProxyStrategyDefault}, 1, nil, xfrChannelSize)
 	p.addEstablished("agent1", int64(1), agent1ConnID1)
 	p.addEstablished("agent1", int64(2), agent1ConnID2)
 	p.addEstablished("agent2", int64(1), agent2ConnID1)
@@ -581,7 +582,7 @@ func TestRemoveEstablishedForStream(t *testing.T) {
 	agent2ConnID1 := &ProxyClientConnection{backend: backend2, frontend: &GrpcFrontend{streamUID: streamUID}}
 	agent2ConnID2 := &ProxyClientConnection{backend: backend2}
 	agent3ConnID1 := &ProxyClientConnection{backend: backend3, frontend: &GrpcFrontend{streamUID: streamUID}}
-	p := NewProxyServer("", []ProxyStrategy{ProxyStrategyDefault}, 1, nil, xfrChannelSize)
+	p := NewProxyServer("", []proxystrategies.ProxyStrategy{proxystrategies.ProxyStrategyDefault}, 1, nil, xfrChannelSize)
 	p.addEstablished("agent1", int64(1), agent1ConnID1)
 	p.addEstablished("agent1", int64(2), agent1ConnID2)
 	p.addEstablished("agent2", int64(1), agent2ConnID1)
@@ -615,14 +616,17 @@ func prepareFrontendConn(ctrl *gomock.Controller) *agentmock.MockAgentService_Co
 	return frontendConn
 }
 
-func prepareAgentConnMD(t testing.TB, ctrl *gomock.Controller, proxyServer *ProxyServer) (*agentmock.MockAgentService_ConnectServer, *Backend) {
+func prepareAgentConnMD(t testing.TB, ctrl *gomock.Controller, proxyServer *ProxyServer, agentidentifiers []string) (*agentmock.MockAgentService_ConnectServer, *Backend) {
 	t.Helper()
+	if agentidentifiers == nil {
+		agentidentifiers = []string{}
+	}
 	// prepare the the connection to agent of proxy-server
 	agentConn := agentmock.NewMockAgentService_ConnectServer(ctrl)
 	agentConnMD := metadata.MD{
 		":authority":       []string{"127.0.0.1:8091"},
 		"agentid":          []string{uuid.New().String()},
-		"agentidentifiers": []string{},
+		"agentidentifiers": agentidentifiers,
 		"content-type":     []string{"application/grpc"},
 		"user-agent":       []string{"grpc-go/1.42.0"},
 	}
@@ -641,7 +645,7 @@ func baseServerProxyTestWithoutBackend(t *testing.T, validate func(*agentmock.Mo
 	defer ctrl.Finish()
 
 	frontendConn := prepareFrontendConn(ctrl)
-	proxyServer := NewProxyServer(uuid.New().String(), []ProxyStrategy{ProxyStrategyDefault}, 1, &AgentTokenAuthenticationOptions{}, xfrChannelSize)
+	proxyServer := NewProxyServer(uuid.New().String(), []proxystrategies.ProxyStrategy{proxystrategies.ProxyStrategyDefault}, 1, &AgentTokenAuthenticationOptions{}, xfrChannelSize)
 
 	validate(frontendConn)
 
@@ -655,9 +659,9 @@ func baseServerProxyTestWithBackend(t *testing.T, validate func(*agentmock.MockA
 	frontendConn := prepareFrontendConn(ctrl)
 
 	// prepare proxy server
-	proxyServer := NewProxyServer(uuid.New().String(), []ProxyStrategy{ProxyStrategyDefault}, 1, &AgentTokenAuthenticationOptions{}, xfrChannelSize)
+	proxyServer := NewProxyServer(uuid.New().String(), []proxystrategies.ProxyStrategy{proxystrategies.ProxyStrategyDefault}, 1, &AgentTokenAuthenticationOptions{}, xfrChannelSize)
 
-	agentConn, _ := prepareAgentConnMD(t, ctrl, proxyServer)
+	agentConn, _ := prepareAgentConnMD(t, ctrl, proxyServer, nil)
 
 	validate(frontendConn, agentConn)
 
@@ -861,14 +865,35 @@ func TestReadyBackendsMetric(t *testing.T) {
 
 	metrics.Metrics.Reset()
 
-	p := NewProxyServer(uuid.New().String(), []ProxyStrategy{ProxyStrategyDefault}, 1, &AgentTokenAuthenticationOptions{}, xfrChannelSize)
+	p := NewProxyServer(uuid.New().String(), []proxystrategies.ProxyStrategy{proxystrategies.ProxyStrategyDefault}, 1, &AgentTokenAuthenticationOptions{}, xfrChannelSize)
 	assertReadyBackendsMetric(t, 0)
 
-	_, backend := prepareAgentConnMD(t, ctrl, p)
+	_, backend := prepareAgentConnMD(t, ctrl, p, nil)
 	assertReadyBackendsMetric(t, 1)
 
 	p.removeBackend(backend)
 	assertReadyBackendsMetric(t, 0)
+}
+
+func TestTotalReadyBackendsMetric(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+
+	metrics.Metrics.Reset()
+
+	p := NewProxyServer(uuid.New().String(), []proxystrategies.ProxyStrategy{proxystrategies.ProxyStrategyDefault, proxystrategies.ProxyStrategyDestHost}, 1, &AgentTokenAuthenticationOptions{}, xfrChannelSize)
+	assertTotalReadyBackendsMetric(t, map[string]int{proxystrategies.ProxyStrategyDefault.String(): 0, proxystrategies.ProxyStrategyDestHost.String(): 0})
+
+	_, backend1 := prepareAgentConnMD(t, ctrl, p, nil)
+	assertTotalReadyBackendsMetric(t, map[string]int{proxystrategies.ProxyStrategyDefault.String(): 1, proxystrategies.ProxyStrategyDestHost.String(): 0})
+
+	// Add a backend with IPv4 agent identifier.
+	_, backend2 := prepareAgentConnMD(t, ctrl, p, []string{"host=localhost"})
+	assertTotalReadyBackendsMetric(t, map[string]int{proxystrategies.ProxyStrategyDefault.String(): 2, proxystrategies.ProxyStrategyDestHost.String(): 1})
+
+	p.removeBackend(backend1)
+	p.removeBackend(backend2)
+	assertTotalReadyBackendsMetric(t, map[string]int{proxystrategies.ProxyStrategyDefault.String(): 0, proxystrategies.ProxyStrategyDestHost.String(): 0})
 }
 
 func dialReqPkt(dialID int64) *client.Packet {
@@ -929,6 +954,13 @@ func assertReadyBackendsMetric(t testing.TB, expect int) {
 	t.Helper()
 	if err := metricstest.DefaultTester.ExpectServerReadyBackends(expect); err != nil {
 		t.Errorf("Expected %d %s metric: %v", expect, "ready_backend_connections", err)
+	}
+}
+
+func assertTotalReadyBackendsMetric(t testing.TB, expect map[string]int) {
+	t.Helper()
+	if err := metricstest.DefaultTester.ExpectServerTotalReadyBackends(expect); err != nil {
+		t.Errorf("Expected %s metric for each proxy strategy %+v, but got error: %v", "ready_backends", expect, err)
 	}
 }
 
