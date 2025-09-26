@@ -1,0 +1,117 @@
+---
+# yaml-language-server: $schema=https://json.schemastore.org/github-workflow.json
+
+name: CI/CD Pipeline
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'cmd/**'
+      - 'konnectivity-client/**'
+      - 'pkg/**'
+      - '.github/workflows/**'
+    tags:
+      - 'v*.*.*'
+  pull_request:
+    branches: [main]
+    paths:
+      - 'cmd/**'
+      - 'konnectivity-client/**'
+      - 'pkg/**'
+      - '.github/workflows/**'
+
+permissions:
+  contents: read
+  pull-requests: read
+  checks: write
+  packages: write
+  security-events: write
+
+jobs:
+  govulncheck:
+    name: Run Go Vulnerability Check
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Go
+        uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+
+      - name: Run govulncheck
+        uses: golang/govulncheck-action@v1
+        with:
+          go-version-file: go.mod
+
+  golangci-lint:
+    name: Run Go Linting
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Go
+        uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+
+      - name: golangci-lint
+        uses: golangci/golangci-lint-action@v6
+        with:
+          version: latest
+          args: --verbose
+
+  docker-build-push:
+    name: Build and Push Docker Image
+    needs: [govulncheck, golangci-lint]
+    # Only run on pushes to main branch or tags (not PRs)
+    if: github.event_name != 'pull_request'
+
+    # Required permissions for OIDC authentication
+    permissions:
+      contents: read
+      id-token: write
+      packages: write
+
+    uses: coreweave/actions/.github/workflows/build-and-push-image.yml@workflows-v2.24.0
+    secrets: inherit
+    with:
+      context: ./
+      dockerfile: ./artifacts/images/agent-build.Dockerfile
+      # Image name
+      # https://cloudsmith.io/~coreweave/packages/?q=proxy-agent
+      # - same name as the upstream image, but we'll distinguish via the tag
+      name: kas-network-proxy/proxy-agent
+
+      # Makefile reference
+      # ${DOCKER_CMD} buildx build . --pull
+#      --output=type=$(OUTPUT_TYPE) # (docker(local), or registry)
+#      --platform linux/$(TARGETARCH)
+#      --build-arg GO_TOOLCHAIN=$(GO_TOOLCHAIN)
+#      --build-arg GO_VERSION=$(GO_VERSION)
+#      --build-arg BUILDARCH=$(BUILDARCH)
+#      --build-arg TARGETARCH=$(TARGETARCH)
+#      --build-arg BASEIMAGE=$(BASEIMAGE)
+#      -f artifacts/images/agent-build.Dockerfile
+#      -t ${AGENT_FULL_IMAGE}-$(TARGETARCH):${TAG}  # set via plugin
+
+      buildx-args: |
+        --platform linux/amd64
+        --sbom=true
+        --GO_TOOLCHAIN=golang
+        --GO_VERSION=1.24.3
+        --BUILDARCH=amd64
+        --TARGETARCH=amd64
+        --BASEIMAGE=gcr.io/distroless/static-debian12:nonroot
+
+      # Image tags based on git reference (tag)
+      tags: |
+        ${{ github.ref_name }}
+        ${{ github.ref_type == 'tag' && 'latest' || github.ref_name }}
+
+      # Push to both registries
+      push-to-cloudsmith: true
+      push-to-ghcr: false
