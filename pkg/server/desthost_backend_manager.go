@@ -79,8 +79,14 @@ func (dibm *DestHostBackendManager) Backend(ctx context.Context) (*Backend, erro
 	if destHost != "" {
 		bes, exist := dibm.backends[destHost]
 		if exist && len(bes) > 0 {
-			klog.V(5).InfoS("Get the backend through the DestHostBackendManager", "destHost", destHost)
-			return dibm.backends[destHost][0], nil
+			// Find a non-draining backend for this destination host
+			for _, backend := range bes {
+				if !backend.IsDraining() {
+					klog.V(5).InfoS("Get the backend through the DestHostBackendManager", "destHost", destHost)
+					return backend, nil
+				}
+			}
+			klog.V(4).InfoS("All backends for destination host are draining", "destHost", destHost)
 		}
 	}
 	return nil, &ErrNotFound{}
