@@ -79,11 +79,11 @@ jobs:
         go-version-file: go.mod
       id: go
     - name: Download prebuilt konnectivity-server image
-      uses: actions/download-artifact@v5
+      uses: actions/download-artifact@v6
       with:
         name: konnectivity-server
     - name: Download prebuilt konnectivity-agent image
-      uses: actions/download-artifact@v5
+      uses: actions/download-artifact@v6
       with:
         name: konnectivity-agent
     - name: Load prebuilt konnectivity images
@@ -187,11 +187,11 @@ jobs:
         # dump the kubeconfig for later
         /usr/local/bin/kind get kubeconfig --name ${{ env.KIND_CLUSTER_NAME}} > _artifacts/kubeconfig.conf
 
-    - uses: actions/download-artifact@v5
+    - uses: actions/download-artifact@v6
       with:
         name: konnectivity-server
 
-    - uses: actions/download-artifact@v5
+    - uses: actions/download-artifact@v6
       with:
         name: konnectivity-agent
 
