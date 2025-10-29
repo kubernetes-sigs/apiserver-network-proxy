@@ -336,7 +336,7 @@ func (p *Proxy) runUDSFrontendServer(ctx context.Context, o *options.ProxyRunOpt
 			"udsFile", o.UdsName,
 		)
 		go runpprof.Do(context.Background(), labels, func(context.Context) { grpcServer.Serve(lis) })
-		stop = func(ctx context.Context) error {
+		stop = func(_ context.Context) error {
 			grpcServer.GracefulStop()
 			return nil
 		}
@@ -407,7 +407,7 @@ func (p *Proxy) getTLSConfig(caFile, certFile, keyFile string, cipherSuites []st
 	return tlsConfig, nil
 }
 
-func (p *Proxy) runMTLSFrontendServer(ctx context.Context, o *options.ProxyRunOptions, s *server.ProxyServer) (StopFunc, error) {
+func (p *Proxy) runMTLSFrontendServer(_ context.Context, o *options.ProxyRunOptions, s *server.ProxyServer) (StopFunc, error) {
 	var stop StopFunc
 
 	var tlsConfig *tls.Config
@@ -434,7 +434,7 @@ func (p *Proxy) runMTLSFrontendServer(ctx context.Context, o *options.ProxyRunOp
 			"port", strconv.Itoa(o.ServerPort),
 		)
 		go runpprof.Do(context.Background(), labels, func(context.Context) { grpcServer.Serve(lis) })
-		stop = func(ctx context.Context) error {
+		stop = func(_ context.Context) error {
 			grpcServer.GracefulStop()
 			return nil
 		}
