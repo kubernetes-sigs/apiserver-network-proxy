@@ -186,7 +186,28 @@ func (p *Proxy) Run(o *options.ProxyRunOptions, stopCh <-chan struct{}) error {
 	}
 
 	<-stopCh
-	klog.V(1).Infoln("Received shutdown signal, initiating graceful shutdown.")
+	klog.V(1).Infoln("Shutting down server.")
+
+	// If graceful shutdown timeout is 0, use the old behavior (immediate shutdown)
+	if o.GracefulShutdownTimeout == 0 {
+		if frontendStop != nil {
+			if err := frontendStop(context.Background()); err != nil {
+				klog.ErrorS(err, "failed to stop frontend server")
+			}
+		}
+		if p.agentServer != nil {
+			p.agentServer.Stop()
+		}
+		if p.adminServer != nil {
+			p.adminServer.Close()
+		}
+		if p.healthServer != nil {
+			p.healthServer.Close()
+		}
+		return nil
+	}
+
+	klog.V(1).Infoln("Initiating graceful shutdown.")
 
 	// Start graceful shutdown with timeout
 	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), o.GracefulShutdownTimeout)
@@ -195,9 +216,21 @@ func (p *Proxy) Run(o *options.ProxyRunOptions, stopCh <-chan struct{}) error {
 	// Create a WaitGroup to track shutdown of all components
 	var wg sync.WaitGroup
 
-	// Shutdown frontend server gracefully (if available)
+	// Add all workers to WaitGroup upfront
 	if frontendStop != nil {
 		wg.Add(1)
+	}
+	wg.Add(3) // agent, admin, health servers
+
+	// Create completion channel before starting goroutines
+	shutdownComplete := make(chan struct{})
+	go func() {
+		wg.Wait()
+		close(shutdownComplete)
+	}()
+
+	// Shutdown frontend server gracefully (if available)
+	if frontendStop != nil {
 		go func() {
 			defer wg.Done()
 			klog.V(1).Infoln("Gracefully stopping frontend server...")
@@ -210,7 +243,6 @@ func (p *Proxy) Run(o *options.ProxyRunOptions, stopCh <-chan struct{}) error {
 	}
 
 	// Shutdown agent server gracefully
-	wg.Add(1)
 	go func() {
 		defer wg.Done()
 		klog.V(1).Infoln("Gracefully stopping agent server...")
@@ -219,20 +251,17 @@ func (p *Proxy) Run(o *options.ProxyRunOptions, stopCh <-chan struct{}) error {
 	}()
 
 	// Shutdown admin server gracefully
-	wg.Add(1)
 	go func() {
 		defer wg.Done()
 		klog.V(1).Infoln("Gracefully stopping admin server...")
 		if err := p.adminServer.Shutdown(shutdownCtx); err != nil {
 			klog.ErrorS(err, "failed to shut down admin server")
-
 		} else {
 			klog.V(1).Infoln("admin server stopped.")
 		}
 	}()
 
 	// Shutdown health server gracefully
-	wg.Add(1)
 	go func() {
 		defer wg.Done()
 		klog.V(1).Infoln("Gracefully stopping health server...")
@@ -244,12 +273,6 @@ func (p *Proxy) Run(o *options.ProxyRunOptions, stopCh <-chan struct{}) error {
 	}()
 
 	// Wait for all servers to shutdown or timeout
-	shutdownComplete := make(chan struct{})
-	go func() {
-		wg.Wait()
-		close(shutdownComplete)
-	}()
-
 	select {
 	case <-shutdownComplete:
 		klog.V(1).Infoln("Graceful shutdown completed successfully.")
@@ -267,8 +290,6 @@ func (p *Proxy) Run(o *options.ProxyRunOptions, stopCh <-chan struct{}) error {
 		}
 		// frontend server's force-stop is handled by its StopFunc
 	}
-
-	klog.V(1).Infoln("Server shutdown complete.")
 
 	return nil
 }
