@@ -157,8 +157,9 @@ func (p *Proxy) Run(o *options.ProxyRunOptions, stopCh <-chan struct{}) error {
 		return err
 	}
 
+	var leaseController *leases.Controller
 	if o.EnableLeaseController {
-		leaseController := leases.NewController(
+		leaseController = leases.NewController(
 			k8sClient,
 			o.ServerID,
 			int32(LeaseDuration.Seconds()),
@@ -170,7 +171,6 @@ func (p *Proxy) Run(o *options.ProxyRunOptions, stopCh <-chan struct{}) error {
 		)
 		klog.V(1).Infoln("Starting lease acquisition and garbage collection controller.")
 		leaseController.Run(ctx)
-		defer leaseController.Stop()
 	}
 
 	klog.V(1).Infoln("Starting admin server for debug connections.")
@@ -203,6 +203,9 @@ func (p *Proxy) Run(o *options.ProxyRunOptions, stopCh <-chan struct{}) error {
 		}
 		if p.healthServer != nil {
 			p.healthServer.Close()
+		}
+		if leaseController != nil {
+			leaseController.Stop()
 		}
 		return nil
 	}
@@ -289,6 +292,12 @@ func (p *Proxy) Run(o *options.ProxyRunOptions, stopCh <-chan struct{}) error {
 			p.healthServer.Close()
 		}
 		// frontend server's force-stop is handled by its StopFunc
+	}
+
+	// Stop lease controller after servers have shut down
+	if leaseController != nil {
+		klog.V(1).Infoln("Stopping lease controller.")
+		leaseController.Stop()
 	}
 
 	return nil
