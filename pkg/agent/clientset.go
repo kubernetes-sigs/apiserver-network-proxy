@@ -255,6 +255,14 @@ func (cs *ClientSet) sync() {
 }
 
 func (cs *ClientSet) connectOnce() error {
+	// Skip establishing new connections if draining
+	select {
+	case <-cs.drainCh:
+		klog.V(2).InfoS("Skipping connectOnce - agent is draining")
+		return nil
+	default:
+	}
+
 	serverCount := cs.determineServerCount()
 
 	// If not in syncForever mode, we only connect if we have fewer connections than the server count.

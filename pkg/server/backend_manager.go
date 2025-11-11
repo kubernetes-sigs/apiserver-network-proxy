@@ -366,6 +366,8 @@ func (s *DefaultBackendStorage) GetRandomBackend() (*Backend, error) {
 		return nil, &ErrNotFound{}
 	}
 
+	var firstDrainingBackend *Backend
+
 	// Start at a random agent and check each agent in sequence
 	startIdx := s.random.Intn(len(s.agentIDs))
 	for i := 0; i < len(s.agentIDs); i++ {
@@ -380,9 +382,19 @@ func (s *DefaultBackendStorage) GetRandomBackend() (*Backend, error) {
 			klog.V(3).InfoS("Pick agent as backend", "agentID", agentID)
 			return backend, nil
 		}
+
+		// Keep track of first draining backend as fallback
+		if firstDrainingBackend == nil {
+			firstDrainingBackend = backend
+		}
 	}
 
-	// All agents are draining
-	klog.V(2).InfoS("No non-draining backends available")
+	// All agents are draining, use one as fallback
+	if firstDrainingBackend != nil {
+		agentID := firstDrainingBackend.id
+		klog.V(2).InfoS("No non-draining backends available, using draining backend as fallback", "agentID", agentID)
+		return firstDrainingBackend, nil
+	}
+
 	return nil, &ErrNotFound{}
 }
