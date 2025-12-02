@@ -184,6 +184,7 @@ func (c *ProxyClientConnection) send(pkt *client.Packet) error {
 					},
 					Proto:      "HTTP/1.1",
 					ProtoMinor: 1,
+					ProtoMajor: 1,
 				}
 
 				t.Write(c.HTTP)
