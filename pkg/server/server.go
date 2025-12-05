@@ -554,7 +554,7 @@ func (s *ProxyServer) serveRecvFrontend(frontend *GrpcFrontend, recvCh <-chan *c
 	defer func() {
 		klog.V(5).InfoS("Close frontend streaming", "connectionID", firstConnID, "streamUID", frontend.streamUID)
 		if backend == nil {
-			klog.V(2).InfoS("Streaming closed before backend intialized")
+			klog.V(2).InfoS("Streaming closed before backend initialized")
 		}
 
 		// As the read side of the recvCh channel, we cannot close it.
