@@ -95,7 +95,7 @@ type Proxy struct {
 	server *server.ProxyServer
 }
 
-type StopFunc func()
+type StopFunc func(context.Context) error
 
 func (p *Proxy) Run(o *options.ProxyRunOptions, stopCh <-chan struct{}) error {
 	o.Print()
@@ -145,24 +145,21 @@ func (p *Proxy) Run(o *options.ProxyRunOptions, stopCh <-chan struct{}) error {
 	if err != nil {
 		return fmt.Errorf("failed to run the frontend server: %v", err)
 	}
-	if frontendStop != nil {
-		defer frontendStop()
-	}
 
 	klog.V(1).Infoln("Starting agent server for tunnel connections.")
 	err = p.runAgentServer(o, p.server)
 	if err != nil {
 		return fmt.Errorf("failed to run the agent server: %v", err)
 	}
-	defer p.agentServer.Stop()
 
 	labels, err := util.ParseLabels(o.LeaseLabel)
 	if err != nil {
 		return err
 	}
 
+	var leaseController *leases.Controller
 	if o.EnableLeaseController {
-		leaseController := leases.NewController(
+		leaseController = leases.NewController(
 			k8sClient,
 			o.ServerID,
 			int32(LeaseDuration.Seconds()),
@@ -174,7 +171,6 @@ func (p *Proxy) Run(o *options.ProxyRunOptions, stopCh <-chan struct{}) error {
 		)
 		klog.V(1).Infoln("Starting lease acquisition and garbage collection controller.")
 		leaseController.Run(ctx)
-		defer leaseController.Stop()
 	}
 
 	klog.V(1).Infoln("Starting admin server for debug connections.")
@@ -182,17 +178,127 @@ func (p *Proxy) Run(o *options.ProxyRunOptions, stopCh <-chan struct{}) error {
 	if err != nil {
 		return fmt.Errorf("failed to run the admin server: %v", err)
 	}
-	defer p.adminServer.Close()
 
 	klog.V(1).Infoln("Starting health server for healthchecks.")
 	err = p.runHealthServer(o, p.server)
 	if err != nil {
 		return fmt.Errorf("failed to run the health server: %v", err)
 	}
-	defer p.healthServer.Close()
 
 	<-stopCh
 	klog.V(1).Infoln("Shutting down server.")
+
+	// If graceful shutdown timeout is 0, use the old behavior (immediate shutdown)
+	if o.GracefulShutdownTimeout == 0 {
+		if frontendStop != nil {
+			if err := frontendStop(context.Background()); err != nil {
+				klog.ErrorS(err, "failed to stop frontend server")
+			}
+		}
+		if p.agentServer != nil {
+			p.agentServer.Stop()
+		}
+		if p.adminServer != nil {
+			p.adminServer.Close()
+		}
+		if p.healthServer != nil {
+			p.healthServer.Close()
+		}
+		if leaseController != nil {
+			leaseController.Stop()
+		}
+		return nil
+	}
+
+	klog.V(1).Infoln("Initiating graceful shutdown.")
+
+	// Start graceful shutdown with timeout
+	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), o.GracefulShutdownTimeout)
+	defer shutdownCancel()
+
+	// Create a WaitGroup to track shutdown of all components
+	var wg sync.WaitGroup
+
+	// Add all workers to WaitGroup upfront
+	if frontendStop != nil {
+		wg.Add(1)
+	}
+	wg.Add(3) // agent, admin, health servers
+
+	// Create completion channel before starting goroutines
+	shutdownComplete := make(chan struct{})
+	go func() {
+		wg.Wait()
+		close(shutdownComplete)
+	}()
+
+	// Shutdown frontend server gracefully (if available)
+	if frontendStop != nil {
+		go func() {
+			defer wg.Done()
+			klog.V(1).Infoln("Gracefully stopping frontend server...")
+			if err := frontendStop(shutdownCtx); err != nil {
+				klog.ErrorS(err, "failed to shut down frontend server")
+			} else {
+				klog.V(1).Infoln("frontend server stopped.")
+			}
+		}()
+	}
+
+	// Shutdown agent server gracefully
+	go func() {
+		defer wg.Done()
+		klog.V(1).Infoln("Gracefully stopping agent server...")
+		p.agentServer.GracefulStop()
+		klog.V(1).Infoln("agent server stopped.")
+	}()
+
+	// Shutdown admin server gracefully
+	go func() {
+		defer wg.Done()
+		klog.V(1).Infoln("Gracefully stopping admin server...")
+		if err := p.adminServer.Shutdown(shutdownCtx); err != nil {
+			klog.ErrorS(err, "failed to shut down admin server")
+		} else {
+			klog.V(1).Infoln("admin server stopped.")
+		}
+	}()
+
+	// Shutdown health server gracefully
+	go func() {
+		defer wg.Done()
+		klog.V(1).Infoln("Gracefully stopping health server...")
+		if err := p.healthServer.Shutdown(shutdownCtx); err != nil {
+			klog.ErrorS(err, "failed to shut down health server")
+		} else {
+			klog.V(1).Infoln("health server stopped.")
+		}
+	}()
+
+	// Wait for all servers to shutdown or timeout
+	select {
+	case <-shutdownComplete:
+		klog.V(1).Infoln("Graceful shutdown completed successfully.")
+	case <-shutdownCtx.Done():
+		klog.Warningf("Graceful shutdown timed out after %v, forcing termination.", o.GracefulShutdownTimeout)
+		// Force stop all servers that might still be running
+		if p.agentServer != nil {
+			p.agentServer.Stop()
+		}
+		if p.adminServer != nil {
+			p.adminServer.Close()
+		}
+		if p.healthServer != nil {
+			p.healthServer.Close()
+		}
+		// frontend server's force-stop is handled by its StopFunc
+	}
+
+	// Stop lease controller after servers have shut down
+	if leaseController != nil {
+		klog.V(1).Infoln("Stopping lease controller.")
+		leaseController.Stop()
+	}
 
 	return nil
 }
@@ -260,7 +366,10 @@ func (p *Proxy) runUDSFrontendServer(ctx context.Context, o *options.ProxyRunOpt
 			"udsFile", o.UdsName,
 		)
 		go runpprof.Do(context.Background(), labels, func(context.Context) { grpcServer.Serve(lis) })
-		stop = grpcServer.GracefulStop
+		stop = func(_ context.Context) error {
+			grpcServer.GracefulStop()
+			return nil
+		}
 	} else {
 		// http-connect
 		server := &http.Server{
@@ -269,9 +378,8 @@ func (p *Proxy) runUDSFrontendServer(ctx context.Context, o *options.ProxyRunOpt
 				Server: s,
 			},
 		}
-		stop = func() {
-			err := server.Shutdown(ctx)
-			klog.ErrorS(err, "error shutting down server")
+		stop = func(shutdownCtx context.Context) error {
+			return server.Shutdown(shutdownCtx)
 		}
 		labels := runpprof.Labels(
 			"core", "udsHttpFrontend",
@@ -329,7 +437,7 @@ func (p *Proxy) getTLSConfig(caFile, certFile, keyFile string, cipherSuites []st
 	return tlsConfig, nil
 }
 
-func (p *Proxy) runMTLSFrontendServer(ctx context.Context, o *options.ProxyRunOptions, s *server.ProxyServer) (StopFunc, error) {
+func (p *Proxy) runMTLSFrontendServer(_ context.Context, o *options.ProxyRunOptions, s *server.ProxyServer) (StopFunc, error) {
 	var stop StopFunc
 
 	var tlsConfig *tls.Config
@@ -356,7 +464,10 @@ func (p *Proxy) runMTLSFrontendServer(ctx context.Context, o *options.ProxyRunOp
 			"port", strconv.Itoa(o.ServerPort),
 		)
 		go runpprof.Do(context.Background(), labels, func(context.Context) { grpcServer.Serve(lis) })
-		stop = grpcServer.GracefulStop
+		stop = func(_ context.Context) error {
+			grpcServer.GracefulStop()
+			return nil
+		}
 	} else {
 		// http-connect
 		server := &http.Server{
@@ -368,11 +479,8 @@ func (p *Proxy) runMTLSFrontendServer(ctx context.Context, o *options.ProxyRunOp
 			},
 			TLSNextProto: make(map[string]func(*http.Server, *tls.Conn, http.Handler)),
 		}
-		stop = func() {
-			err := server.Shutdown(ctx)
-			if err != nil {
-				klog.ErrorS(err, "failed to shutdown server")
-			}
+		stop = func(shutdownCtx context.Context) error {
+			return server.Shutdown(shutdownCtx)
 		}
 		labels := runpprof.Labels(
 			"core", "mtlsHttpFrontend",
