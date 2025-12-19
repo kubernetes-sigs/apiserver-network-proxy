@@ -63,6 +63,7 @@ func TestDefaultServerOptions(t *testing.T) {
 	assertDefaultValue(t, "CipherSuites", defaultServerOptions.CipherSuites, make([]string, 0))
 	assertDefaultValue(t, "XfrChannelSize", defaultServerOptions.XfrChannelSize, 10)
 	assertDefaultValue(t, "APIContentType", defaultServerOptions.APIContentType, "application/vnd.kubernetes.protobuf")
+	assertDefaultValue(t, "GracefulShutdownTimeout", defaultServerOptions.GracefulShutdownTimeout, 0*time.Second)
 
 }
 
@@ -168,6 +169,21 @@ func TestValidate(t *testing.T) {
 			value:    -10,
 			expected: fmt.Errorf("channel size -10 must be greater than 0"),
 		},
+		"NegativeGracefulShutdownTimeout": {
+			field:    "GracefulShutdownTimeout",
+			value:    -1 * time.Second,
+			expected: fmt.Errorf("graceful-shutdown-timeout must be >= 0, got -1s"),
+		},
+		"ZeroGracefulShutdownTimeout": {
+			field:    "GracefulShutdownTimeout",
+			value:    0 * time.Second,
+			expected: nil,
+		},
+		"PositiveGracefulShutdownTimeout": {
+			field:    "GracefulShutdownTimeout",
+			value:    30 * time.Second,
+			expected: nil,
+		},
 	} {
 		t.Run(desc, func(t *testing.T) {
 			testServerOptions := NewProxyRunOptions()
@@ -184,6 +200,10 @@ func TestValidate(t *testing.T) {
 				case reflect.Int:
 					ivalue := tc.value.(int)
 					fv.SetInt(int64(ivalue))
+				case reflect.Int64:
+					if duration, ok := tc.value.(time.Duration); ok {
+						fv.SetInt(int64(duration))
+					}
 				}
 			}
 			actual := testServerOptions.Validate()
