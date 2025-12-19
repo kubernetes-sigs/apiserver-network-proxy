@@ -29,6 +29,22 @@ import (
 	"sigs.k8s.io/apiserver-network-proxy/pkg/server/metrics"
 )
 
+const (
+	// bufferSize is the size of the buffer used for reading from the hijacked connection.
+	// It matches the gRPC window size for optimal performance.
+	bufferSize = 1 << 15 // 32KB
+)
+
+// bufferPool is a pool of byte slices used for reading data from hijacked connections.
+// This reduces memory allocations and GC pressure by reusing buffers across connections.
+var bufferPool = sync.Pool{
+	New: func() interface{} {
+		// Allocate a new buffer when the pool is empty
+		buf := make([]byte, bufferSize)
+		return &buf
+	},
+}
+
 // Tunnel implements Proxy based on HTTP Connect, which tunnels the traffic to
 // the agent registered in ProxyServer.
 type Tunnel struct {
@@ -176,7 +192,14 @@ func (t *Tunnel) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	agentID := connection.agentID
 	klog.V(3).InfoS("Starting proxy to host", "host", r.Host, "agentID", agentID, "connectionID", connID)
 
-	pkt := make([]byte, 1<<15) // Match GRPC Window size
+	// Get a buffer from the pool
+	bufPtr := bufferPool.Get().(*[]byte)
+	pkt := *bufPtr
+	defer func() {
+		// Return the buffer to the pool when done
+		bufferPool.Put(bufPtr)
+	}()
+
 	var acc int
 
 	for {
