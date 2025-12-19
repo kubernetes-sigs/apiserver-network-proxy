@@ -49,6 +49,25 @@ type Backend struct {
 	// cached from conn.Context()
 	id     string
 	idents header.Identifiers
+
+	// draining indicates if this backend is draining and should not accept new connections
+	draining bool
+	// mu protects draining field
+	mu sync.RWMutex
+}
+
+// IsDraining returns true if the backend is draining
+func (b *Backend) IsDraining() bool {
+	b.mu.RLock()
+	defer b.mu.RUnlock()
+	return b.draining
+}
+
+// SetDraining marks the backend as draining
+func (b *Backend) SetDraining() {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	b.draining = true
 }
 
 func (b *Backend) Send(p *client.Packet) error {
@@ -346,9 +365,36 @@ func (s *DefaultBackendStorage) GetRandomBackend() (*Backend, error) {
 	if len(s.backends) == 0 {
 		return nil, &ErrNotFound{}
 	}
-	agentID := s.agentIDs[s.random.Intn(len(s.agentIDs))]
-	klog.V(3).InfoS("Pick agent as backend", "agentID", agentID)
-	// always return the first connection to an agent, because the agent
-	// will close later connections if there are multiple.
-	return s.backends[agentID][0], nil
+
+	var firstDrainingBackend *Backend
+
+	// Start at a random agent and check each agent in sequence
+	startIdx := s.random.Intn(len(s.agentIDs))
+	for i := 0; i < len(s.agentIDs); i++ {
+		// Wrap around using modulo
+		currentIdx := (startIdx + i) % len(s.agentIDs)
+		agentID := s.agentIDs[currentIdx]
+		// always return the first connection to an agent, because the agent
+		// will close later connections if there are multiple.
+		backend := s.backends[agentID][0]
+
+		if !backend.IsDraining() {
+			klog.V(3).InfoS("Pick agent as backend", "agentID", agentID)
+			return backend, nil
+		}
+
+		// Keep track of first draining backend as fallback
+		if firstDrainingBackend == nil {
+			firstDrainingBackend = backend
+		}
+	}
+
+	// All agents are draining, use one as fallback
+	if firstDrainingBackend != nil {
+		agentID := firstDrainingBackend.id
+		klog.V(2).InfoS("No non-draining backends available, using draining backend as fallback", "agentID", agentID)
+		return firstDrainingBackend, nil
+	}
+
+	return nil, &ErrNotFound{}
 }
