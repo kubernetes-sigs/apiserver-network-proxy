@@ -40,12 +40,12 @@ jobs:
         docker tag gcr.io/k8s-staging-kas-network-proxy/proxy-server-amd64:local gcr.io/k8s-staging-kas-network-proxy/proxy-server:master
         docker save gcr.io/k8s-staging-kas-network-proxy/proxy-server:master > _output/konnectivity-server.tar
 
-    - uses: actions/upload-artifact@v4
+    - uses: actions/upload-artifact@v6
       with:
         name: konnectivity-server
         path: _output/konnectivity-server.tar
 
-    - uses: actions/upload-artifact@v4
+    - uses: actions/upload-artifact@v6
       with:
         name: konnectivity-agent
         path: _output/konnectivity-agent.tar
@@ -267,7 +267,7 @@ jobs:
 
     - name: Upload Junit Reports
       if: always()
-      uses: actions/upload-artifact@v4
+      uses: actions/upload-artifact@v6
       with:
         name: kind-junit-${{ env.JOB_NAME }}-${{ matrix.k8s }}-${{ matrix.ipFamily }}-${{ github.run_id }}
         path: './_artifacts/*.xml'
@@ -279,7 +279,7 @@ jobs:
 
     - name: Upload logs
       if: always()
-      uses: actions/upload-artifact@v4
+      uses: actions/upload-artifact@v6
       with:
         name: kind-logs-${{ env.JOB_NAME }}-${{ matrix.k8s }}-${{ matrix.ipFamily }}-${{ github.run_id }}
         path: ./_artifacts/logs
