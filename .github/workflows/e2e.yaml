@@ -63,7 +63,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        k8s: [ v1.32.0, v1.33.2, v1.34.0 ]
+        k8s: [ v1.33.2, v1.34.0, v1.35.1 ]
         connection-mode: [ grpc, http-connect ]
     steps:
     - name: Install kind
