@@ -95,7 +95,7 @@ func (dibm *DestHostBackendManager) Backend(ctx context.Context) (*Backend, erro
 
 			// All backends for this destination are draining, use one as fallback
 			if firstDrainingBackend != nil {
-				klog.V(4).InfoS("All backends for destination host are draining, using one as fallback", "destHost", destHost)
+				klog.V(3).InfoS("All backends for destination host are draining, using one as fallback", "destHost", destHost)
 				return firstDrainingBackend, nil
 			}
 		}

@@ -23,6 +23,7 @@ import (
 	"math/rand"
 	"slices"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"google.golang.org/grpc/metadata"
@@ -51,23 +52,17 @@ type Backend struct {
 	idents header.Identifiers
 
 	// draining indicates if this backend is draining and should not accept new connections
-	draining bool
-	// mu protects draining field
-	mu sync.RWMutex
+	draining atomic.Bool
 }
 
 // IsDraining returns true if the backend is draining
 func (b *Backend) IsDraining() bool {
-	b.mu.RLock()
-	defer b.mu.RUnlock()
-	return b.draining
+	return b.draining.Load()
 }
 
 // SetDraining marks the backend as draining
 func (b *Backend) SetDraining() {
-	b.mu.Lock()
-	defer b.mu.Unlock()
-	b.draining = true
+	b.draining.Store(true)
 }
 
 func (b *Backend) Send(p *client.Packet) error {
@@ -392,7 +387,7 @@ func (s *DefaultBackendStorage) GetRandomBackend() (*Backend, error) {
 	// All agents are draining, use one as fallback
 	if firstDrainingBackend != nil {
 		agentID := firstDrainingBackend.id
-		klog.V(2).InfoS("No non-draining backends available, using draining backend as fallback", "agentID", agentID)
+		klog.V(3).InfoS("No non-draining backends available, using draining backend as fallback", "agentID", agentID)
 		return firstDrainingBackend, nil
 	}
 
