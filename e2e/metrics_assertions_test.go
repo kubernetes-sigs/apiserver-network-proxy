@@ -22,6 +22,7 @@ import (
 	"testing"
 
 	"github.com/prometheus/common/expfmt"
+	"github.com/prometheus/common/model"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/client-go/rest"
 	"sigs.k8s.io/e2e-framework/klient/k8s/resources"
@@ -48,7 +49,7 @@ func getMetricsGaugeValue(restCfg *rest.Config, namespace string, podName string
 		return 0, fmt.Errorf("got invalid response from metrics endpoint %q, status code %v: %v", url, resp.StatusCode, string(body))
 	}
 
-	metricsParser := &expfmt.TextParser{}
+	metricsParser := expfmt.NewTextParser(model.UTF8Validation)
 	metricsFamilies, err := metricsParser.TextToMetricFamilies(resp.Body)
 	if err != nil {
 		return 0, fmt.Errorf("could not parse metrics: %w", err)
