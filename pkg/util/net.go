@@ -18,6 +18,7 @@ package util
 
 import (
 	"crypto/tls"
+	"fmt"
 	"strings"
 )
 
@@ -57,4 +58,26 @@ func GetAcceptedCiphers() map[string]uint16 {
 		acceptedCiphers[v.Name] = v.ID
 	}
 	return acceptedCiphers
+}
+
+// tlsVersions maps TLS version name strings to their crypto/tls constant values.
+var tlsVersions = map[string]uint16{
+	"VersionTLS10": tls.VersionTLS10,
+	"VersionTLS11": tls.VersionTLS11,
+	"VersionTLS12": tls.VersionTLS12,
+	"VersionTLS13": tls.VersionTLS13,
+}
+
+// GetTLSVersion returns the TLS version ID for the given version name.
+// If the name is empty, it returns the default (TLS 1.2).
+// Returns an error if the name is not recognized.
+func GetTLSVersion(versionName string) (uint16, error) {
+	if versionName == "" {
+		return tls.VersionTLS12, nil
+	}
+	version, ok := tlsVersions[versionName]
+	if !ok {
+		return 0, fmt.Errorf("unsupported TLS version %q, supported values are: VersionTLS10, VersionTLS11, VersionTLS12, VersionTLS13", versionName)
+	}
+	return version, nil
 }
