@@ -226,10 +226,10 @@ func (cs *ClientSet) sync() {
 				klog.V(4).InfoS("duplicate server", "serverID", dse.ServerID, "serverCount", serverCount, "clientsCount", clientsCount)
 				if serverCount != 0 && clientsCount >= serverCount {
 					duration = backoff.Step()
-				} else {
-					backoff = cs.resetBackoff()
-					duration = wait.Jitter(backoff.Duration, backoff.Jitter)
 				}
+				// When clientsCount < serverCount, we need a new connection.
+				// Leave duration at 0 to retry immediately without delay,
+				// allowing fast reconnection via DNS load balancing.
 			} else {
 				klog.ErrorS(err, "cannot connect once")
 				duration = backoff.Step()
