@@ -92,51 +92,54 @@ func (lc *ServerLeaseCounter) Count() int {
 
 func NewLeaseInformerWithMetrics(client kubernetes.Interface, namespace string, resyncPeriod time.Duration) cache.SharedIndexInformer {
 	return cache.NewSharedIndexInformer(
-		&cache.ListWatch{
-			ListFunc: func(options metav1.ListOptions) (runtime.Object, error) {
-				start := time.Now()
-				httpCode := 200
-				defer func() {
-					latency := time.Now().Sub(start)
-					metrics.Metrics.ObserveLeaseListLatency(latency, httpCode)
-				}()
-				obj, err := client.CoordinationV1().Leases(namespace).List(context.TODO(), options)
-				if err != nil {
-					klog.Errorf("Could not list leases: %v", err)
+		cache.ToListWatcherWithWatchListSemantics(
+			&cache.ListWatch{
+				ListFunc: func(options metav1.ListOptions) (runtime.Object, error) {
+					start := time.Now()
+					httpCode := 200
+					defer func() {
+						latency := time.Since(start)
+						metrics.Metrics.ObserveLeaseListLatency(latency, httpCode)
+					}()
+					obj, err := client.CoordinationV1().Leases(namespace).List(context.TODO(), options)
+					if err != nil {
+						klog.Errorf("Could not list leases: %v", err)
 
-					var apiStatus apierrors.APIStatus
-					if errors.As(err, &apiStatus) {
-						status := apiStatus.Status()
-						httpCode = int(status.Code)
-						metrics.Metrics.ObserveLeaseList(int(status.Code), string(status.Reason))
-					} else {
-						klog.Errorf("Lease list error could not be logged to metrics as it is not an APIStatus: %v", err)
+						var apiStatus apierrors.APIStatus
+						if errors.As(err, &apiStatus) {
+							status := apiStatus.Status()
+							httpCode = int(status.Code)
+							metrics.Metrics.ObserveLeaseList(int(status.Code), string(status.Reason))
+						} else {
+							klog.Errorf("Lease list error could not be logged to metrics as it is not an APIStatus: %v", err)
+						}
+						return nil, err
 					}
-					return nil, err
-				}
 
-				metrics.Metrics.ObserveLeaseList(200, "")
-				return obj, nil
-			},
-			WatchFunc: func(options metav1.ListOptions) (watch.Interface, error) {
-				obj, err := client.CoordinationV1().Leases(namespace).Watch(context.TODO(), options)
-				if err != nil {
-					klog.Errorf("Could not watch leases: %v", err)
+					metrics.Metrics.ObserveLeaseList(200, "")
+					return obj, nil
+				},
+				WatchFunc: func(options metav1.ListOptions) (watch.Interface, error) {
+					obj, err := client.CoordinationV1().Leases(namespace).Watch(context.TODO(), options)
+					if err != nil {
+						klog.Errorf("Could not watch leases: %v", err)
 
-					var apiStatus apierrors.APIStatus
-					if errors.As(err, &apiStatus) {
-						status := apiStatus.Status()
-						metrics.Metrics.ObserveLeaseWatch(int(status.Code), string(status.Reason))
-					} else {
-						klog.Errorf("Lease watch error could not be logged to metrics as it is not an APIStatus: %v", err)
+						var apiStatus apierrors.APIStatus
+						if errors.As(err, &apiStatus) {
+							status := apiStatus.Status()
+							metrics.Metrics.ObserveLeaseWatch(int(status.Code), string(status.Reason))
+						} else {
+							klog.Errorf("Lease watch error could not be logged to metrics as it is not an APIStatus: %v", err)
+						}
+						return nil, err
 					}
-					return nil, err
-				}
 
-				metrics.Metrics.ObserveLeaseWatch(200, "")
-				return obj, nil
+					metrics.Metrics.ObserveLeaseWatch(200, "")
+					return obj, nil
+				},
 			},
-		},
+			client,
+		),
 		&coordinationv1api.Lease{},
 		resyncPeriod,
 		cache.Indexers{cache.NamespaceIndex: cache.MetaNamespaceIndexFunc},
