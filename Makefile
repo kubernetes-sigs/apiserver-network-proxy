@@ -24,7 +24,7 @@ ALL_ARCH ?= amd64 arm arm64 ppc64le s390x
 # The output type could either be docker (local), or registry.
 OUTPUT_TYPE ?= docker
 GO_TOOLCHAIN ?= golang
-GO_VERSION ?= 1.25.7
+GO_VERSION ?= 1.25.8
 BASEIMAGE ?= gcr.io/distroless/static-debian12:nonroot
 
 ifeq ($(GOPATH),)
@@ -59,7 +59,7 @@ KIND_IMAGE ?= kindest/node:v1.30.2
 CONNECTION_MODE ?= grpc
 
 MOCKGEN_VERSION := $(shell mockgen -version)
-DESIRED_MOCKGEN := "v0.5.2"
+DESIRED_MOCKGEN := "v0.6.0"
 
 ## --------------------------------------
 ## Testing
