@@ -365,7 +365,7 @@ func (p *Proxy) runUDSFrontendServer(ctx context.Context, o *options.ProxyRunOpt
 			"core", "udsGrpcFrontend",
 			"udsFile", o.UdsName,
 		)
-		go runpprof.Do(context.Background(), labels, func(context.Context) { grpcServer.Serve(lis) })
+		go runpprof.Do(ctx, labels, func(context.Context) { grpcServer.Serve(lis) })
 		stop = func(_ context.Context) error {
 			grpcServer.GracefulStop()
 			return nil
@@ -437,7 +437,7 @@ func (p *Proxy) getTLSConfig(caFile, certFile, keyFile string, cipherSuites []st
 	return tlsConfig, nil
 }
 
-func (p *Proxy) runMTLSFrontendServer(_ context.Context, o *options.ProxyRunOptions, s *server.ProxyServer) (StopFunc, error) {
+func (p *Proxy) runMTLSFrontendServer(ctx context.Context, o *options.ProxyRunOptions, s *server.ProxyServer) (StopFunc, error) {
 	var stop StopFunc
 
 	var tlsConfig *tls.Config
@@ -463,7 +463,7 @@ func (p *Proxy) runMTLSFrontendServer(_ context.Context, o *options.ProxyRunOpti
 			"core", "mtlsGrpcFrontend",
 			"port", strconv.Itoa(o.ServerPort),
 		)
-		go runpprof.Do(context.Background(), labels, func(context.Context) { grpcServer.Serve(lis) })
+		go runpprof.Do(ctx, labels, func(context.Context) { grpcServer.Serve(lis) })
 		stop = func(_ context.Context) error {
 			grpcServer.GracefulStop()
 			return nil
@@ -486,7 +486,7 @@ func (p *Proxy) runMTLSFrontendServer(_ context.Context, o *options.ProxyRunOpti
 			"core", "mtlsHttpFrontend",
 			"port", strconv.Itoa(o.ServerPort),
 		)
-		go runpprof.Do(context.Background(), labels, func(context.Context) {
+		go runpprof.Do(ctx, labels, func(context.Context) {
 			err := server.ListenAndServeTLS("", "") // empty files defaults to tlsConfig
 			if err != nil {
 				klog.ErrorS(err, "failed to listen on frontend port")
