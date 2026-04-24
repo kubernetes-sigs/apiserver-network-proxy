@@ -24,11 +24,12 @@ import (
 	"go.uber.org/mock/gomock"
 	"google.golang.org/grpc/metadata"
 
+	client "sigs.k8s.io/apiserver-network-proxy/konnectivity-client/proto/client"
 	agentmock "sigs.k8s.io/apiserver-network-proxy/proto/agent/mocks"
 )
 
-func mockAgentConn(ctrl *gomock.Controller, agentID string, agentIdentifiers []string) *agentmock.MockAgentService_ConnectServer {
-	agentConn := agentmock.NewMockAgentService_ConnectServer(ctrl)
+func mockAgentConn(ctrl *gomock.Controller, agentID string, agentIdentifiers []string) *agentmock.MockAgentService_ConnectServer[client.Packet, client.Packet] {
+	agentConn := agentmock.NewMockAgentService_ConnectServer[client.Packet, client.Packet](ctrl)
 	agentConnMD := metadata.MD{
 		":authority":       []string{"127.0.0.1:8091"},
 		"agentid":          []string{agentID},
@@ -85,8 +86,7 @@ func TestNewBackend(t *testing.T) {
 
 	for _, tc := range testCases {
 		t.Run(tc.desc, func(t *testing.T) {
-
-			agentConn := agentmock.NewMockAgentService_ConnectServer(ctrl)
+			agentConn := agentmock.NewMockAgentService_ConnectServer[client.Packet, client.Packet](ctrl)
 			agentConnMD := metadata.MD{
 				":authority":       []string{"127.0.0.1:8091"},
 				"agentid":          tc.ids,

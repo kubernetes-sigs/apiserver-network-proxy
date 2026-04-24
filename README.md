@@ -63,19 +63,19 @@ The [```mockgen```](https://github.com/uber-go/mock) tool must be installed on y
 
 Currently, we are using go.uber.org/mock/mockgen@v0.5.2
 
-`go install go.uber.org/mock/mockgen@v0.5.2`
+`go install go.uber.org/mock/mockgen@v0.6.0`
 
 ### Protoc
 
 Proto definitions are compiled with `protoc`. Please ensure you have protoc installed ([Instructions](https://grpc.io/docs/languages/go/quickstart/)) and the `protoc-gen-go` and `protoc-gen-go-grpc` libraries at the appropriate version.
 
-Currently, we are using protoc-gen-go@v1.27.1
+Currently, we are using protoc-gen-go@v1.35.1
 
-`go install google.golang.org/protobuf/cmd/protoc-gen-go@v1.27.1`
+`go install google.golang.org/protobuf/cmd/protoc-gen-go@v1.35.1`
 
-Currently, we are using protoc-gen-go-grpc@v1.2
+Currently, we are using protoc-gen-go-grpc@v1.5.1
 
-`go install google.golang.org/grpc/cmd/protoc-gen-go-grpc@v1.2`
+`go install google.golang.org/grpc/cmd/protoc-gen-go-grpc@v1.5.1`
 
 ### Local builds
 
