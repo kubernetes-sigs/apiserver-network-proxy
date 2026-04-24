@@ -383,3 +383,132 @@ func TestDestHostBackendManager_WithDuplicateIdents(t *testing.T) {
 		t.Errorf("expected %v, got %v", e, a)
 	}
 }
+
+func TestDefaultBackendManager_GetRandomBackend_DrainingFallback(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+
+	backend1, _ := NewBackend(mockAgentConn(ctrl, "agent1", []string{}))
+	backend2, _ := NewBackend(mockAgentConn(ctrl, "agent2", []string{}))
+	backend3, _ := NewBackend(mockAgentConn(ctrl, "agent3", []string{}))
+
+	p := NewDefaultBackendManager()
+
+	// Test 1: Empty backend manager returns ErrNotFound
+	_, err := p.Backend(context.Background())
+	if _, ok := err.(*ErrNotFound); !ok {
+		t.Errorf("expected ErrNotFound, got %v", err)
+	}
+
+	// Add backends
+	p.AddBackend(backend1)
+	p.AddBackend(backend2)
+	p.AddBackend(backend3)
+
+	// Test 2: Non-draining backends are returned
+	b, err := p.Backend(context.Background())
+	if err != nil {
+		t.Errorf("unexpected error: %v", err)
+	}
+	if b.IsDraining() {
+		t.Errorf("expected non-draining backend, got draining")
+	}
+
+	// Test 3: When some backends are draining, non-draining ones are prioritized
+	backend1.SetDraining()
+
+	// Call multiple times to ensure we never get the draining backend
+	for i := 0; i < 20; i++ {
+		b, err = p.Backend(context.Background())
+		if err != nil {
+			t.Errorf("unexpected error: %v", err)
+		}
+		if b == backend1 {
+			t.Errorf("expected non-draining backend, got draining backend1")
+		}
+	}
+
+	// Test 4: When all backends are draining, fallback to a draining backend
+	backend2.SetDraining()
+	backend3.SetDraining()
+
+	b, err = p.Backend(context.Background())
+	if err != nil {
+		t.Errorf("expected fallback to draining backend, got error: %v", err)
+	}
+	if b == nil {
+		t.Error("expected a backend, got nil")
+	}
+	if !b.IsDraining() {
+		t.Error("expected draining backend as fallback")
+	}
+}
+
+func TestDestHostBackendManager_Backend_DrainingFallback(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+
+	backend1, _ := NewBackend(mockAgentConn(ctrl, "agent1", []string{"host=localhost"}))
+	backend2, _ := NewBackend(mockAgentConn(ctrl, "agent2", []string{"host=localhost"}))
+	backend3, _ := NewBackend(mockAgentConn(ctrl, "agent3", []string{"host=otherhost"}))
+
+	p := NewDestHostBackendManager()
+
+	// Add backends
+	p.AddBackend(backend1)
+	p.AddBackend(backend2)
+	p.AddBackend(backend3)
+
+	ctx := context.WithValue(context.Background(), destHostKey, "localhost")
+
+	// Test 1: Non-draining backends are returned
+	b, err := p.Backend(ctx)
+	if err != nil {
+		t.Errorf("unexpected error: %v", err)
+	}
+	if b.IsDraining() {
+		t.Errorf("expected non-draining backend, got draining")
+	}
+
+	// Test 2: When some backends for destHost are draining, non-draining ones are prioritized
+	backend1.SetDraining()
+
+	b, err = p.Backend(ctx)
+	if err != nil {
+		t.Errorf("unexpected error: %v", err)
+	}
+	if b != backend2 {
+		t.Errorf("expected backend2 (non-draining), got different backend")
+	}
+
+	// Test 3: When all backends for destHost are draining, fallback to a draining backend
+	backend2.SetDraining()
+
+	b, err = p.Backend(ctx)
+	if err != nil {
+		t.Errorf("expected fallback to draining backend, got error: %v", err)
+	}
+	if b == nil {
+		t.Error("expected a backend, got nil")
+	}
+	if !b.IsDraining() {
+		t.Error("expected draining backend as fallback")
+	}
+	// Verify we got one of the localhost backends, not otherhost
+	if b != backend1 && b != backend2 {
+		t.Error("expected fallback to be one of the localhost backends")
+	}
+
+	// Test 4: Different destHost still works independently
+	ctx2 := context.WithValue(context.Background(), destHostKey, "otherhost")
+	b, err = p.Backend(ctx2)
+	if err != nil {
+		t.Errorf("unexpected error: %v", err)
+	}
+	if b != backend3 {
+		t.Errorf("expected backend3 for otherhost")
+	}
+	if b.IsDraining() {
+		t.Error("expected non-draining backend for otherhost")
+	}
+}
