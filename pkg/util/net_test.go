@@ -17,6 +17,7 @@ limitations under the License.
 package util
 
 import (
+	"crypto/tls"
 	"testing"
 )
 
@@ -55,5 +56,43 @@ func TestRemovePortFromHost(t *testing.T) {
 			}
 		}
 		t.Run(st.name, tf)
+	}
+}
+
+func TestGetTLSVersion(t *testing.T) {
+	tests := []struct {
+		name        string
+		versionName string
+		expected    uint16
+		expectError bool
+	}{
+		{"EmptyDefaultsToTLS12", "", tls.VersionTLS12, false},
+		{"VersionTLS10", "VersionTLS10", tls.VersionTLS10, false},
+		{"VersionTLS11", "VersionTLS11", tls.VersionTLS11, false},
+		{"VersionTLS12", "VersionTLS12", tls.VersionTLS12, false},
+		{"VersionTLS13", "VersionTLS13", tls.VersionTLS13, false},
+		{"InvalidVersion", "VersionTLS99", 0, true},
+	}
+
+	for _, tt := range tests {
+		st := tt
+		t.Run(st.name, func(t *testing.T) {
+			t.Parallel()
+			got, err := GetTLSVersion(st.versionName)
+			if st.expectError {
+				if err == nil {
+					t.Fatalf("\t%s\texpected error for input %q, but got none", failed, st.versionName)
+				}
+				t.Logf("\t%s\tgot expected error: %v", succeed, err)
+				return
+			}
+			if err != nil {
+				t.Fatalf("\t%s\tunexpected error for input %q: %v", failed, st.versionName, err)
+			}
+			if got != st.expected {
+				t.Fatalf("\t%s\texpect %v, but got %v", failed, st.expected, got)
+			}
+			t.Logf("\t%s\texpect %v, got %v", succeed, st.expected, got)
+		})
 	}
 }
