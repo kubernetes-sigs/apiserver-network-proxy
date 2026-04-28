@@ -45,6 +45,32 @@ type Tunnel interface {
 	Done() <-chan struct{}
 }
 
+// ReusableTunnel is a Tunnel whose DialContext may be called many times.
+// Each returned net.Conn is independent. The caller is responsible for
+// calling Close to release the underlying gRPC ClientConn.
+//
+// A ReusableTunnel owns a single underlying *grpc.ClientConn whose lifetime
+// matches the tunnel's; per-dial work happens on new gRPC Proxy streams over
+// that shared connection rather than new gRPC ClientConn connections.
+//
+// Done semantics differ subtly from a single-use Tunnel: Done is closed only
+// after Close has been called and all in-flight per-dial child streams have
+// drained. It does not fire on remote unreachability alone; callers detect
+// transport failure via DialContext errors (typed via GetDialFailureReason)
+// and decide whether to Close and rebuild.
+type ReusableTunnel interface {
+	Tunnel
+	// Close releases the tunnel's resources, including the underlying
+	// gRPC ClientConn. In-flight DialContext calls are cancelled.
+	//
+	// Close blocks until all per-dial child streams have drained and Done
+	// has fired. Concurrent Close calls all observe the same post-condition:
+	// every caller returns only after teardown is complete. The first
+	// caller's return value carries any error from closing the underlying
+	// ClientConn; subsequent callers return nil.
+	Close() error
+}
+
 type dialResult struct {
 	err    *dialFailure
 	connid int64
