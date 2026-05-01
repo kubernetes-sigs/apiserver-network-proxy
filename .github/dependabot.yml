@@ -6,6 +6,8 @@ updates:
     interval: weekly
 - package-ecosystem: gomod
   directory: /
+  exclude-paths:
+    - "konnectivity-client/**"
   schedule:
     interval: weekly
   groups:
