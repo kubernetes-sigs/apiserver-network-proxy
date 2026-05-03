@@ -1,4 +1,4 @@
-package testing
+package testing //nolint:revive
 
 import (
 	"time"

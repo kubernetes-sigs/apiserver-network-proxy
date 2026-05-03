@@ -122,7 +122,7 @@ func (o *GrpcProxyClientOptions) Print() {
 	klog.V(1).Infof("ProxyHost set to %q.\n", o.proxyHost)
 	klog.V(1).Infof("ProxyPort set to %d.\n", o.proxyPort)
 	klog.V(1).Infof("ProxyUdsName set to %q.\n", o.proxyUdsName)
-	klog.V(1).Infof("TestRequests set to %q.\n", o.testRequests)
+	klog.V(1).Infof("TestRequests set to %d.\n", o.testRequests)
 	klog.V(1).Infof("TestDelaySec set to %d.\n", o.testDelaySec)
 	klog.V(1).Infof("AfterDelaySec set to %d.\n", o.afterDelaySec)
 	klog.V(1).Infof("CloseIdleConn set to %t.\n", o.closeIdleConn)
