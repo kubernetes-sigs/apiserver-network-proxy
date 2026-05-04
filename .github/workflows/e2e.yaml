@@ -63,7 +63,8 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        k8s: [ v1.32.0, v1.33.2, v1.34.0 ]
+        # https://hub.docker.com/r/kindest/node/tags
+        k8s: [ v1.33.7, v1.34.3, v1.35.1 ]
         connection-mode: [ grpc, http-connect ]
     steps:
     - name: Install kind
@@ -106,7 +107,8 @@ jobs:
       fail-fast: false
       matrix:
         ipFamily: ["ipv4", "ipv6", "dual"]
-        k8s: [ v1.32.0, v1.33.2, v1.34.0 ]
+        # https://hub.docker.com/r/kindest/node/tags
+        k8s: [ v1.33.7, v1.34.3, v1.35.1 ]
     env:
       JOB_NAME: "kindnetd-e2e-${{ matrix.ipFamily }}"
       IP_FAMILY: ${{ matrix.ipFamily }}
