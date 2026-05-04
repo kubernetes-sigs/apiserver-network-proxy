@@ -61,6 +61,7 @@ func TestDefaultServerOptions(t *testing.T) {
 	assertDefaultValue(t, "AuthenticationAudience", defaultServerOptions.AuthenticationAudience, "")
 	assertDefaultValue(t, "ProxyStrategies", defaultServerOptions.ProxyStrategies, "default")
 	assertDefaultValue(t, "CipherSuites", defaultServerOptions.CipherSuites, make([]string, 0))
+	assertDefaultValue(t, "TLSMinVersion", defaultServerOptions.TLSMinVersion, "")
 	assertDefaultValue(t, "XfrChannelSize", defaultServerOptions.XfrChannelSize, 10)
 	assertDefaultValue(t, "APIContentType", defaultServerOptions.APIContentType, "application/vnd.kubernetes.protobuf")
 	assertDefaultValue(t, "GracefulShutdownTimeout", defaultServerOptions.GracefulShutdownTimeout, 0*time.Second)
@@ -148,6 +149,21 @@ func TestValidate(t *testing.T) {
 			field:    "CipherSuites",
 			value:    "TLS_AES_256_GCM_SHA384,TLS_ECDHE_RSA_WITH_AES_128_CBC_SHA",
 			expected: nil,
+		},
+		"ValidTLSMinVersion12": {
+			field:    "TLSMinVersion",
+			value:    "VersionTLS12",
+			expected: nil,
+		},
+		"ValidTLSMinVersion13": {
+			field:    "TLSMinVersion",
+			value:    "VersionTLS13",
+			expected: nil,
+		},
+		"InvalidTLSMinVersion": {
+			field:    "TLSMinVersion",
+			value:    "InvalidVersion",
+			expected: fmt.Errorf("unsupported TLS version \"InvalidVersion\", supported values are: VersionTLS10, VersionTLS11, VersionTLS12, VersionTLS13"),
 		},
 		"Empty proxy strategies": {
 			field:    "ProxyStrategies",
