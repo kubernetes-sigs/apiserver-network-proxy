@@ -24,7 +24,9 @@ ALL_ARCH ?= amd64 arm arm64 ppc64le s390x
 # The output type could either be docker (local), or registry.
 OUTPUT_TYPE ?= docker
 GO_TOOLCHAIN ?= golang
-GO_VERSION ?= 1.24.7
+GO_VERSION ?= 1.26.2
+GOTOOLCHAIN ?= go$(GO_VERSION)+auto
+export GOTOOLCHAIN
 BASEIMAGE ?= gcr.io/distroless/static-debian12:nonroot
 
 ifeq ($(GOPATH),)
@@ -33,7 +35,7 @@ endif
 GOOS ?= $(shell go env GOOS)
 GOARCH ?= $(shell go env GOARCH)
 INSTALL_LOCATION:=$(shell go env GOPATH)/bin
-GOLANGCI_LINT_VERSION ?= 2.1.6
+GOLANGCI_LINT_VERSION ?= 2.9.0
 GOSEC_VERSION ?= 2.13.1
 
 REGISTRY ?= gcr.io/$(shell gcloud config get-value project)
@@ -82,7 +84,10 @@ fast-test:
 # Unit tests with fuller coverage, invoked by CI system.
 .PHONY: test
 test:
-	go test -v -mod=vendor -race -covermode=atomic -coverprofile=konnectivity.out $(shell go list ./... | grep -v -e "/e2e$$" -e "/e2e/.*") && go tool cover -html=konnectivity.out -o=konnectivity.html
+	$(eval TEST_LIST := $(shell go list -test ./... | egrep " \[.*\]" | cut -d' ' -f1 | grep -v -e "/e2e$$" -e "/e2e/.*"))
+	echo "Running tests on $(TEST_LIST)"
+	$(info GOTOOLCHAIN is $(GOTOOLCHAIN))
+	go test -v -mod=vendor -race -covermode=atomic -coverprofile=konnectivity.out $(TEST_LIST) && go tool cover -html=konnectivity.out -o=konnectivity.html
 	cd konnectivity-client && go test -race -covermode=atomic -coverprofile=client.out ./... && go tool cover -html=client.out -o=client.html
 
 .PHONY: test-integration
