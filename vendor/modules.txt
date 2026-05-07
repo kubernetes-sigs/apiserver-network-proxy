@@ -171,8 +171,8 @@ go.yaml.in/yaml/v2
 # go.yaml.in/yaml/v3 v3.0.4
 ## explicit; go 1.16
 go.yaml.in/yaml/v3
-# golang.org/x/net v0.48.0
-## explicit; go 1.24.0
+# golang.org/x/net v0.53.0
+## explicit; go 1.25.0
 golang.org/x/net/html
 golang.org/x/net/html/atom
 golang.org/x/net/http/httpguts
@@ -180,6 +180,7 @@ golang.org/x/net/http2
 golang.org/x/net/http2/hpack
 golang.org/x/net/idna
 golang.org/x/net/internal/httpcommon
+golang.org/x/net/internal/httpsfv
 golang.org/x/net/internal/socks
 golang.org/x/net/internal/timeseries
 golang.org/x/net/proxy
@@ -189,16 +190,16 @@ golang.org/x/net/websocket
 ## explicit; go 1.24.0
 golang.org/x/oauth2
 golang.org/x/oauth2/internal
-# golang.org/x/sys v0.39.0
-## explicit; go 1.24.0
+# golang.org/x/sys v0.43.0
+## explicit; go 1.25.0
 golang.org/x/sys/plan9
 golang.org/x/sys/unix
 golang.org/x/sys/windows
-# golang.org/x/term v0.38.0
-## explicit; go 1.24.0
+# golang.org/x/term v0.42.0
+## explicit; go 1.25.0
 golang.org/x/term
-# golang.org/x/text v0.32.0
-## explicit; go 1.24.0
+# golang.org/x/text v0.36.0
+## explicit; go 1.25.0
 golang.org/x/text/secure/bidirule
 golang.org/x/text/transform
 golang.org/x/text/unicode/bidi

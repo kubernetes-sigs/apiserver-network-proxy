@@ -12,7 +12,7 @@ require (
 	github.com/stretchr/testify v1.11.1
 	go.uber.org/goleak v1.3.0
 	go.uber.org/mock v0.5.2
-	golang.org/x/net v0.48.0
+	golang.org/x/net v0.53.0
 	google.golang.org/grpc v1.79.3
 	google.golang.org/protobuf v1.36.10
 	k8s.io/api v0.34.0
@@ -64,9 +64,9 @@ require (
 	go.yaml.in/yaml/v2 v2.4.2 // indirect
 	go.yaml.in/yaml/v3 v3.0.4 // indirect
 	golang.org/x/oauth2 v0.34.0 // indirect
-	golang.org/x/sys v0.39.0 // indirect
-	golang.org/x/term v0.38.0 // indirect
-	golang.org/x/text v0.32.0 // indirect
+	golang.org/x/sys v0.43.0 // indirect
+	golang.org/x/term v0.42.0 // indirect
+	golang.org/x/text v0.36.0 // indirect
 	golang.org/x/time v0.9.0 // indirect
 	google.golang.org/genproto/googleapis/rpc v0.0.0-20251202230838-ff82c1b0f217 // indirect
 	gopkg.in/evanphx/json-patch.v4 v4.12.0 // indirect
