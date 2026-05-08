@@ -22,6 +22,7 @@ import (
 
 	dto "github.com/prometheus/client_model/go"
 	"github.com/prometheus/common/expfmt"
+	"github.com/prometheus/common/model"
 )
 
 func readIntGauge(metricsURL, metricName string) (int, error) {
@@ -54,7 +55,7 @@ func scrapeMetrics(metricsURL string) (map[string]*dto.MetricFamily, error) {
 		return nil, fmt.Errorf("unexpected %q status scraping metrics from %s", resp.Status, metricsURL)
 	}
 
-	var parser expfmt.TextParser
+	parser := expfmt.NewTextParser(model.LegacyValidation)
 	mf, err := parser.TextToMetricFamilies(resp.Body)
 	if err != nil {
 		return nil, fmt.Errorf("failed to parse metrics: %w", err)
