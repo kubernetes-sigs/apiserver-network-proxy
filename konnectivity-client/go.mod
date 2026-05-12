@@ -10,7 +10,7 @@ require (
 	golang.org/x/net v0.38.0 // indirect
 	google.golang.org/grpc v1.68.1
 	google.golang.org/protobuf v1.36.5
-	k8s.io/klog/v2 v2.130.1
+	k8s.io/klog/v2 v2.140.0
 )
 
 require (
