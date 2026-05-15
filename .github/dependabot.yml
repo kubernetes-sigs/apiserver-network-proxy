@@ -9,7 +9,7 @@ updates:
   exclude-paths:
     - "konnectivity-client/**"
   schedule:
-    interval: weekly
+    interval: daily
   groups:
     gomod-dependencies:
       patterns:
