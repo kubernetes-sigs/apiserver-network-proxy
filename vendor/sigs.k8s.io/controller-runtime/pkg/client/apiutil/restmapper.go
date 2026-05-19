@@ -28,7 +28,6 @@ import (
 	"k8s.io/client-go/discovery"
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/restmapper"
-	"k8s.io/utils/ptr"
 )
 
 // NewDynamicRESTMapper returns a dynamic RESTMapper for cfg. The dynamic
@@ -197,7 +196,7 @@ func (m *mapper) addKnownGroupAndReload(groupName string, versions ...string) er
 				}
 			}
 			if len(failedGroups) > 0 {
-				return ptr.To(ErrResourceDiscoveryFailed(failedGroups))
+				return new(ErrResourceDiscoveryFailed(failedGroups))
 			}
 			return nil
 		}
@@ -246,10 +245,18 @@ func (m *mapper) addGroupVersionResourcesToCacheAndReloadLocked(gvr map[schema.G
 		}
 
 		if !found {
-			groupResources.Group.Versions = append(groupResources.Group.Versions, metav1.GroupVersionForDiscovery{
+			gv := metav1.GroupVersionForDiscovery{
 				GroupVersion: metav1.GroupVersion{Group: groupVersion.Group, Version: version}.String(),
 				Version:      version,
-			})
+			}
+
+			// Prepend if preferred version, else append. The upstream DiscoveryRestMappper assumes
+			// the first version is the preferred one: https://github.com/kubernetes/kubernetes/blob/ef54ac803b712137871c1a1f8d635d50e69ffa6c/staging/src/k8s.io/apimachinery/pkg/api/meta/restmapper.go#L458-L461
+			if group, ok := m.apiGroups[groupVersion.Group]; ok && group.PreferredVersion.Version == version {
+				groupResources.Group.Versions = append([]metav1.GroupVersionForDiscovery{gv}, groupResources.Group.Versions...)
+			} else {
+				groupResources.Group.Versions = append(groupResources.Group.Versions, gv)
+			}
 		}
 
 		// Update data in the cache.
@@ -284,13 +291,13 @@ func (m *mapper) findAPIGroupByNameAndMaybeAggregatedDiscoveryLocked(groupName s
 	}
 
 	m.initialDiscoveryDone = true
-	if len(maybeResources) > 0 {
-		didAggregatedDiscovery = true
-		m.addGroupVersionResourcesToCacheAndReloadLocked(maybeResources)
-	}
 	for i := range apiGroups.Groups {
 		group := &apiGroups.Groups[i]
 		m.apiGroups[group.Name] = group
+	}
+	if len(maybeResources) > 0 {
+		didAggregatedDiscovery = true
+		m.addGroupVersionResourcesToCacheAndReloadLocked(maybeResources)
 	}
 
 	// Looking in the cache again.
