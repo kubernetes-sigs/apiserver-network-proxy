@@ -243,7 +243,7 @@ func waitForDeployment(obj client.Object) func(context.Context, *testing.T, *env
 		k8sClient := kubernetes.NewForConfigOrDie(cfg.Client().RESTConfig())
 		err := wait.For(
 			conditions.New(cfg.Client().Resources(deployment.Namespace)).DeploymentAvailable(deployment.Name, deployment.Namespace),
-			wait.WithTimeout(120*time.Second),
+			wait.WithTimeout(60*time.Second),
 			wait.WithInterval(5*time.Second),
 		)
 		if err != nil {
@@ -316,6 +316,7 @@ func scaleDeployment(obj client.Object, replicas int) func(context.Context, *tes
 			t.Fatalf("could not update Deployment replicas: %v", err)
 		}
 
+		k8sClient := kubernetes.NewForConfigOrDie(cfg.Client().RESTConfig())
 		err = wait.For(
 			conditions.New(cfg.Client().Resources(deployment.Namespace)).ResourceScaled(deployment, func(obj k8s.Object) int32 {
 				deployment, ok := obj.(*appsv1api.Deployment)
@@ -329,7 +330,23 @@ func scaleDeployment(obj client.Object, replicas int) func(context.Context, *tes
 			wait.WithInterval(5*time.Second),
 		)
 		if err != nil {
-			t.Fatalf("waiting for deployment %q to scale failed", deployment.Name)
+			pods, err := k8sClient.CoreV1().Pods(deployment.Namespace).List(ctx, metav1.ListOptions{LabelSelector: labels.FormatLabels(deployment.Spec.Selector.MatchLabels)})
+			if err != nil {
+				t.Fatalf("could not get pods for deployment %q: %v", deployment.Name, err)
+			}
+
+			for _, pod := range pods.Items {
+				if isPodReady(&pod) {
+					continue
+				}
+
+				logs, err := dumpPodLogs(ctx, k8sClient, pod.Namespace, pod.Name)
+				if err != nil {
+					t.Fatalf("could not dump logs for pod %q: %v", pod.Name, err)
+				}
+				t.Errorf("logs for pod %q: %v", pod.Name, logs)
+			}
+			t.Fatalf("waiting for deployment %q to scale failed, dumped pod logs", deployment.Name)
 		}
 
 		return ctx
