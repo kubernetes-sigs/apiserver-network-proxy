@@ -137,25 +137,9 @@ func NewLeaseInformerWithMetrics(client kubernetes.Interface, namespace string, 
 		},
 	}
 	return cache.NewSharedIndexInformer(
-		&listWatch{lw, client},
+		cache.ToListWatcherWithWatchListSemantics(lw, client),
 		&coordinationv1api.Lease{},
 		resyncPeriod,
 		cache.Indexers{cache.NamespaceIndex: cache.MetaNamespaceIndexFunc},
 	)
-}
-
-type unSupportedWatchListSemantics interface {
-	IsWatchListSemanticsUnSupported() bool
-}
-
-type listWatch struct {
-	cache.ListerWatcher
-	client kubernetes.Interface
-}
-
-func (l *listWatch) IsWatchListSemanticsUnSupported() bool {
-	if unSupported, ok := l.client.(unSupportedWatchListSemantics); ok {
-		return unSupported.IsWatchListSemanticsUnSupported()
-	}
-	return false
 }
