@@ -263,6 +263,10 @@ func (o *ProxyRunOptions) Validate() error {
 		if o.ServerCaCert != "" {
 			return fmt.Errorf("server ca cert should not be set for UDS")
 		}
+	} else {
+		if o.ServerCaCert == "" {
+			return fmt.Errorf("server ca cert must be set when in TCP mode (uds-name is empty)")
+		}
 	}
 	if o.ServerPort > 49151 {
 		return fmt.Errorf("please do not try to use ephemeral port %d for the server port", o.ServerPort)

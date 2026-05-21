@@ -18,6 +18,7 @@ package options
 
 import (
 	"fmt"
+	"os"
 	"reflect"
 	"testing"
 	"time"
@@ -74,11 +75,30 @@ func assertDefaultValue(t *testing.T, fieldName string, actual, expected interfa
 }
 
 func TestValidate(t *testing.T) {
+	tempFile, err := os.CreateTemp("", "server-ca-cert")
+	if err != nil {
+		t.Fatalf("failed to create temp file: %v", err)
+	}
+	defer os.Remove(tempFile.Name())
+	tempFile.Close()
+
+	_, nonExistentErr := os.Stat("non-existent-file.crt")
+
 	for desc, tc := range map[string]struct {
 		field    string
 		value    interface{}
 		expected error
 	}{
+		"ServerCaCert empty in TCP mode": {
+			field:    "ServerCaCert",
+			value:    "",
+			expected: fmt.Errorf("server ca cert must be set when in TCP mode (uds-name is empty)"),
+		},
+		"ServerCaCert non-existent in TCP mode": {
+			field:    "ServerCaCert",
+			value:    "non-existent-file.crt",
+			expected: fmt.Errorf("error checking server CA cert non-existent-file.crt, got %v", nonExistentErr),
+		},
 		"default": {
 			field:    "",
 			value:    nil,
@@ -187,6 +207,9 @@ func TestValidate(t *testing.T) {
 	} {
 		t.Run(desc, func(t *testing.T) {
 			testServerOptions := NewProxyRunOptions()
+			if tc.field != "ServerCaCert" {
+				testServerOptions.ServerCaCert = tempFile.Name()
+			}
 			if tc.field == "CipherSuites" {
 				testServerOptions.Flags().Set("cipher-suites", tc.value.(string))
 			} else if tc.field != "" {
