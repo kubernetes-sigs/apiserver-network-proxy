@@ -105,6 +105,7 @@ func TestProxy_ConcurrencyHTTP(t *testing.T) {
 		tunnel, err := createHTTPConnectClient(ctx, ps.FrontAddr(), server.URL)
 		if err != nil {
 			t.Error(err)
+			return
 		}
 		data, err := clientRequest(tunnel, server.URL)
 		if err != nil {
