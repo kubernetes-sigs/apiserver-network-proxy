@@ -199,10 +199,10 @@ func (p *Proxy) Run(o *options.ProxyRunOptions, stopCh <-chan struct{}) error {
 			p.agentServer.Stop()
 		}
 		if p.adminServer != nil {
-			p.adminServer.Close()
+			_ = p.adminServer.Close()
 		}
 		if p.healthServer != nil {
-			p.healthServer.Close()
+			_ = p.healthServer.Close()
 		}
 		if leaseController != nil {
 			leaseController.Stop()
@@ -286,10 +286,10 @@ func (p *Proxy) Run(o *options.ProxyRunOptions, stopCh <-chan struct{}) error {
 			p.agentServer.Stop()
 		}
 		if p.adminServer != nil {
-			p.adminServer.Close()
+			_ = p.adminServer.Close()
 		}
 		if p.healthServer != nil {
-			p.healthServer.Close()
+			_ = p.healthServer.Close()
 		}
 		// frontend server's force-stop is handled by its StopFunc
 	}
@@ -365,7 +365,7 @@ func (p *Proxy) runUDSFrontendServer(ctx context.Context, o *options.ProxyRunOpt
 			"core", "udsGrpcFrontend",
 			"udsFile", o.UdsName,
 		)
-		go runpprof.Do(context.Background(), labels, func(context.Context) { grpcServer.Serve(lis) })
+		go runpprof.Do(context.Background(), labels, func(context.Context) { _ = grpcServer.Serve(lis) })
 		stop = func(_ context.Context) error {
 			grpcServer.GracefulStop()
 			return nil
@@ -463,7 +463,7 @@ func (p *Proxy) runMTLSFrontendServer(_ context.Context, o *options.ProxyRunOpti
 			"core", "mtlsGrpcFrontend",
 			"port", strconv.Itoa(o.ServerPort),
 		)
-		go runpprof.Do(context.Background(), labels, func(context.Context) { grpcServer.Serve(lis) })
+		go runpprof.Do(context.Background(), labels, func(context.Context) { _ = grpcServer.Serve(lis) })
 		stop = func(_ context.Context) error {
 			grpcServer.GracefulStop()
 			return nil
@@ -523,7 +523,7 @@ func (p *Proxy) runAgentServer(o *options.ProxyRunOptions, server *server.ProxyS
 		"core", "agentListener",
 		"port", strconv.Itoa(o.AgentPort),
 	)
-	go runpprof.Do(context.Background(), labels, func(context.Context) { grpcServer.Serve(lis) })
+	go runpprof.Do(context.Background(), labels, func(context.Context) { _ = grpcServer.Serve(lis) })
 	p.agentServer = grpcServer
 
 	return nil

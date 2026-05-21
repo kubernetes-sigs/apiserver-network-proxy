@@ -187,7 +187,7 @@ func (c *ProxyClientConnection) send(pkt *client.Packet) error {
 					ProtoMajor: 1,
 				}
 
-				t.Write(c.HTTP)
+				_ = t.Write(c.HTTP)
 				return c.CloseHTTP()
 			}
 			return nil

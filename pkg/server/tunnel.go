@@ -77,7 +77,7 @@ func (t *Tunnel) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var closeOnce sync.Once
-	defer closeOnce.Do(func() { conn.Close() })
+	defer closeOnce.Do(func() { _ = conn.Close() })
 
 	random := rand.Int63() /* #nosec G404 */
 	dialRequest := &client.Packet{
@@ -95,7 +95,7 @@ func (t *Tunnel) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	backend, err := t.Server.getBackend(r.Host)
 	if err != nil {
 		klog.ErrorS(err, "no tunnels available")
-		conn.Write([]byte(fmt.Sprintf("HTTP/1.1 500 Internal Server Error\r\nContent-Type: text/plain\r\n\r\ncurrently no tunnels available: %v", err)))
+		_, _ = conn.Write([]byte(fmt.Sprintf("HTTP/1.1 500 Internal Server Error\r\nContent-Type: text/plain\r\n\r\ncurrently no tunnels available: %v", err)))
 		// The hijacked connection will be closed by the closeOnce defer.
 		return
 	}
@@ -105,7 +105,7 @@ func (t *Tunnel) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		Mode: ModeHTTPConnect,
 		HTTP: io.ReadWriter(conn), // pass as ReadWriter so the caller must close with CloseHTTP
 		CloseHTTP: func() error {
-			closeOnce.Do(func() { conn.Close() })
+			closeOnce.Do(func() { _ = conn.Close() })
 			close(closed)
 			return nil
 		},
@@ -134,7 +134,7 @@ func (t *Tunnel) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		klog.ErrorS(err, "failed to tunnel dial request", "host", r.Host, "dialID", connection.dialID, "agentID", connection.agentID)
 		metrics.Metrics.ObserveDialFailure(metrics.DialFailureBackendClose)
 		// Send proper HTTP error response
-		conn.Write([]byte(fmt.Sprintf("HTTP/1.1 502 Bad Gateway\r\nContent-Type: text/plain; charset=utf-8\r\n\r\nFailed to tunnel dial request: %v\r\n", err)))
+		_, _ = conn.Write([]byte(fmt.Sprintf("HTTP/1.1 502 Bad Gateway\r\nContent-Type: text/plain; charset=utf-8\r\n\r\nFailed to tunnel dial request: %v\r\n", err)))
 		// The deferred cleanup will run when we return here.
 		return
 	}
@@ -167,7 +167,7 @@ func (t *Tunnel) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		klog.ErrorS(ctxt.Err(), "backend context closed before connection was established", "host", r.Host, "dialID", connection.dialID, "agentID", connection.agentID)
 		metrics.Metrics.ObserveDialFailure(metrics.DialFailureBackendClose)
 		// Send proper HTTP error response
-		conn.Write([]byte(fmt.Sprintf("HTTP/1.1 502 Bad Gateway\r\nContent-Type: text/plain; charset=utf-8\r\n\r\nBackend context error: %v\r\n", ctxt.Err())))
+		_, _ = conn.Write([]byte(fmt.Sprintf("HTTP/1.1 502 Bad Gateway\r\nContent-Type: text/plain; charset=utf-8\r\n\r\nBackend context error: %v\r\n", ctxt.Err())))
 		// The deferred cleanup will run when we return here.
 		return
 	}
@@ -223,8 +223,7 @@ func (t *Tunnel) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 				},
 			},
 		}
-		err = backend.Send(packet)
-		if err != nil {
+		if err = backend.Send(packet); err != nil {
 			klog.ErrorS(err, "error sending packet", "host", r.Host, "agentID", agentID, "connectionID", connID)
 			break
 		}

@@ -637,8 +637,8 @@ k8s.io/component-base/metrics/legacyregistry
 k8s.io/component-base/metrics/prometheus/feature
 k8s.io/component-base/metrics/prometheusextension
 k8s.io/component-base/version
-# k8s.io/component-helpers v0.34.0
-## explicit; go 1.24.0
+# k8s.io/component-helpers v0.36.0
+## explicit; go 1.26.0
 k8s.io/component-helpers/apimachinery/lease
 # k8s.io/klog/v2 v2.140.0
 ## explicit; go 1.21
@@ -680,7 +680,7 @@ k8s.io/utils/net
 k8s.io/utils/ptr
 k8s.io/utils/trace
 # sigs.k8s.io/apiserver-network-proxy/konnectivity-client v0.34.0 => ./konnectivity-client
-## explicit; go 1.24.0
+## explicit; go 1.26.2
 sigs.k8s.io/apiserver-network-proxy/konnectivity-client/pkg/client
 sigs.k8s.io/apiserver-network-proxy/konnectivity-client/pkg/client/metrics
 sigs.k8s.io/apiserver-network-proxy/konnectivity-client/pkg/common/metrics

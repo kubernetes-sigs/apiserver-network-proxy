@@ -219,9 +219,9 @@ func (a *Client) Connect() (int, error) {
 func (a *Client) Close() {
 	if a.conn == nil {
 		klog.Errorln("Unexpected empty AgentClient.conn")
+		return
 	}
-	err := a.conn.Close()
-	if err != nil {
+	if err := a.conn.Close(); err != nil {
 		klog.ErrorS(err, "failed to close gRPC connection", "serverID", a.serverID, "agentID", a.agentID)
 	}
 	close(a.stopCh)
@@ -493,7 +493,7 @@ func (a *Client) Serve() {
 				eConn.send(data.Data)
 			} else {
 				klog.V(2).InfoS("received DATA for unrecognized connection", "connectionID", data.ConnectID)
-				a.Send(&client.Packet{
+				_ = a.Send(&client.Packet{
 					Type: client.PacketType_CLOSE_RSP,
 					Payload: &client.Packet_CloseResponse{
 						CloseResponse: &client.CloseResponse{

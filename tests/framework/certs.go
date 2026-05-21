@@ -176,7 +176,7 @@ func InitCertsDir() error {
 			return
 		}
 		// Something failed; clean up the temp directory.
-		os.RemoveAll(dir)
+		_ = os.RemoveAll(dir)
 	}()
 
 	for filename, contents := range map[string]string{

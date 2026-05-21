@@ -24,7 +24,7 @@ ALL_ARCH ?= amd64 arm arm64 ppc64le s390x
 # The output type could either be docker (local), or registry.
 OUTPUT_TYPE ?= docker
 GO_TOOLCHAIN ?= golang
-GO_VERSION ?= 1.26.2
+GO_VERSION := 1.26.2
 GOTOOLCHAIN ?= go$(GO_VERSION)+auto
 export GOTOOLCHAIN
 BASEIMAGE ?= gcr.io/distroless/static-debian12:nonroot
@@ -78,30 +78,30 @@ mock_gen:
 # Unit tests with faster execution (nicer for development).
 .PHONY: fast-test
 fast-test:
-	go test -mod=vendor -race $(shell go list ./... | grep -v -e "/e2e$$" -e "/e2e/.*")
-	cd konnectivity-client && go test -race ./...
+	GOTOOLCHAIN=go$(GO_VERSION) go test -mod=vendor -race $(shell go list ./... | grep -v -e "/e2e$$" -e "/e2e/.*")
+	cd konnectivity-client && GOTOOLCHAIN=go$(GO_VERSION) go test -race ./...
 
 # Unit tests with fuller coverage, invoked by CI system.
 .PHONY: test
 test:
-	$(eval TEST_LIST := $(shell go list -test ./... | egrep " \[.*\]" | cut -d' ' -f1 | grep -v -e "/e2e$$" -e "/e2e/.*"))
+	$(eval TEST_LIST := $(shell GOTOOLCHAIN=go$(GO_VERSION) go list -test ./... | egrep " \[.*\]" | cut -d' ' -f1 | grep -v -e "/e2e$$" -e "/e2e/.*"))
 	echo "Running tests on $(TEST_LIST)"
 	$(info GOTOOLCHAIN is $(GOTOOLCHAIN))
-	go test -v -mod=vendor -race -covermode=atomic -coverprofile=konnectivity.out $(TEST_LIST) && go tool cover -html=konnectivity.out -o=konnectivity.html
-	cd konnectivity-client && go test -race -covermode=atomic -coverprofile=client.out ./... && go tool cover -html=client.out -o=client.html
+	GOTOOLCHAIN=go$(GO_VERSION) go test -v -mod=vendor -race -covermode=atomic -coverprofile=konnectivity.out $(TEST_LIST) && GOTOOLCHAIN=go$(GO_VERSION) go tool cover -html=konnectivity.out -o=konnectivity.html
+	cd konnectivity-client && GOTOOLCHAIN=go$(GO_VERSION) go test -race -covermode=atomic -coverprofile=client.out ./... && GOTOOLCHAIN=go$(GO_VERSION) go tool cover -html=client.out -o=client.html
 
 .PHONY: test-integration
 test-integration: build
-	go test -mod=vendor -race ./tests -agent-path $(PWD)/bin/proxy-agent
+	GOTOOLCHAIN=go$(GO_VERSION) go test -mod=vendor -race ./tests -agent-path $(PWD)/bin/proxy-agent
 
 .PHONY: test-e2e
 test-e2e: docker-build
-	go test -mod=vendor ./e2e -race -agent-image ${AGENT_FULL_IMAGE}-$(TARGETARCH):${TAG} -server-image ${SERVER_FULL_IMAGE}-$(TARGETARCH):${TAG} -kind-image ${KIND_IMAGE} -mode ${CONNECTION_MODE}
+	GOTOOLCHAIN=go$(GO_VERSION) go test -mod=vendor ./e2e -race -agent-image ${AGENT_FULL_IMAGE}-$(TARGETARCH):${TAG} -server-image ${SERVER_FULL_IMAGE}-$(TARGETARCH):${TAG} -kind-image ${KIND_IMAGE} -mode ${CONNECTION_MODE}
 
 # e2e test runner for continuous integration that does not build a new image.
 .PHONY: test-e2e-ci
 test-e2e-ci:
-	go test -mod=vendor ./e2e -race -agent-image ${AGENT_FULL_IMAGE}-$(TARGETARCH):${TAG} -server-image ${SERVER_FULL_IMAGE}-$(TARGETARCH):${TAG} -kind-image ${KIND_IMAGE} -mode ${CONNECTION_MODE}
+	GOTOOLCHAIN=go$(GO_VERSION) go test -mod=vendor ./e2e -race -agent-image ${AGENT_FULL_IMAGE}-$(TARGETARCH):${TAG} -server-image ${SERVER_FULL_IMAGE}-$(TARGETARCH):${TAG} -kind-image ${KIND_IMAGE} -mode ${CONNECTION_MODE}
 
 ## --------------------------------------
 ## Binaries
@@ -115,19 +115,19 @@ build: bin/proxy-agent bin/proxy-server bin/proxy-test-client bin/http-test-serv
 
 .PHONY: bin/proxy-agent
 bin/proxy-agent:
-	GO111MODULE=on go build -mod=vendor -o bin/proxy-agent cmd/agent/main.go
+	GOTOOLCHAIN=go$(GO_VERSION) GO111MODULE=on go build -mod=vendor -o bin/proxy-agent cmd/agent/main.go
 
 .PHONY: bin/proxy-test-client
 bin/proxy-test-client:
-	GO111MODULE=on go build -mod=vendor -o bin/proxy-test-client cmd/test-client/main.go
+	GOTOOLCHAIN=go$(GO_VERSION) GO111MODULE=on go build -mod=vendor -o bin/proxy-test-client cmd/test-client/main.go
 
 .PHONY: bin/http-test-server
 bin/http-test-server:
-	GO111MODULE=on go build -mod=vendor -o bin/http-test-server cmd/test-server/main.go
+	GOTOOLCHAIN=go$(GO_VERSION) GO111MODULE=on go build -mod=vendor -o bin/http-test-server cmd/test-server/main.go
 
 .PHONY: bin/proxy-server
 bin/proxy-server:
-	GO111MODULE=on go build -mod=vendor -o bin/proxy-server cmd/server/main.go
+	GOTOOLCHAIN=go$(GO_VERSION) GO111MODULE=on go build -mod=vendor -o bin/proxy-server cmd/server/main.go
 
 ## --------------------------------------
 ## Linting
@@ -135,8 +135,10 @@ bin/proxy-server:
 
 .PHONY: lint
 lint:
-	curl -sSfL https://raw.githubusercontent.com/golangci/golangci-lint/master/install.sh | sh -s -- -b $(INSTALL_LOCATION) v$(GOLANGCI_LINT_VERSION)
-	$(INSTALL_LOCATION)/golangci-lint run --config ./.golangci.yaml --verbose
+	if [ ! -f $(INSTALL_LOCATION)/golangci-lint ]; then \
+		curl -sSfL https://raw.githubusercontent.com/golangci/golangci-lint/master/install.sh | sh -s -- -b $(INSTALL_LOCATION) v$(GOLANGCI_LINT_VERSION); \
+	fi
+	GOTOOLCHAIN=go$(GO_VERSION) $(INSTALL_LOCATION)/golangci-lint run --config ./.golangci.yaml --verbose --timeout 5m
 
 ## --------------------------------------
 ## Go

@@ -56,7 +56,7 @@ func (c *GarbageCollectionController) Run(ctx context.Context) {
 func (c *GarbageCollectionController) gc(ctx context.Context) {
 	start := time.Now()
 	leases, err := c.leaseInterface.List(ctx, metav1.ListOptions{LabelSelector: c.labelSelector})
-	latency := time.Now().Sub(start)
+	latency := time.Since(start)
 	if err != nil {
 		klog.Errorf("Could not list leases to garbage collect: %v", err)
 
@@ -92,7 +92,7 @@ func (c *GarbageCollectionController) gc(ctx context.Context) {
 		}
 
 		// Log metrics for the deletion call.
-		latency := time.Now().Sub(start)
+		latency := time.Since(start)
 		if err != nil {
 			var apiStatus apierrors.APIStatus
 			if errors.As(err, &apiStatus) {

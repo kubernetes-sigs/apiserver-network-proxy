@@ -16,17 +16,13 @@ limitations under the License.
 package agent
 
 import (
-	"context"
 	"fmt"
 	"testing"
 	"time"
 
 	coordinationv1 "k8s.io/api/coordination/v1"
 	"k8s.io/apimachinery/pkg/labels"
-	"k8s.io/apimachinery/pkg/runtime"
-	"k8s.io/client-go/kubernetes/fake"
 	coordinationv1lister "k8s.io/client-go/listers/coordination/v1"
-	"k8s.io/client-go/tools/cache"
 	clocktesting "k8s.io/utils/clock/testing"
 	proxytesting "sigs.k8s.io/apiserver-network-proxy/pkg/testing"
 )
@@ -114,17 +110,16 @@ func TestServerLeaseCounter(t *testing.T) {
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
 			pc := clocktesting.NewFakePassiveClock(time.Now())
-			leases := make([]runtime.Object, len(tc.templates))
+			leases := make([]*coordinationv1.Lease, len(tc.templates))
 			for i, template := range tc.templates {
 				leases[i] = proxytesting.NewLeaseFromTemplate(pc, template)
 			}
 
-			k8sClient := fake.NewSimpleClientset(leases...)
 			selector, _ := labels.Parse(tc.labelSelector)
-			leaseInformer := NewLeaseInformerWithMetrics(k8sClient, "", time.Millisecond)
-			go leaseInformer.Run(context.Background().Done())
-			cache.WaitForCacheSync(context.Background().Done(), leaseInformer.HasSynced)
-			leaseLister := coordinationv1lister.NewLeaseLister(leaseInformer.GetIndexer())
+			leaseLister := &fakeLeaseLister{
+				LeaseList: leases,
+				Err:       tc.leaseListerError,
+			}
 
 			counter := NewServerLeaseCounter(pc, leaseLister, selector)
 

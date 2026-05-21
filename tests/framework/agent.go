@@ -163,7 +163,7 @@ func (r *ExternalAgentRunner) Start(t testing.TB, opts AgentOpts) (Agent, error)
 	}
 	t.Cleanup(a.Stop)
 
-	a.waitForLiveness()
+	_ = a.waitForLiveness()
 	return a, nil
 }
 
@@ -206,7 +206,7 @@ func (a *externalAgent) Ready() bool {
 	if err != nil {
 		return false
 	}
-	resp.Body.Close()
+	_ = resp.Body.Close()
 	return resp.StatusCode == http.StatusOK
 }
 
@@ -220,7 +220,7 @@ func (a *externalAgent) waitForLiveness() error {
 		if err != nil {
 			return false, nil
 		}
-		resp.Body.Close()
+		_ = resp.Body.Close()
 		return resp.StatusCode == http.StatusOK, nil
 	})
 	if err != nil {

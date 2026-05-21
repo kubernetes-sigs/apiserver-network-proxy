@@ -1,4 +1,10 @@
 version: "2"
+
+run:
+  timeout: 5m
+  go: "1.25.0"
+  modules-download-mode: vendor
+
 linters:
   default: none
   enable:
@@ -7,31 +13,21 @@ linters:
     - revive
     - unused
   exclusions:
-    generated: lax
-    presets:
-      - comments
-      - common-false-positives
-      - legacy
-      - std-error-handling
     rules:
-      - linters:
+      - path: _test\.go
+        linters:
           - gosec
-        path: _test\.go
-      - linters:
+      - path: ^tests/
+        linters:
           - gosec
-        path: ^tests/
     paths:
-      - third_party$
-      - builtin$
-      - examples$
-issues:
-  fix: true
-formatters:
-  enable:
-    - gofmt
-  exclusions:
-    generated: lax
-    paths:
-      - third_party$
-      - builtin$
-      - examples$
+      - third_party/
+      - builtin/
+      - examples/
+  settings:
+    revive:
+      rules:
+        - name: exported
+          disabled: true
+        - name: package-comments
+          disabled: true

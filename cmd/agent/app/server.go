@@ -91,12 +91,12 @@ func (a *Agent) Run(o *options.GrpcProxyAgentOptions, drainCh, stopCh <-chan str
 	if err := a.runHealthServer(o, cs); err != nil {
 		return fmt.Errorf("failed to run health server with %v", err)
 	}
-	defer a.healthServer.Close()
+	defer func() { _ = a.healthServer.Close() }()
 
 	if err := a.runAdminServer(o); err != nil {
 		return fmt.Errorf("failed to run admin server with %v", err)
 	}
-	defer a.adminServer.Close()
+	defer func() { _ = a.adminServer.Close() }()
 
 	<-stopCh
 	klog.V(1).Infoln("Shutting down agent.")
