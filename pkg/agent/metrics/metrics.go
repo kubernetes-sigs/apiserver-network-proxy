@@ -224,7 +224,7 @@ func (a *AgentMetrics) ObserveLeaseList(httpCode int, reason string) {
 }
 
 func (a *AgentMetrics) ObserveLeaseWatch(httpCode int, reason string) {
-	a.leaseLists.WithLabelValues(strconv.Itoa(httpCode), reason).Inc()
+	a.leaseWatches.WithLabelValues(strconv.Itoa(httpCode), reason).Inc()
 }
 
 func (a *AgentMetrics) ObserveLeaseListLatency(latency time.Duration, httpCode int) {
