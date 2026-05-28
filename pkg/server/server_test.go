@@ -17,9 +17,14 @@ limitations under the License.
 package server
 
 import (
+	"bufio"
 	"context"
 	"fmt"
 	"io"
+	"net"
+	"net/http"
+	"net/http/httptest"
+	"net/url"
 	"reflect"
 	"sync"
 	"testing"
@@ -216,6 +221,108 @@ func TestRemovePendingDialForStream(t *testing.T) {
 	p.PendingDial.removeForStream("")
 	if e, a := expectedPending, p.PendingDial.pendingDial; !reflect.DeepEqual(e, a) {
 		t.Errorf("expected %v, got %v", e, a)
+	}
+}
+
+func TestHTTPConnectTunnelBlockedBackendDialSendTimesOutCleansPendingDialAndRetiresBackend(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+
+	metrics.Metrics.Reset()
+
+	proxyServer := NewProxyServer(uuid.New().String(), []proxystrategies.ProxyStrategy{proxystrategies.ProxyStrategyDefault}, 1, &AgentTokenAuthenticationOptions{}, xfrChannelSize)
+	proxyServer.SetBackendDialTimeout(500 * time.Millisecond)
+
+	agentConn, backend := prepareAgentConnMD(t, ctrl, proxyServer, nil)
+	sendStarted := make(chan *client.Packet, 1)
+	releaseSend := make(chan struct{})
+	sendReleased := make(chan struct{})
+	agentConn.EXPECT().Send(gomock.AssignableToTypeOf(&client.Packet{})).DoAndReturn(func(pkt *client.Packet) error {
+		sendStarted <- pkt
+		<-releaseSend
+		close(sendReleased)
+		return nil
+	}).Times(1)
+
+	front := httptest.NewServer(&Tunnel{Server: proxyServer})
+	defer front.Close()
+
+	frontURL, err := url.Parse(front.URL)
+	if err != nil {
+		t.Fatalf("failed to parse front URL: %v", err)
+	}
+	conn, err := net.Dial("tcp", frontURL.Host)
+	if err != nil {
+		t.Fatalf("failed to connect to HTTP CONNECT front: %v", err)
+	}
+	defer conn.Close()
+
+	if _, err := fmt.Fprintf(conn, "CONNECT 127.0.0.1:443 HTTP/1.1\r\nHost: 127.0.0.1:443\r\n\r\n"); err != nil {
+		t.Fatalf("failed to write CONNECT request: %v", err)
+	}
+
+	var sent *client.Packet
+	select {
+	case sent = <-sendStarted:
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for backend DIAL_REQ send to start")
+	}
+	if sent.Type != client.PacketType_DIAL_REQ {
+		t.Fatalf("expected DIAL_REQ to backend, got %v", sent.Type)
+	}
+	if got := pendingDialCount(proxyServer); got != 1 {
+		t.Fatalf("expected one pending dial while backend Send is blocked, got %d", got)
+	}
+
+	respCh := make(chan struct {
+		resp *http.Response
+		err  error
+	}, 1)
+	go func() {
+		resp, err := http.ReadResponse(bufio.NewReader(conn), nil)
+		respCh <- struct {
+			resp *http.Response
+			err  error
+		}{resp: resp, err: err}
+	}()
+
+	var resp *http.Response
+	select {
+	case got := <-respCh:
+		if got.err != nil {
+			t.Fatalf("failed to read CONNECT response: %v", got.err)
+		}
+		resp = got.resp
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for backend dial timeout response")
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusGatewayTimeout {
+		t.Fatalf("expected %d for blocked backend dial send, got %s", http.StatusGatewayTimeout, resp.Status)
+	}
+	if got := pendingDialCount(proxyServer); got != 0 {
+		t.Fatalf("expected pending dial to be cleaned after backend dial timeout, got %d", got)
+	}
+	if !backend.IsDraining() {
+		t.Fatal("expected backend to be marked draining after backend dial timeout")
+	}
+	select {
+	case <-backend.Done():
+	case <-time.After(time.Second):
+		t.Fatal("expected backend retire signal after backend dial timeout")
+	}
+	for _, bm := range proxyServer.BackendManagers {
+		if got := bm.NumBackends(); got != 0 {
+			t.Fatalf("expected timed-out backend to be retired from manager, got %d backends", got)
+		}
+	}
+
+	close(releaseSend)
+	select {
+	case <-sendReleased:
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for blocked backend Send goroutine to exit")
 	}
 }
 
@@ -948,6 +1055,12 @@ func assertEstablishedConnsMetric(t testing.TB, expect int) {
 	if err := metricstest.DefaultTester.ExpectServerEstablishedConns(expect); err != nil {
 		t.Errorf("Expected %d %s metric: %v", expect, "established_connections", err)
 	}
+}
+
+func pendingDialCount(p *ProxyServer) int {
+	p.PendingDial.mu.RLock()
+	defer p.PendingDial.mu.RUnlock()
+	return len(p.PendingDial.pendingDial)
 }
 
 func assertReadyBackendsMetric(t testing.TB, expect int) {

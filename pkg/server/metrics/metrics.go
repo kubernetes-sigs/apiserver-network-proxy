@@ -328,6 +328,7 @@ const (
 	DialFailureUnrecognizedResponse DialFailureReason = "unrecognized_response" // Dial repsonse received for unrecognozide dial ID.
 	DialFailureSendResponse         DialFailureReason = "send_rsp"              // Successful dial response from agent, but failed to send to frontend.
 	DialFailureBackendClose         DialFailureReason = "backend_close"         // Received a DIAL_CLS from the backend before the dial completed.
+	DialFailureBackendDialTimeout   DialFailureReason = "backend_dial_timeout"  // Timed out sending DIAL_REQ to or waiting for DIAL_RSP from the backend.
 	DialFailureFrontendClose        DialFailureReason = "frontend_close"        // Received a DIAL_CLS from the frontend before the dial completed.
 )
 

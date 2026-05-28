@@ -66,6 +66,7 @@ func TestDefaultServerOptions(t *testing.T) {
 	assertDefaultValue(t, "XfrChannelSize", defaultServerOptions.XfrChannelSize, 10)
 	assertDefaultValue(t, "APIContentType", defaultServerOptions.APIContentType, "application/vnd.kubernetes.protobuf")
 	assertDefaultValue(t, "GracefulShutdownTimeout", defaultServerOptions.GracefulShutdownTimeout, 0*time.Second)
+	assertDefaultValue(t, "BackendDialTimeout", defaultServerOptions.BackendDialTimeout, 0*time.Second)
 
 }
 
@@ -217,6 +218,21 @@ func TestValidate(t *testing.T) {
 		},
 		"PositiveGracefulShutdownTimeout": {
 			field:    "GracefulShutdownTimeout",
+			value:    30 * time.Second,
+			expected: nil,
+		},
+		"NegativeBackendDialTimeout": {
+			field:    "BackendDialTimeout",
+			value:    -1 * time.Second,
+			expected: fmt.Errorf("backend-dial-timeout must be >= 0, got -1s"),
+		},
+		"ZeroBackendDialTimeout": {
+			field:    "BackendDialTimeout",
+			value:    0 * time.Second,
+			expected: nil,
+		},
+		"PositiveBackendDialTimeout": {
+			field:    "BackendDialTimeout",
 			value:    30 * time.Second,
 			expected: nil,
 		},
