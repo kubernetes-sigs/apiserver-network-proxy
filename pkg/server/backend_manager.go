@@ -43,13 +43,16 @@ import (
 // agent.AgentService_ConnectServer, provides synchronization and
 // emits common stream metrics.
 type Backend struct {
-	sendLock sync.Mutex
-	recvLock sync.Mutex
-	conn     agent.AgentService_ConnectServer
+	sendLock   sync.Mutex
+	recvLock   sync.Mutex
+	retireOnce sync.Once
+	conn       agent.AgentService_ConnectServer
 
 	// cached from conn.Context()
 	id     string
 	idents header.Identifiers
+
+	done chan struct{}
 
 	// draining indicates if this backend is draining and should not accept new connections
 	draining atomic.Bool
@@ -63,6 +66,17 @@ func (b *Backend) IsDraining() bool {
 // SetDraining marks the backend as draining
 func (b *Backend) SetDraining() {
 	b.draining.Store(true)
+}
+
+func (b *Backend) Retire() {
+	b.SetDraining()
+	b.retireOnce.Do(func() {
+		close(b.done)
+	})
+}
+
+func (b *Backend) Done() <-chan struct{} {
+	return b.done
 }
 
 func (b *Backend) Send(p *client.Packet) error {
@@ -145,7 +159,7 @@ func NewBackend(conn agent.AgentService_ConnectServer) (*Backend, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &Backend{conn: conn, id: agentID, idents: agentIdentifiers}, nil
+	return &Backend{conn: conn, id: agentID, idents: agentIdentifiers, done: make(chan struct{})}, nil
 }
 
 // BackendStorage is an interface to manage the storage of the backend

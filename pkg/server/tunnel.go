@@ -17,6 +17,7 @@ limitations under the License.
 package server
 
 import (
+	"errors"
 	"fmt"
 	"io"
 	"math/rand"
@@ -120,26 +121,41 @@ func (t *Tunnel) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// This defer acts as a safeguard to ensure we clean up the pending dial
 	// if the connection is never successfully established.
 	established := false
+	dialFailureObserved := false
 	defer func() {
 		if !established {
 			if t.Server.PendingDial.Remove(random) != nil {
-				// This metric is observed only when the frontend closes the connection.
-				// Other failure reasons are observed elsewhere.
-				metrics.Metrics.ObserveDialFailure(metrics.DialFailureFrontendClose)
+				if !dialFailureObserved {
+					metrics.Metrics.ObserveDialFailure(metrics.DialFailureFrontendClose)
+				}
 			}
 		}
 	}()
 
-	if err := backend.Send(dialRequest); err != nil {
+	if err := t.Server.sendDialRequestToBackend(backend, dialRequest); err != nil {
 		klog.ErrorS(err, "failed to tunnel dial request", "host", r.Host, "dialID", connection.dialID, "agentID", connection.agentID)
-		metrics.Metrics.ObserveDialFailure(metrics.DialFailureBackendClose)
-		// Send proper HTTP error response
-		conn.Write([]byte(fmt.Sprintf("HTTP/1.1 502 Bad Gateway\r\nContent-Type: text/plain; charset=utf-8\r\n\r\nFailed to tunnel dial request: %v\r\n", err)))
+		dialFailureObserved = true
+		statusCode := http.StatusBadGateway
+		reason := metrics.DialFailureBackendClose
+		if errors.Is(err, errBackendDialTimeout) {
+			statusCode = http.StatusGatewayTimeout
+			reason = metrics.DialFailureBackendDialTimeout
+		}
+		metrics.Metrics.ObserveDialFailure(reason)
+		statusText := http.StatusText(statusCode)
+		conn.Write([]byte(fmt.Sprintf("HTTP/1.1 %d %s\r\nContent-Type: text/plain; charset=utf-8\r\n\r\nFailed to tunnel dial request: %v\r\n", statusCode, statusText, err)))
 		// The deferred cleanup will run when we return here.
 		return
 	}
 
 	ctxt := backend.Context()
+	var timeoutCh <-chan time.Time
+	var dialTimer *time.Timer
+	if t.Server.backendDialTimeout > 0 {
+		dialTimer = time.NewTimer(t.Server.backendDialTimeout)
+		defer dialTimer.Stop()
+		timeoutCh = dialTimer.C
+	}
 
 	select {
 	case <-connection.connected: // Waiting for response before we begin full communication.
@@ -166,8 +182,17 @@ func (t *Tunnel) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	case <-ctxt.Done(): // Backend connection died before being established
 		klog.ErrorS(ctxt.Err(), "backend context closed before connection was established", "host", r.Host, "dialID", connection.dialID, "agentID", connection.agentID)
 		metrics.Metrics.ObserveDialFailure(metrics.DialFailureBackendClose)
+		dialFailureObserved = true
 		// Send proper HTTP error response
 		conn.Write([]byte(fmt.Sprintf("HTTP/1.1 502 Bad Gateway\r\nContent-Type: text/plain; charset=utf-8\r\n\r\nBackend context error: %v\r\n", ctxt.Err())))
+		// The deferred cleanup will run when we return here.
+		return
+
+	case <-timeoutCh:
+		klog.ErrorS(errBackendDialTimeout, "backend dial timed out before connection was established", "host", r.Host, "dialID", connection.dialID, "agentID", connection.agentID)
+		metrics.Metrics.ObserveDialFailure(metrics.DialFailureBackendDialTimeout)
+		dialFailureObserved = true
+		conn.Write([]byte(fmt.Sprintf("HTTP/1.1 504 Gateway Timeout\r\nContent-Type: text/plain; charset=utf-8\r\n\r\nBackend dial timeout: %v\r\n", errBackendDialTimeout)))
 		// The deferred cleanup will run when we return here.
 		return
 	}
