@@ -15,7 +15,7 @@ Creating a new release of network proxy involves releasing a new version of the 
     git push upstream "${RELEASE}"
     ```
 
-2. The first step involves creating a new git tag for the release, following semver for go libraries. A tag is required for both the repository and the konnectivity-client library. For example releasing the `0.99.0` version will have two tags `v0.36.0` and `konnectivity-client/v0.36.0` on the appropriate commit. The minor version number (the `y` in `x.y.z`) should match the minor version of the Kubernetes version that is utilized by the apiserver-network-proxy. The patch level version number (the `z` in `x.y.z`) should increase by one unless a new minor version is being created, in which case it should be `0`.
+2. The first step involves creating a new git tag for the release, following semver for go libraries. A tag is required for both the repository and the konnectivity-client library. For example releasing the `0.36.0` version will have two tags `v0.36.0` and `konnectivity-client/v0.36.0` on the appropriate commit. The minor version number (the `y` in `x.y.z`) should match the minor version of the Kubernetes version that is utilized by the apiserver-network-proxy. The patch level version number (the `z` in `x.y.z`) should increase by one unless a new minor version is being created, in which case it should be `0`.
 
     In the master branch, choose the appropriate commit, and determine a patch version based on the required Kubernetes version and the current patch level.
 
@@ -38,7 +38,7 @@ Creating a new release of network proxy involves releasing a new version of the 
     Example commands for `HEAD` of `release-0.36` branch:
 
     ```
-    # Assuming v0.1.35 exists, then it is on the release-0.36 branch
+    # Assuming v0.35.0 exists, then it is on the release-0.36 branch
     export RELEASE=release-0.36
     export TAG=v0.36.0
     export MESSAGE="Meaningful description of change."
