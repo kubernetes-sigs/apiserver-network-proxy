@@ -52,6 +52,11 @@ func TestDefaultServerOptions(t *testing.T) {
 	assertDefaultValue(t, "WarnOnChannelLimit", defaultAgentOptions.WarnOnChannelLimit, false)
 	assertDefaultValue(t, "SyncForever", defaultAgentOptions.SyncForever, false)
 	assertDefaultValue(t, "XfrChannelSize", defaultAgentOptions.XfrChannelSize, 150)
+	assertDefaultValue(t, "CountServerLeases", defaultAgentOptions.CountServerLeases, false)
+	assertDefaultValue(t, "LeaseNamespace", defaultAgentOptions.LeaseNamespace, "kube-system")
+	assertDefaultValue(t, "LeaseLabel", defaultAgentOptions.LeaseLabel, "k8s-app=konnectivity-server")
+	assertDefaultValue(t, "ServerCountSource", defaultAgentOptions.ServerCountSource, "default")
+	assertDefaultValue(t, "KubeconfigPath", defaultAgentOptions.KubeconfigPath, "")
 	assertDefaultValue(t, "APIContentType", defaultAgentOptions.APIContentType, "application/vnd.kubernetes.protobuf")
 }
 
@@ -216,6 +221,41 @@ func TestValidate(t *testing.T) {
 				"lease-label-selector": "k8s-app=konnectivity-server,component=proxy",
 			},
 			expected: "",
+		},
+		"LeaseLabelValidWithCountServerLeases": {
+			fieldMap: map[string]any{
+				"CountServerLeases": true,
+				"LeaseLabel":        "k8s-app=konnectivity-server",
+			},
+			expected: nil,
+		},
+		"LeaseLabelEmptyWithCountServerLeases": {
+			fieldMap: map[string]any{
+				"CountServerLeases": true,
+				"LeaseLabel":        "",
+			},
+			expected: fmt.Errorf("empty string provided"),
+		},
+		"LeaseLabelInvalidFormatWithCountServerLeases": {
+			fieldMap: map[string]any{
+				"CountServerLeases": true,
+				"LeaseLabel":        "notavalidlabel",
+			},
+			expected: fmt.Errorf("invalid label format: notavalidlabel"),
+		},
+		"LeaseLabelMultipleValidWithCountServerLeases": {
+			fieldMap: map[string]any{
+				"CountServerLeases": true,
+				"LeaseLabel":        "k8s-app=konnectivity-server,component=proxy",
+			},
+			expected: nil,
+		},
+		"LeaseLabelInvalidIgnoredWithoutCountServerLeases": {
+			fieldMap: map[string]any{
+				"CountServerLeases": false,
+				"LeaseLabel":        "notavalidlabel",
+			},
+			expected: nil,
 		},
 	} {
 		t.Run(desc, func(t *testing.T) {
