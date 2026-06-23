@@ -52,7 +52,7 @@ func TestDefaultServerOptions(t *testing.T) {
 	assertDefaultValue(t, "XfrChannelSize", defaultAgentOptions.XfrChannelSize, 150)
 	assertDefaultValue(t, "CountServerLeases", defaultAgentOptions.CountServerLeases, false)
 	assertDefaultValue(t, "LeaseNamespace", defaultAgentOptions.LeaseNamespace, "kube-system")
-	assertDefaultValue(t, "LeaseLabel", defaultAgentOptions.LeaseLabel, "k8s-app=konnectivity-server")
+	assertDefaultValue(t, "LeaseLabelSelector", defaultAgentOptions.LeaseLabelSelector.String(), "k8s-app=konnectivity-server")
 	assertDefaultValue(t, "ServerCountSource", defaultAgentOptions.ServerCountSource, "default")
 	assertDefaultValue(t, "KubeconfigPath", defaultAgentOptions.KubeconfigPath, "")
 	assertDefaultValue(t, "APIContentType", defaultAgentOptions.APIContentType, "application/vnd.kubernetes.protobuf")
@@ -164,38 +164,51 @@ func TestValidate(t *testing.T) {
 			fieldMap: map[string]any{"server-count-source": "foobar"},
 			expected: "--server-count-source must be one of '', 'default', 'max', got foobar",
 		},
-		"LeaseLabelValidWithCountServerLeases": {
+		"LeaseLabelValid": {
 			fieldMap: map[string]any{
-				"count-server-leases": true,
-				"lease-label":         "k8s-app=konnectivity-server",
+				"lease-label": "k8s-app=konnectivity-server",
 			},
 			expected: "",
 		},
-		"LeaseLabelEmptyWithCountServerLeases": {
+		"LeaseLabelEmpty": {
 			fieldMap: map[string]any{
-				"count-server-leases": true,
-				"lease-label":         "",
-			},
-			expected: "empty string provided",
-		},
-		"LeaseLabelInvalidFormatWithCountServerLeases": {
-			fieldMap: map[string]any{
-				"count-server-leases": true,
-				"lease-label":         "notavalidlabel",
-			},
-			expected: "invalid label format: notavalidlabel",
-		},
-		"LeaseLabelMultipleValidWithCountServerLeases": {
-			fieldMap: map[string]any{
-				"count-server-leases": true,
-				"lease-label":         "k8s-app=konnectivity-server,component=proxy",
+				"lease-label": "",
 			},
 			expected: "",
 		},
-		"LeaseLabelInvalidIgnoredWithoutCountServerLeases": {
+		"LeaseLabelInvalidFormat": {
 			fieldMap: map[string]any{
-				"count-server-leases": false,
-				"lease-label":         "notavalidlabel",
+				"lease-label": "*notavalidlabel*",
+			},
+			expected: `invalid argument "*notavalidlabel*" for "--lease-label" flag`,
+		},
+		"LeaseLabelMultipleValid": {
+			fieldMap: map[string]any{
+				"lease-label": "k8s-app=konnectivity-server,component=proxy",
+			},
+			expected: "",
+		},
+		"LeaseLabelSelectorValid": {
+			fieldMap: map[string]any{
+				"lease-label-selector": "k8s-app=konnectivity-server",
+			},
+			expected: "",
+		},
+		"LeaseLabelSelectorEmpty": {
+			fieldMap: map[string]any{
+				"lease-label-selector": "",
+			},
+			expected: "",
+		},
+		"LeaseLabelSelectorInvalidFormat": {
+			fieldMap: map[string]any{
+				"lease-label-selector": "*notavalidlabel*",
+			},
+			expected: `invalid argument "*notavalidlabel*" for "--lease-label-selector" flag`,
+		},
+		"LeaseLabelSelectorMultipleValid": {
+			fieldMap: map[string]any{
+				"lease-label-selector": "k8s-app=konnectivity-server,component=proxy",
 			},
 			expected: "",
 		},
