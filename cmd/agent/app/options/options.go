@@ -17,6 +17,7 @@ limitations under the License.
 package options
 
 import (
+	"cmp"
 	"fmt"
 	"net"
 	"net/url"
@@ -27,6 +28,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/spf13/pflag"
 	"google.golang.org/grpc"
+	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/klog/v2"
 
@@ -87,8 +89,8 @@ type GrpcProxyAgentOptions struct {
 	CountServerLeases bool
 	// Namespace where lease objects are managed.
 	LeaseNamespace string
-	// Labels on which lease objects are managed.
-	LeaseLabel string
+	// Label selector for leases to take into account when counting servers.
+	LeaseLabelSelector labels.Selector
 	// ServerCountSource describes how server counts should be combined.
 	ServerCountSource string
 	// Path to kubeconfig (used by kubernetes client for lease listing)
@@ -140,7 +142,10 @@ func (o *GrpcProxyAgentOptions) Flags() *pflag.FlagSet {
 	flags.IntVar(&o.XfrChannelSize, "xfr-channel-size", 150, "Set the size of the channel for transferring data between the agent and the proxy server.")
 	flags.BoolVar(&o.CountServerLeases, "count-server-leases", o.CountServerLeases, "Enables lease counting system to determine the number of proxy servers to connect to.")
 	flags.StringVar(&o.LeaseNamespace, "lease-namespace", o.LeaseNamespace, "Namespace where lease objects are managed.")
-	flags.StringVar(&o.LeaseLabel, "lease-label", o.LeaseLabel, "The labels on which the lease objects are managed.")
+	flags.VarP(labelSelectorFlag{&o.LeaseLabelSelector}, "lease-label-selector", "", "Label selector for leases to take into account when counting servers.")
+	leaseLabelFlag := flags.VarPF(labelSelectorFlag{&o.LeaseLabelSelector}, "lease-label", "", "")
+	leaseLabelFlag.Hidden = true
+	leaseLabelFlag.Deprecated = "Use --lease-label-selector instead"
 	flags.StringVar(&o.ServerCountSource, "server-count-source", o.ServerCountSource, "Defines how the server counts from lease and from server responses are combined. Possible values: 'default' to use only one source (server or leases depending on other flags), 'max' to take the larger value.")
 	flags.StringVar(&o.KubeconfigPath, "kubeconfig", o.KubeconfigPath, "Path to the kubeconfig file")
 	flags.StringVar(&o.APIContentType, "kube-api-content-type", o.APIContentType, "Content type of requests sent to apiserver.")
@@ -171,7 +176,7 @@ func (o *GrpcProxyAgentOptions) Print() {
 	klog.V(1).Infof("SyncForever set to %v.\n", o.SyncForever)
 	klog.V(1).Infof("CountServerLeases set to %v.\n", o.CountServerLeases)
 	klog.V(1).Infof("LeaseNamespace set to %s.\n", o.LeaseNamespace)
-	klog.V(1).Infof("LeaseLabel set to %s.\n", o.LeaseLabel)
+	klog.V(1).Infof("LeaseLabelSelector set to %s.\n", o.LeaseLabelSelector)
 	klog.V(1).Infof("ServerCountSource set to %s.\n", o.ServerCountSource)
 	klog.V(1).Infof("ChannelSize set to %d.\n", o.XfrChannelSize)
 	klog.V(1).Infof("APIContentType set to %v.\n", o.APIContentType)
@@ -231,12 +236,6 @@ func (o *GrpcProxyAgentOptions) Validate() error {
 		}
 	}
 	// Validate labels provided.
-	if o.CountServerLeases {
-		_, err := util.ParseLabels(o.LeaseLabel)
-		if err != nil {
-			return err
-		}
-	}
 	if o.ServerCountSource != "" {
 		if o.ServerCountSource != "default" && o.ServerCountSource != "max" {
 			return fmt.Errorf("--server-count-source must be one of '', 'default', 'max', got %v", o.ServerCountSource)
@@ -290,7 +289,7 @@ func NewGrpcProxyAgentOptions() *GrpcProxyAgentOptions {
 		XfrChannelSize:            150,
 		CountServerLeases:         false,
 		LeaseNamespace:            "kube-system",
-		LeaseLabel:                "k8s-app=konnectivity-server",
+		LeaseLabelSelector:        labels.ValidatedSetSelector{"k8s-app": "konnectivity-server"},
 		ServerCountSource:         "default",
 		KubeconfigPath:            "",
 		APIContentType:            runtime.ContentTypeProtobuf,
@@ -305,4 +304,29 @@ func defaultAgentID() string {
 		return id
 	}
 	return uuid.New().String()
+}
+
+type labelSelectorFlag struct {
+	inner *labels.Selector
+}
+
+// Type implements [pflag.Value].
+func (l labelSelectorFlag) Type() string {
+	return "string"
+}
+
+// String implements [pflag.Value].
+func (l labelSelectorFlag) String() string {
+	return cmp.Or(*l.inner, labels.Everything()).String()
+}
+
+// Set implements [pflag.Value].
+func (l labelSelectorFlag) Set(value string) error {
+	parsed, err := labels.Parse(value)
+	if err != nil {
+		return err
+	}
+
+	*l.inner = parsed
+	return nil
 }
