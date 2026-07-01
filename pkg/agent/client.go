@@ -50,6 +50,7 @@ type endpointConn struct {
 	connID    int64
 	cleanFunc func()
 	dataCh    chan []byte
+	sendCh    chan []byte
 	cleanOnce sync.Once
 	warnChLim bool
 	dialDone  chan struct{}
@@ -59,8 +60,7 @@ func (e *endpointConn) cleanup() {
 	e.cleanOnce.Do(e.cleanFunc)
 }
 
-func (e *endpointConn) send(msg []byte) {
-	// TODO (cheftako@): Get perf test working and compare this solution with a lock based solution.
+func (e *endpointConn) sendViaDataChannel(msg []byte) {
 	defer func() {
 		// Handles the race condition where we write to a closed channel
 		if err := recover(); err != nil {
@@ -383,9 +383,11 @@ func (a *Client) Serve() {
 
 			connID := atomic.AddInt64(&a.nextConnID, 1)
 			dataCh := make(chan []byte, a.cs.xfrChannelSize)
+			sendCh := make(chan []byte, a.cs.xfrChannelSize)
 			dialDone := make(chan struct{})
 			eConn := &endpointConn{
 				dataCh:    dataCh,
+				sendCh:    sendCh,
 				dialDone:  dialDone,
 				warnChLim: a.warnOnChannelLimit,
 			}
@@ -476,8 +478,9 @@ func (a *Client) Serve() {
 					go runpprof.Do(context.Background(), labels, func(context.Context) { eConn.cleanup() })
 					return
 				}
-				go runpprof.Do(context.Background(), labels, func(context.Context) { a.remoteToProxy(connID, eConn) })
-				go runpprof.Do(context.Background(), labels, func(context.Context) { a.proxyToRemote(connID, eConn) })
+				go runpprof.Do(context.Background(), labels, func(context.Context) { a.remoteToSendChannel(connID, eConn) })
+				go runpprof.Do(context.Background(), labels, func(context.Context) { a.sendChannelToProxy(connID, eConn) })
+				go runpprof.Do(context.Background(), labels, func(context.Context) { a.dataChannelToRemote(connID, eConn) })
 			})
 
 		case client.PacketType_DATA:
@@ -490,7 +493,7 @@ func (a *Client) Serve() {
 
 			eConn, ok := a.connManager.Get(data.ConnectID)
 			if ok {
-				eConn.send(data.Data)
+				eConn.sendViaDataChannel(data.Data)
 			} else {
 				klog.V(2).InfoS("received DATA for unrecognized connection", "connectionID", data.ConnectID)
 				a.Send(&client.Packet{
@@ -534,20 +537,18 @@ func (a *Client) Serve() {
 	}
 }
 
-func (a *Client) remoteToProxy(connID int64, eConn *endpointConn) {
+func (a *Client) remoteToSendChannel(connID int64, eConn *endpointConn) {
 	defer func() {
 		if panicInfo := recover(); panicInfo != nil {
-			klog.V(2).InfoS("Exiting remoteToProxy with recovery", "panicInfo", panicInfo, "connectionID", connID)
+			klog.V(2).InfoS("Exiting remoteToSendChannel with recovery", "panicInfo", panicInfo, "connectionID", connID)
 		} else {
-			klog.V(4).InfoS("Exiting remoteToProxy", "connectionID", connID)
+			klog.V(4).InfoS("Exiting remoteToSendChannel", "connectionID", connID)
 		}
 	}()
 	defer eConn.cleanup()
+	defer close(eConn.sendCh)
 
 	var buf [1 << 12]byte
-	resp := &client.Packet{
-		Type: client.PacketType_DATA,
-	}
 
 	for {
 		n, err := eConn.conn.Read(buf[:])
@@ -567,8 +568,33 @@ func (a *Client) remoteToProxy(connID int64, eConn *endpointConn) {
 			return
 		}
 
+		data := make([]byte, n)
+		copy(data, buf[:n])
+
+		select {
+		case eConn.sendCh <- data:
+		case <-a.stopCh:
+			return
+		}
+	}
+}
+
+func (a *Client) sendChannelToProxy(connID int64, eConn *endpointConn) {
+	defer func() {
+		if panicInfo := recover(); panicInfo != nil {
+			klog.V(2).InfoS("Exiting sendChannelToProxy with recovery", "panicInfo", panicInfo, "connectionID", connID)
+		} else {
+			klog.V(4).InfoS("Exiting sendChannelToProxy", "connectionID", connID)
+		}
+	}()
+
+	resp := &client.Packet{
+		Type: client.PacketType_DATA,
+	}
+
+	for d := range eConn.sendCh {
 		resp.Payload = &client.Packet_Data{Data: &client.Data{
-			Data:      buf[:n],
+			Data:      d,
 			ConnectID: connID,
 		}}
 		if err := a.Send(resp); err != nil {
@@ -577,12 +603,12 @@ func (a *Client) remoteToProxy(connID int64, eConn *endpointConn) {
 	}
 }
 
-func (a *Client) proxyToRemote(connID int64, eConn *endpointConn) {
+func (a *Client) dataChannelToRemote(connID int64, eConn *endpointConn) {
 	defer func() {
 		if panicInfo := recover(); panicInfo != nil {
-			klog.V(2).InfoS("Exiting proxyToRemote with recovery", "panicInfo", panicInfo, "connectionID", connID)
+			klog.V(2).InfoS("Exiting dataChannelToRemote with recovery", "panicInfo", panicInfo, "connectionID", connID)
 		} else {
-			klog.V(4).InfoS("Exiting proxyToRemote", "connectionID", connID)
+			klog.V(4).InfoS("Exiting dataChannelToRemote", "connectionID", connID)
 		}
 	}()
 	// Not safe to call cleanup here, as cleanup() closes the dataCh
@@ -599,7 +625,7 @@ func (a *Client) proxyToRemote(connID int64, eConn *endpointConn) {
 			discardedPktCount++
 		}
 		if discardedPktCount > 0 {
-			klog.V(2).InfoS("Discard packets while exiting proxyToRemote", "pktCount", discardedPktCount, "connectionID", connID)
+			klog.V(2).InfoS("Discard packets while exiting dataChannelToRemote", "pktCount", discardedPktCount, "connectionID", connID)
 		}
 	}()
 
