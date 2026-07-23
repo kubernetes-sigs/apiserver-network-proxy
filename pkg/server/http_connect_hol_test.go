@@ -477,3 +477,105 @@ func TestSlowHTTPFrontendDoesNotDelayDialResponse(t *testing.T) {
 		}
 	}
 }
+
+// TestSlowHTTPFrontendDoesNotDelayOtherConnectionData targets DATA-path head-of-
+// line blocking between established HTTP-CONNECT connections.
+//
+// The test:
+//  1. Registers established connections A and B on the same agent stream.
+//  2. Blocks A inside its hijacked-socket Write.
+//  3. Delivers DATA for B while A remains blocked.
+//  4. Requires B to receive its exact payload without releasing or closing A.
+//
+// This prevents a control-packet-only fix that prioritizes DIAL_RSP while
+// leaving unrelated DATA on the same blocking shared-consumer path.
+func TestSlowHTTPFrontendDoesNotDelayOtherConnectionData(t *testing.T) {
+	const (
+		agentID    = "agent-1"
+		connectIDA = int64(1001)
+		connectIDB = int64(1002)
+		payloadB   = "response for connection B"
+	)
+
+	proxyServer := NewProxyServer(
+		"",
+		[]proxystrategies.ProxyStrategy{proxystrategies.ProxyStrategyDefault},
+		1,
+		nil,
+		1,
+	)
+	backend := &Backend{id: agentID}
+
+	slowHTTP := newBlockingHTTPReadWriter()
+	connectionA := &ProxyClientConnection{
+		Mode:      ModeHTTPConnect,
+		HTTP:      slowHTTP,
+		CloseHTTP: func() error { slowHTTP.release(); return nil },
+		connected: make(chan struct{}),
+		connectID: connectIDA,
+		agentID:   agentID,
+		backend:   backend,
+	}
+	proxyServer.addEstablished(agentID, connectIDA, connectionA)
+
+	recordingHTTP := newRecordingHTTPReadWriter()
+	connectionB := &ProxyClientConnection{
+		Mode:      ModeHTTPConnect,
+		HTTP:      recordingHTTP,
+		CloseHTTP: func() error { return nil },
+		connected: make(chan struct{}),
+		connectID: connectIDB,
+		agentID:   agentID,
+		backend:   backend,
+	}
+	proxyServer.addEstablished(agentID, connectIDB, connectionB)
+
+	recvCh := make(chan *client.Packet, 1)
+	consumerDone := make(chan struct{})
+	go func() {
+		defer close(consumerDone)
+		proxyServer.serveRecvBackend(backend, agentID, recvCh)
+	}()
+
+	t.Cleanup(func() {
+		slowHTTP.release()
+		close(recvCh)
+		select {
+		case <-consumerDone:
+		case <-time.After(holTestSafetyTimeout):
+			t.Errorf("serveRecvBackend did not exit during test cleanup")
+		}
+	})
+
+	recvCh <- dataPkt(connectIDA, []byte("response for connection A"))
+	select {
+	case <-slowHTTP.writeStarted:
+	case <-time.After(holTestSafetyTimeout):
+		t.Fatal("connection A did not enter the blocking HTTP Write")
+	}
+
+	recvCh <- dataPkt(connectIDB, []byte(payloadB))
+
+	select {
+	case got := <-recordingHTTP.writes:
+		if string(got) != payloadB {
+			t.Fatalf("connection B received payload %q, want %q", got, payloadB)
+		}
+		if slowHTTP.released() {
+			t.Fatal("connection A was released/closed before B received DATA; B must progress via isolation, not by killing A")
+		}
+	case <-time.After(holTestSafetyTimeout):
+		// Release A only to prove that its blocked write was preventing B's DATA
+		// from being processed and to allow deterministic cleanup.
+		slowHTTP.release()
+		select {
+		case got := <-recordingHTTP.writes:
+			if string(got) != payloadB {
+				t.Fatalf("connection B received payload %q after A was released, want %q", got, payloadB)
+			}
+			t.Fatal("connection B received DATA only after connection A's blocked HTTP Write was released")
+		case <-time.After(holTestSafetyTimeout):
+			t.Fatal("connection B did not receive DATA even after connection A was released")
+		}
+	}
+}
