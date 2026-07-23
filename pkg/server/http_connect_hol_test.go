@@ -1428,3 +1428,158 @@ func TestConcurrentHTTPFrontendAndBackendClose(t *testing.T) {
 		t.Fatal("connection reappeared in pending state after concurrent close")
 	}
 }
+
+// TestManySlowHTTPFrontendsDoNotDelayDialResponse targets a fix that isolates
+// only one slow frontend but still stalls behind several slow connections.
+//
+// For slow-frontend counts 2 and 10, the test:
+//  1. Registers each slow connection on one agent stream.
+//  2. Blocks the connections in deterministic stream order.
+//  3. Delivers DIAL_RSP and DATA for healthy connection B after all slow DATA.
+//  4. Requires B to establish and receive its exact DATA before any slow
+//     frontend is released or closed.
+//  5. Requires all slow connections to remain alive through B's progress.
+//
+// The contract is observable multi-connection isolation; it does not require a
+// per-connection worker, queue, or other dispatch architecture.
+func TestManySlowHTTPFrontendsDoNotDelayDialResponse(t *testing.T) {
+	for _, slowFrontendCount := range []int{2, 10} {
+		slowFrontendCount := slowFrontendCount
+		t.Run(fmt.Sprintf("slow_frontends=%d", slowFrontendCount), func(t *testing.T) {
+			runManySlowHTTPFrontendsDialResponseCase(t, slowFrontendCount)
+		})
+	}
+}
+
+func runManySlowHTTPFrontendsDialResponseCase(t *testing.T, slowFrontendCount int) {
+	const (
+		agentID    = "agent-1"
+		dialIDB    = int64(2001)
+		connectIDB = int64(3001)
+		payloadB   = "response for healthy connection B"
+	)
+
+	proxyServer := NewProxyServer(
+		"",
+		[]proxystrategies.ProxyStrategy{proxystrategies.ProxyStrategyDefault},
+		1,
+		nil,
+		slowFrontendCount,
+	)
+	backend := &Backend{id: agentID}
+
+	slowHTTPs := make([]*blockingHTTPReadWriter, 0, slowFrontendCount)
+	connectIDs := make([]int64, 0, slowFrontendCount)
+	for i := 0; i < slowFrontendCount; i++ {
+		slowHTTP := newBlockingHTTPReadWriter()
+		connectID := int64(1001 + i)
+		connection := &ProxyClientConnection{
+			Mode:      ModeHTTPConnect,
+			HTTP:      slowHTTP,
+			CloseHTTP: func() error { slowHTTP.release(); return nil },
+			connected: make(chan struct{}),
+			connectID: connectID,
+			agentID:   agentID,
+			backend:   backend,
+		}
+		proxyServer.addEstablished(agentID, connectID, connection)
+		slowHTTPs = append(slowHTTPs, slowHTTP)
+		connectIDs = append(connectIDs, connectID)
+	}
+
+	recordingHTTP := newRecordingHTTPReadWriter()
+	connectionB := &ProxyClientConnection{
+		Mode:      ModeHTTPConnect,
+		HTTP:      recordingHTTP,
+		CloseHTTP: func() error { return nil },
+		connected: make(chan struct{}),
+		dialID:    dialIDB,
+		agentID:   agentID,
+		start:     time.Now(),
+		backend:   backend,
+	}
+	proxyServer.PendingDial.Add(dialIDB, connectionB)
+
+	// Writer 0's DATA is dequeued before the remaining packets are staged.
+	// Capacity N therefore holds exactly the remaining N-1 DATA packets plus
+	// B's final DIAL_RSP, so the producer cannot become the source of the stall.
+	recvCh := make(chan *client.Packet, slowFrontendCount)
+	consumerDone := make(chan struct{})
+	go func() {
+		defer close(consumerDone)
+		proxyServer.serveRecvBackend(backend, agentID, recvCh)
+	}()
+
+	releaseAll := func() {
+		for _, slowHTTP := range slowHTTPs {
+			slowHTTP.release()
+		}
+	}
+	t.Cleanup(func() {
+		releaseAll()
+		close(recvCh)
+		select {
+		case <-consumerDone:
+		case <-time.After(holTestSafetyTimeout):
+			t.Errorf("serveRecvBackend did not exit during test cleanup")
+		}
+	})
+
+	// Establish one actually blocked frontend before staging the remaining slow
+	// connections and B. The test does not require the implementation to start a
+	// Write for every other slow connection; only healthy B's progress matters.
+	recvCh <- dataPkt(connectIDs[0], []byte("response for slow connection 0"))
+	select {
+	case <-slowHTTPs[0].writeStarted:
+	case <-time.After(holTestSafetyTimeout):
+		t.Fatal("first slow connection did not enter the blocking HTTP Write")
+	}
+
+	for i := 1; i < slowFrontendCount; i++ {
+		recvCh <- dataPkt(connectIDs[i], []byte(fmt.Sprintf("response for slow connection %d", i)))
+	}
+	recvCh <- &client.Packet{
+		Type: client.PacketType_DIAL_RSP,
+		Payload: &client.Packet_DialResponse{
+			DialResponse: &client.DialResponse{
+				Random:    dialIDB,
+				ConnectID: connectIDB,
+			},
+		},
+	}
+
+	select {
+	case <-connectionB.connected:
+		// A DIAL_RSP-only priority mechanism is insufficient: after B establishes,
+		// exact DATA for B must also traverse the same loaded backend path.
+		recvCh <- dataPkt(connectIDB, []byte(payloadB))
+		select {
+		case got := <-recordingHTTP.writes:
+			if string(got) != payloadB {
+				t.Fatalf("connection B received payload %q, want %q", got, payloadB)
+			}
+		case <-time.After(holTestSafetyTimeout):
+			t.Fatal("connection B established but its DATA was delayed by the slow HTTP frontends")
+		}
+
+		// Each slow connection has only one DATA packet, so closing one is not a
+		// legitimate overflow response. The monotonic release signal catches a
+		// connection killed at any point before healthy B's DATA was delivered.
+		for i, slowHTTP := range slowHTTPs {
+			if slowHTTP.released() {
+				t.Fatalf("slow connection %d was released/closed to make healthy B progress", i)
+			}
+		}
+	case <-time.After(holTestSafetyTimeout):
+		// Release the slow frontends only after B failed to progress. If B then
+		// establishes, their blocked writes caused the failure without constraining
+		// how a correct implementation must dispatch writes.
+		releaseAll()
+		select {
+		case <-connectionB.connected:
+			t.Fatal("connection B established only after the slow HTTP frontends were released")
+		case <-time.After(holTestSafetyTimeout):
+			t.Fatal("connection B did not establish even after the slow HTTP frontends were released")
+		}
+	}
+}
