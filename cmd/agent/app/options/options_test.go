@@ -50,6 +50,7 @@ func TestDefaultServerOptions(t *testing.T) {
 	assertDefaultValue(t, "ServiceAccountTokenPath", defaultAgentOptions.ServiceAccountTokenPath, "")
 	assertDefaultValue(t, "WarnOnChannelLimit", defaultAgentOptions.WarnOnChannelLimit, false)
 	assertDefaultValue(t, "SyncForever", defaultAgentOptions.SyncForever, false)
+	assertDefaultValue(t, "SyncImmediatelyOnDuplicate", defaultAgentOptions.SyncImmediatelyOnDuplicate, false)
 	assertDefaultValue(t, "XfrChannelSize", defaultAgentOptions.XfrChannelSize, 150)
 	assertDefaultValue(t, "APIContentType", defaultAgentOptions.APIContentType, "application/vnd.kubernetes.protobuf")
 }
