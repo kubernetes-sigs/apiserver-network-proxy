@@ -100,6 +100,14 @@ type ClientSet struct {
 	// and the agent figures out from these observations how many
 	// agent-to-proxy-server connections it should maintain.
 	serverCountSource string
+
+	// syncImmediatelyOnDuplicate controls the retry delay when a reconnection
+	// attempt lands on a proxy server we are already connected to
+	// (DuplicateServerError) while we still need more connections. When true,
+	// the agent retries immediately instead of waiting a sync interval, which
+	// speeds up reconnection behind DNS load balancing at the cost of more
+	// frequent connection attempts. Defaults to false (the previous behavior).
+	syncImmediatelyOnDuplicate bool
 }
 
 func (cs *ClientSet) ClientsCount() int {
@@ -177,6 +185,10 @@ type ClientSetConfig struct {
 	XfrChannelSize          int
 	ServerLeaseCounter      ServerCounter
 	ServerCountSource       string
+
+	// SyncImmediatelyOnDuplicate enables immediate reconnection retries on
+	// DuplicateServerError while more connections are still needed.
+	SyncImmediatelyOnDuplicate bool
 }
 
 func (cc *ClientSetConfig) NewAgentClientSet(drainCh, stopCh <-chan struct{}) *ClientSet {
@@ -197,6 +209,8 @@ func (cc *ClientSetConfig) NewAgentClientSet(drainCh, stopCh <-chan struct{}) *C
 		stopCh:                  stopCh,
 		leaseCounter:            cc.ServerLeaseCounter,
 		serverCountSource:       cc.ServerCountSource,
+
+		syncImmediatelyOnDuplicate: cc.SyncImmediatelyOnDuplicate,
 	}
 }
 
@@ -219,25 +233,19 @@ func (cs *ClientSet) sync() {
 	defer cs.shutdown()
 	backoff := cs.resetBackoff()
 	var duration time.Duration
+	// immediateRetries counts consecutive zero-delay reconnection attempts made
+	// under syncImmediatelyOnDuplicate, so they can be bounded (see
+	// nextResyncDuration). It resets whenever a connection makes progress.
+	immediateRetries := 0
 	for {
-		if serverCount, err := cs.connectOnce(); err != nil {
-			if dse, ok := err.(*DuplicateServerError); ok {
-				clientsCount := cs.ClientsCount()
-				klog.V(4).InfoS("duplicate server", "serverID", dse.ServerID, "serverCount", serverCount, "clientsCount", clientsCount)
-				if serverCount != 0 && clientsCount >= serverCount {
-					duration = backoff.Step()
-				} else {
-					backoff = cs.resetBackoff()
-					duration = wait.Jitter(backoff.Duration, backoff.Jitter)
-				}
-			} else {
-				klog.ErrorS(err, "cannot connect once")
-				duration = backoff.Step()
-			}
-		} else {
-			backoff = cs.resetBackoff()
-			duration = wait.Jitter(backoff.Duration, backoff.Jitter)
+		serverCount, err := cs.connectOnce()
+		clientsCount := cs.ClientsCount()
+		if dse, ok := err.(*DuplicateServerError); ok {
+			klog.V(4).InfoS("duplicate server", "serverID", dse.ServerID, "serverCount", serverCount, "clientsCount", clientsCount)
+		} else if err != nil {
+			klog.ErrorS(err, "cannot connect once")
 		}
+		duration, backoff, immediateRetries = cs.nextResyncDuration(backoff, immediateRetries, err, serverCount, clientsCount)
 		time.Sleep(duration)
 		select {
 		case <-cs.stopCh:
@@ -245,6 +253,46 @@ func (cs *ClientSet) sync() {
 		default:
 		}
 	}
+}
+
+// nextResyncDuration decides how long sync() waits before the next connectOnce
+// attempt. It returns the delay, the (possibly reset) backoff to use afterwards,
+// and the updated count of consecutive immediate reconnection retries. It is
+// separated from sync() so the branching can be unit tested without a live
+// proxy server.
+func (cs *ClientSet) nextResyncDuration(backoff *wait.Backoff, immediateRetries int, err error, serverCount, clientsCount int) (time.Duration, *wait.Backoff, int) {
+	if _, ok := err.(*DuplicateServerError); ok {
+		if serverCount != 0 && clientsCount >= serverCount {
+			// We already hold as many connections as there are servers, so the
+			// duplicate means there is nothing new to connect to: back off.
+			return backoff.Step(), backoff, 0
+		}
+		if cs.syncImmediatelyOnDuplicate && serverCount != 0 && clientsCount < serverCount && immediateRetries < serverCount {
+			// Opt-in: we have a known connection deficit but landed on a server
+			// we are already connected to. Retry immediately instead of waiting
+			// a full sync interval, so the next dial can pick the missing server
+			// via DNS load balancing. Bounded by serverCount consecutive attempts
+			// so a permanent deficit (a server count that can never be reached)
+			// cannot become an unbounded zero-delay reconnect loop; once the
+			// budget is spent we fall back to the jittered delay below until a
+			// connection makes progress.
+			return 0, backoff, immediateRetries + 1
+		}
+		// The server count is not known yet, immediate retry is disabled, or its
+		// budget is spent: wait a jittered sync interval before trying again.
+		// Preserve immediateRetries so a spent budget stays spent until a
+		// connection makes progress.
+		backoff = cs.resetBackoff()
+		return wait.Jitter(backoff.Duration, backoff.Jitter), backoff, immediateRetries
+	}
+	if err != nil {
+		// A real connection error: back off.
+		return backoff.Step(), backoff, 0
+	}
+	// A successful connection, or nothing to do: reset backoff and the immediate
+	// retry budget, then wait a sync interval before re-checking.
+	backoff = cs.resetBackoff()
+	return wait.Jitter(backoff.Duration, backoff.Jitter), backoff, 0
 }
 
 func (cs *ClientSet) ServerCount() int {

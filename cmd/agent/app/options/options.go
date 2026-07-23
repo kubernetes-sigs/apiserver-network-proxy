@@ -82,6 +82,11 @@ type GrpcProxyAgentOptions struct {
 	SyncForever    bool
 	XfrChannelSize int
 
+	// SyncImmediatelyOnDuplicate makes the agent retry a reconnection
+	// immediately, instead of waiting a sync interval, when it lands on a proxy
+	// server it is already connected to while more connections are still needed.
+	SyncImmediatelyOnDuplicate bool
+
 	// Enables updating the server count by counting the number of valid leases
 	// matching the selector.
 	CountServerLeases bool
@@ -111,6 +116,8 @@ func (o *GrpcProxyAgentOptions) ClientSetConfig(dialOptions ...grpc.DialOption) 
 		SyncForever:             o.SyncForever,
 		XfrChannelSize:          o.XfrChannelSize,
 		ServerCountSource:       o.ServerCountSource,
+
+		SyncImmediatelyOnDuplicate: o.SyncImmediatelyOnDuplicate,
 	}
 }
 
@@ -137,6 +144,7 @@ func (o *GrpcProxyAgentOptions) Flags() *pflag.FlagSet {
 	flags.StringVar(&o.AgentIdentifiers, "agent-identifiers", o.AgentIdentifiers, "Identifiers of the agent that will be used by the server when choosing agent. N.B. the list of identifiers must be in URL encoded format. e.g.,host=localhost&host=node1.mydomain.com&cidr=127.0.0.1/16&ipv4=1.2.3.4&ipv4=5.6.7.8&ipv6=:::::&default-route=true")
 	flags.BoolVar(&o.WarnOnChannelLimit, "warn-on-channel-limit", o.WarnOnChannelLimit, "Turns on a warning if the system is going to push to a full channel. The check involves an unsafe read.")
 	flags.BoolVar(&o.SyncForever, "sync-forever", o.SyncForever, "If true, the agent continues syncing, in order to support server count changes.")
+	flags.BoolVar(&o.SyncImmediatelyOnDuplicate, "sync-immediately-on-duplicate", o.SyncImmediatelyOnDuplicate, "If true, when a reconnection attempt lands on a proxy server the agent is already connected to while more connections are still needed, the agent retries immediately instead of waiting a sync interval. Speeds up reconnection behind DNS load balancing at the cost of more frequent connection attempts. Defaults to false (previous behavior).")
 	flags.IntVar(&o.XfrChannelSize, "xfr-channel-size", 150, "Set the size of the channel for transferring data between the agent and the proxy server.")
 	flags.BoolVar(&o.CountServerLeases, "count-server-leases", o.CountServerLeases, "Enables lease counting system to determine the number of proxy servers to connect to.")
 	flags.StringVar(&o.LeaseNamespace, "lease-namespace", o.LeaseNamespace, "Namespace where lease objects are managed.")
@@ -169,6 +177,7 @@ func (o *GrpcProxyAgentOptions) Print() {
 	klog.V(1).Infof("AgentIdentifiers set to %s.\n", util.PrettyPrintURL(o.AgentIdentifiers))
 	klog.V(1).Infof("WarnOnChannelLimit set to %t.\n", o.WarnOnChannelLimit)
 	klog.V(1).Infof("SyncForever set to %v.\n", o.SyncForever)
+	klog.V(1).Infof("SyncImmediatelyOnDuplicate set to %v.\n", o.SyncImmediatelyOnDuplicate)
 	klog.V(1).Infof("CountServerLeases set to %v.\n", o.CountServerLeases)
 	klog.V(1).Infof("LeaseNamespace set to %s.\n", o.LeaseNamespace)
 	klog.V(1).Infof("LeaseLabel set to %s.\n", o.LeaseLabel)
@@ -267,33 +276,34 @@ func validateAgentIdentifiers(agentIdentifiers string) error {
 
 func NewGrpcProxyAgentOptions() *GrpcProxyAgentOptions {
 	o := GrpcProxyAgentOptions{
-		AgentCert:                 "",
-		AgentKey:                  "",
-		CaCert:                    "",
-		ProxyServerHost:           "127.0.0.1",
-		ProxyServerPort:           8091,
-		HealthServerHost:          "",
-		HealthServerPort:          8093,
-		AdminBindAddress:          "127.0.0.1",
-		AdminServerPort:           8094,
-		EnableProfiling:           false,
-		EnableContentionProfiling: false,
-		AgentID:                   defaultAgentID(),
-		AgentIdentifiers:          "",
-		SyncInterval:              1 * time.Second,
-		ProbeInterval:             1 * time.Second,
-		SyncIntervalCap:           10 * time.Second,
-		KeepaliveTime:             1 * time.Hour,
-		ServiceAccountTokenPath:   "",
-		WarnOnChannelLimit:        false,
-		SyncForever:               false,
-		XfrChannelSize:            150,
-		CountServerLeases:         false,
-		LeaseNamespace:            "kube-system",
-		LeaseLabel:                "k8s-app=konnectivity-server",
-		ServerCountSource:         "default",
-		KubeconfigPath:            "",
-		APIContentType:            runtime.ContentTypeProtobuf,
+		AgentCert:                  "",
+		AgentKey:                   "",
+		CaCert:                     "",
+		ProxyServerHost:            "127.0.0.1",
+		ProxyServerPort:            8091,
+		HealthServerHost:           "",
+		HealthServerPort:           8093,
+		AdminBindAddress:           "127.0.0.1",
+		AdminServerPort:            8094,
+		EnableProfiling:            false,
+		EnableContentionProfiling:  false,
+		AgentID:                    defaultAgentID(),
+		AgentIdentifiers:           "",
+		SyncInterval:               1 * time.Second,
+		ProbeInterval:              1 * time.Second,
+		SyncIntervalCap:            10 * time.Second,
+		KeepaliveTime:              1 * time.Hour,
+		ServiceAccountTokenPath:    "",
+		WarnOnChannelLimit:         false,
+		SyncForever:                false,
+		SyncImmediatelyOnDuplicate: false,
+		XfrChannelSize:             150,
+		CountServerLeases:          false,
+		LeaseNamespace:             "kube-system",
+		LeaseLabel:                 "k8s-app=konnectivity-server",
+		ServerCountSource:          "default",
+		KubeconfigPath:             "",
+		APIContentType:             runtime.ContentTypeProtobuf,
 	}
 	return &o
 }
