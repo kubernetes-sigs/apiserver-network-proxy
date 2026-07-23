@@ -878,3 +878,103 @@ func TestBackendShutdownUnblocksSlowHTTPFrontend(t *testing.T) {
 		t.Fatal("connection remained established after backend shutdown")
 	}
 }
+
+// TestPerConnectionDataOrdering targets reordering, omission, duplication, and
+// close overtaking within one isolated HTTP-CONNECT connection.
+//
+// The test:
+//  1. Registers one established connection and blocks its first socket Write.
+//  2. Delivers three more DATA packets followed by CLOSE_RSP.
+//  3. Releases the first Write.
+//  4. Requires the concatenated DATA byte stream exactly once and in source
+//     order, followed by terminal close with no socket operation in flight.
+//
+// DATA packet boundaries need not map one-to-one to socket Write calls; the
+// observable contract is the byte stream and close ordering.
+func TestPerConnectionDataOrdering(t *testing.T) {
+	const (
+		agentID   = "agent-1"
+		connectID = int64(1001)
+	)
+	payloads := [][]byte{[]byte("first"), []byte("second"), []byte("third"), []byte("fourth")}
+	wantStream := bytes.Join(payloads, nil)
+
+	proxyServer := NewProxyServer(
+		"",
+		[]proxystrategies.ProxyStrategy{proxystrategies.ProxyStrategyDefault},
+		1,
+		nil,
+		len(payloads),
+	)
+	backend := &Backend{id: agentID}
+
+	frontendHTTP := newByteStreamHTTPReadWriter()
+	connection := &ProxyClientConnection{
+		Mode:      ModeHTTPConnect,
+		HTTP:      frontendHTTP,
+		CloseHTTP: frontendHTTP.close,
+		connected: make(chan struct{}),
+		connectID: connectID,
+		agentID:   agentID,
+		backend:   backend,
+	}
+	proxyServer.addEstablished(agentID, connectID, connection)
+
+	// Once the first DATA is dequeued, the channel has exactly enough capacity
+	// for the remaining DATA packets and the terminal CLOSE_RSP. Test-side sends
+	// therefore cannot become the source of the stall.
+	recvCh := make(chan *client.Packet, len(payloads))
+	consumerDone := make(chan struct{})
+	go func() {
+		defer close(consumerDone)
+		proxyServer.serveRecvBackend(backend, agentID, recvCh)
+	}()
+
+	t.Cleanup(func() {
+		frontendHTTP.release()
+		close(recvCh)
+		select {
+		case <-consumerDone:
+		case <-time.After(holTestSafetyTimeout):
+			t.Errorf("serveRecvBackend did not exit during test cleanup")
+		}
+	})
+
+	recvCh <- dataPkt(connectID, payloads[0])
+	select {
+	case <-frontendHTTP.firstWriteStarted:
+	case <-time.After(holTestSafetyTimeout):
+		t.Fatal("first DATA did not enter the blocking HTTP Write")
+	}
+
+	for _, payload := range payloads[1:] {
+		recvCh <- dataPkt(connectID, payload)
+	}
+	recvCh <- &client.Packet{
+		Type: client.PacketType_CLOSE_RSP,
+		Payload: &client.Packet_CloseResponse{
+			CloseResponse: &client.CloseResponse{ConnectID: connectID},
+		},
+	}
+
+	frontendHTTP.release()
+	select {
+	case <-frontendHTTP.closeObserved:
+	case <-time.After(holTestSafetyTimeout):
+		t.Fatal("timed out waiting for frontend close after ordered DATA")
+	}
+
+	gotStream, violations, closed, inFlight := frontendHTTP.snapshot()
+	if len(violations) > 0 {
+		t.Fatalf("frontend socket operations were not serialized: %v", violations)
+	}
+	if inFlight != 0 {
+		t.Fatalf("frontend close was observed with %d socket operations still in flight", inFlight)
+	}
+	if !closed {
+		t.Fatal("frontend did not observe the terminal close")
+	}
+	if !bytes.Equal(gotStream, wantStream) {
+		t.Fatalf("frontend byte stream = %q, want %q", gotStream, wantStream)
+	}
+}
