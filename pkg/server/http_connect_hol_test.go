@@ -18,6 +18,7 @@ package server
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -577,5 +578,190 @@ func TestSlowHTTPFrontendDoesNotDelayOtherConnectionData(t *testing.T) {
 		case <-time.After(holTestSafetyTimeout):
 			t.Fatal("connection B did not receive DATA even after connection A was released")
 		}
+	}
+}
+
+// TestTemporarilySlowHTTPFrontendRecovers targets the risk that isolation turns
+// a temporary socket slowdown into an unnecessary connection reset.
+//
+// The test:
+//  1. Registers established connections A and B on the same agent stream.
+//  2. Blocks A's first DATA write and places one additional DATA payload behind
+//     it.
+//  3. Delivers DATA to B and requires B to progress while A remains blocked.
+//  4. Requires A to remain established and open during the temporary slowdown.
+//  5. Makes A writable and requires both accepted payloads in byte-stream order.
+//  6. Delivers normal CLOSE_RSP and requires close only after A's bytes drain.
+//
+// This deliberately freezes the minimum nonzero recovery guarantee: one small
+// pending DATA payload must not overflow-close A. It does not choose a larger
+// queue depth or sustained-overflow threshold. A time-based policy must not
+// preempt the prompt recovery exercised here, but the test does not decide
+// whether a genuinely prolonged stall may be timed out. No queue, writer
+// goroutine, or dispatcher design is required.
+func TestTemporarilySlowHTTPFrontendRecovers(t *testing.T) {
+	const (
+		agentID    = "agent-1"
+		connectIDA = int64(1001)
+		connectIDB = int64(1002)
+		payloadB   = "response for healthy connection B"
+	)
+	payloadsA := [][]byte{[]byte("first response for A"), []byte("second response for A")}
+	wantStreamA := bytes.Join(payloadsA, nil)
+
+	proxyServer := NewProxyServer(
+		"",
+		[]proxystrategies.ProxyStrategy{proxystrategies.ProxyStrategyDefault},
+		1,
+		nil,
+		2,
+	)
+	backend := &Backend{id: agentID}
+
+	frontendA := newByteStreamHTTPReadWriter()
+	connectionA := &ProxyClientConnection{
+		Mode:      ModeHTTPConnect,
+		HTTP:      frontendA,
+		CloseHTTP: frontendA.close,
+		connected: make(chan struct{}),
+		connectID: connectIDA,
+		agentID:   agentID,
+		backend:   backend,
+	}
+	proxyServer.addEstablished(agentID, connectIDA, connectionA)
+
+	frontendB := newRecordingHTTPReadWriter()
+	connectionB := &ProxyClientConnection{
+		Mode:      ModeHTTPConnect,
+		HTTP:      frontendB,
+		CloseHTTP: func() error { return nil },
+		connected: make(chan struct{}),
+		connectID: connectIDB,
+		agentID:   agentID,
+		backend:   backend,
+	}
+	proxyServer.addEstablished(agentID, connectIDB, connectionB)
+
+	// Once A's first DATA is dequeued and blocked, the channel can hold exactly
+	// one waiting DATA for A and the healthy DATA for B. Reaching B therefore
+	// proves A's second payload was accepted by the frontend delivery path.
+	recvCh := make(chan *client.Packet, 2)
+	consumerDone := make(chan struct{})
+	go func() {
+		defer close(consumerDone)
+		proxyServer.serveRecvBackend(backend, agentID, recvCh)
+	}()
+
+	var closeRecvOnce sync.Once
+	closeRecv := func() { closeRecvOnce.Do(func() { close(recvCh) }) }
+	t.Cleanup(func() {
+		frontendA.release()
+		closeRecv()
+		select {
+		case <-consumerDone:
+		case <-time.After(holTestSafetyTimeout):
+			t.Errorf("serveRecvBackend did not exit during cleanup")
+		}
+	})
+
+	recvCh <- dataPkt(connectIDA, payloadsA[0])
+	select {
+	case <-frontendA.firstWriteStarted:
+	case <-time.After(holTestSafetyTimeout):
+		t.Fatal("connection A did not enter the blocking HTTP Write")
+	}
+
+	recvCh <- dataPkt(connectIDA, payloadsA[1])
+	recvCh <- dataPkt(connectIDB, []byte(payloadB))
+
+	select {
+	case got := <-frontendB.writes:
+		if string(got) != payloadB {
+			t.Fatalf("connection B received payload %q, want %q", got, payloadB)
+		}
+	case <-time.After(holTestSafetyTimeout):
+		// Release A only after B's required progress timed out. If B then
+		// progresses, the failure is specifically the shared-consumer HOL stall.
+		frontendA.release()
+		select {
+		case got := <-frontendB.writes:
+			if string(got) != payloadB {
+				t.Fatalf("connection B received payload %q after A recovered, want %q", got, payloadB)
+			}
+			t.Fatal("connection B received DATA only after connection A recovered")
+		case <-time.After(holTestSafetyTimeout):
+			t.Fatal("connection B did not receive DATA even after connection A recovered")
+		}
+	}
+
+	if _, err := proxyServer.getFrontend(agentID, connectIDA); err != nil {
+		t.Fatalf("connection A was removed while temporarily slow: %v", err)
+	}
+	_, _, closedBeforeRecovery, _ := frontendA.snapshot()
+	if closedBeforeRecovery {
+		t.Fatal("connection A was closed instead of isolated while temporarily slow")
+	}
+
+	frontendA.release()
+	deadline := time.NewTimer(holTestSafetyTimeout)
+	defer deadline.Stop()
+	for {
+		gotStream, _, _, _ := frontendA.snapshot()
+		if len(gotStream) >= len(wantStreamA) {
+			break
+		}
+		select {
+		case <-frontendA.streamUpdated:
+		case <-deadline.C:
+			t.Fatalf("connection A received %d bytes after recovery, want %d", len(gotStream), len(wantStreamA))
+		}
+	}
+
+	if _, err := proxyServer.getFrontend(agentID, connectIDA); err != nil {
+		t.Fatalf("connection A was removed during recovery: %v", err)
+	}
+	gotStreamA, _, closedAfterRecovery, _ := frontendA.snapshot()
+	if closedAfterRecovery {
+		t.Fatal("connection A was closed after recovering socket progress")
+	}
+	if !bytes.Equal(gotStreamA, wantStreamA) {
+		t.Fatalf("connection A byte stream after recovery = %q, want %q", gotStreamA, wantStreamA)
+	}
+
+	// Normal backend close is the terminal barrier: it must occur only after A's
+	// accepted bytes have drained and must remove A from established state.
+	recvCh <- &client.Packet{
+		Type: client.PacketType_CLOSE_RSP,
+		Payload: &client.Packet_CloseResponse{
+			CloseResponse: &client.CloseResponse{ConnectID: connectIDA},
+		},
+	}
+	select {
+	case <-frontendA.closeObserved:
+	case <-time.After(holTestSafetyTimeout):
+		t.Fatal("connection A did not close normally after recovery")
+	}
+	gotStreamA, violations, closed, inFlight := frontendA.snapshot()
+	if len(violations) > 0 {
+		t.Fatalf("connection A socket operations were not serialized through close: %v", violations)
+	}
+	if !closed {
+		t.Fatal("connection A did not reach a terminal closed state")
+	}
+	if inFlight != 0 {
+		t.Fatalf("connection A closed with %d socket operations still in flight", inFlight)
+	}
+	if !bytes.Equal(gotStreamA, wantStreamA) {
+		t.Fatalf("connection A final byte stream = %q, want %q", gotStreamA, wantStreamA)
+	}
+	if _, err := proxyServer.getFrontend(agentID, connectIDA); err == nil {
+		t.Fatal("connection A remained established after normal close")
+	}
+
+	closeRecv()
+	select {
+	case <-consumerDone:
+	case <-time.After(holTestSafetyTimeout):
+		t.Fatal("serveRecvBackend did not exit after recovery test")
 	}
 }
