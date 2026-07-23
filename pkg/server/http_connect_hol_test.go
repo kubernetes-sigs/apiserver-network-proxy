@@ -765,3 +765,116 @@ func TestTemporarilySlowHTTPFrontendRecovers(t *testing.T) {
 		t.Fatal("serveRecvBackend did not exit after recovery test")
 	}
 }
+
+// TestBackendShutdownUnblocksSlowHTTPFrontend targets cleanup after the agent
+// stream ends while an HTTP-CONNECT frontend socket Write is blocked.
+// ProxyServer.Connect closes recvCh when the agent stream terminates.
+//
+// The test:
+//  1. Registers established HTTP-CONNECT connection A.
+//  2. Blocks A inside its frontend socket Write.
+//  3. Closes recvCh, representing agent-stream termination.
+//  4. Does not release the write on the success path.
+//  5. Requires production cleanup to call CloseHTTP, unblock the pending Write
+//     with io.ErrClosedPipe, remove A from established state, and exit
+//     serveRecvBackend.
+//
+// The required outcome is independent of any writer goroutine, queue, or
+// cancellation implementation.
+func TestBackendShutdownUnblocksSlowHTTPFrontend(t *testing.T) {
+	const (
+		agentID   = "agent-1"
+		connectID = int64(1001)
+	)
+
+	proxyServer := NewProxyServer(
+		"",
+		[]proxystrategies.ProxyStrategy{proxystrategies.ProxyStrategyDefault},
+		1,
+		nil,
+		1,
+	)
+	backend := &Backend{id: agentID}
+	frontend := newCloseUnblocksHTTPReadWriter()
+	connection := &ProxyClientConnection{
+		Mode:      ModeHTTPConnect,
+		HTTP:      frontend,
+		CloseHTTP: frontend.close,
+		connected: make(chan struct{}),
+		connectID: connectID,
+		agentID:   agentID,
+		backend:   backend,
+	}
+	proxyServer.addEstablished(agentID, connectID, connection)
+
+	recvCh := make(chan *client.Packet)
+	consumerDone := make(chan struct{})
+	go func() {
+		defer close(consumerDone)
+		proxyServer.serveRecvBackend(backend, agentID, recvCh)
+	}()
+
+	var closeRecvOnce sync.Once
+	closeRecv := func() { closeRecvOnce.Do(func() { close(recvCh) }) }
+	t.Cleanup(func() {
+		// A release here is failure cleanup only. The success path must be
+		// released by production calling CloseHTTP after backend shutdown.
+		frontend.release()
+		closeRecv()
+		select {
+		case <-frontend.writeDone:
+		case <-time.After(holTestSafetyTimeout):
+			t.Errorf("blocked frontend Write did not exit during cleanup")
+		}
+		select {
+		case <-consumerDone:
+		case <-time.After(holTestSafetyTimeout):
+			t.Errorf("serveRecvBackend did not exit during cleanup")
+		}
+	})
+
+	recvCh <- dataPkt(connectID, []byte("response blocked on frontend socket"))
+	select {
+	case <-frontend.writeStarted:
+	case <-time.After(holTestSafetyTimeout):
+		t.Fatal("frontend DATA did not enter the blocking HTTP Write")
+	}
+
+	// Closing recvCh models readBackendToChannel ending when the agent stream is
+	// lost. No test-side release follows: backend cleanup must close the frontend
+	// and thereby unblock its Write.
+	closeRecv()
+	select {
+	case <-frontend.closeObserved:
+	case <-time.After(holTestSafetyTimeout):
+		frontend.release()
+		select {
+		case <-frontend.closeObserved:
+			t.Fatal("backend shutdown closed the frontend only after its blocked Write was released by the test")
+		case <-time.After(holTestSafetyTimeout):
+			t.Fatal("backend shutdown did not close the blocked HTTP frontend")
+		}
+	}
+
+	select {
+	case <-frontend.writeDone:
+	case <-time.After(holTestSafetyTimeout):
+		t.Fatal("closing the frontend did not unblock its pending Write")
+	}
+	select {
+	case <-consumerDone:
+	case <-time.After(holTestSafetyTimeout):
+		t.Fatal("serveRecvBackend did not exit after backend shutdown")
+	}
+
+	closed, writeErr := frontend.snapshot()
+	if !closed {
+		t.Fatal("frontend did not reach a terminal closed state")
+	}
+	if !errors.Is(writeErr, io.ErrClosedPipe) {
+		t.Fatalf("blocked frontend Write error = %v, want %v", writeErr, io.ErrClosedPipe)
+	}
+	if _, err := proxyServer.getFrontend(agentID, connectID); err == nil {
+		t.Fatal("connection remained established after backend shutdown")
+	}
+}
