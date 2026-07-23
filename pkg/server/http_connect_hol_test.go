@@ -31,9 +31,11 @@ import (
 	"testing"
 	"time"
 
+	promtest "github.com/prometheus/client_golang/prometheus/testutil"
 	"go.uber.org/mock/gomock"
 
 	client "sigs.k8s.io/apiserver-network-proxy/konnectivity-client/proto/client"
+	"sigs.k8s.io/apiserver-network-proxy/pkg/server/metrics"
 	"sigs.k8s.io/apiserver-network-proxy/pkg/server/proxystrategies"
 	"sigs.k8s.io/apiserver-network-proxy/proto/agent"
 )
@@ -1581,5 +1583,254 @@ func runManySlowHTTPFrontendsDialResponseCase(t *testing.T, slowFrontendCount in
 		case <-time.After(holTestSafetyTimeout):
 			t.Fatal("connection B did not establish even after the slow HTTP frontends were released")
 		}
+	}
+}
+
+// TestSlowHTTPFrontendDoesNotSaturateBackendReceiveChannel targets the incident's
+// propagated ingress symptom: "Receive channel from agent is full" and a stuck
+// FullRecvChannel("Connect") gauge. It drives readBackendToChannel -> recvCh ->
+// serveRecvBackend, but not the outer Connect RPC wrapper.
+//
+// For capacities 1 and 10, the test:
+//  1. Blocks established connection A in its HTTP socket Write.
+//  2. Delivers B's DIAL_RSP, then N+1 filler DATA packets for A so the backlog
+//     exceeds a capacity-N backend receive channel.
+//  3. Delivers terminal DATA for healthy B after the filler traffic.
+//  4. Confirms the FullRecvChannel gauge rises while current code is stalled.
+//  5. Requires B to establish and receive its exact DATA without test-releasing
+//     A, then requires the shared receive-channel gauge to settle to zero.
+//
+// Capacity 1 is the minimal reproduction; capacity 10 matches the default
+// konnectivity-server backend Connect receive channel (agent -> server), not the
+// HTTP-CONNECT frontend path. A transient gauge increase is acceptable. A may
+// also be overflow-closed under the frozen sustained-backpressure policy; the
+// required outcome is that healthy traffic and shared ingress do not remain
+// stuck. No frontend dispatch architecture is prescribed.
+func TestSlowHTTPFrontendDoesNotSaturateBackendReceiveChannel(t *testing.T) {
+	for _, capacity := range []int{1, 10} {
+		capacity := capacity
+		t.Run(fmt.Sprintf("capacity=%d", capacity), func(t *testing.T) {
+			runSlowHTTPFrontendSaturationCase(t, capacity)
+		})
+	}
+}
+
+func runSlowHTTPFrontendSaturationCase(t *testing.T, capacity int) {
+	const (
+		agentID    = "agent-1"
+		connectIDA = int64(1001)
+		connectIDB = int64(1002)
+		dialIDB    = int64(2002)
+		payloadB   = "terminal response for healthy connection B"
+	)
+
+	metrics.Metrics.Reset()
+
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+
+	proxyServer := NewProxyServer(
+		"",
+		[]proxystrategies.ProxyStrategy{proxystrategies.ProxyStrategyDefault},
+		1,
+		nil,
+		capacity,
+	)
+
+	dialRSPFor := func(random, connID int64) *client.Packet {
+		return &client.Packet{
+			Type: client.PacketType_DIAL_RSP,
+			Payload: &client.Packet_DialResponse{
+				DialResponse: &client.DialResponse{
+					Random:    random,
+					ConnectID: connID,
+				},
+			},
+		}
+	}
+
+	// Packets are released to the mock reader in stages, not preloaded, so the
+	// sustained saturation is provably caused by A's parked write rather than by
+	// the reader outrunning the consumer. The gate is opened only after A is
+	// confirmed blocked. gateOnce lets cleanup reopen it safely if the test
+	// fails before the main path does.
+	gateOpen := make(chan struct{})
+	var gateOnce sync.Once
+	openGate := func() { gateOnce.Do(func() { close(gateOpen) }) }
+
+	packets := make(chan *client.Packet)
+	fillerCount := capacity + 1
+
+	conn := mockAgentConn(ctrl, agentID, []string{})
+	// A bounded backpressure policy may legitimately close A after sustained
+	// overload. Later DATA for the now-missing frontend may repeat the close
+	// request, so accept any number of CLOSE_REQ packets for A while rejecting
+	// every other send.
+	conn.EXPECT().Send(gomock.Any()).DoAndReturn(func(pkt *client.Packet) error {
+		if pkt.Type != client.PacketType_CLOSE_REQ {
+			t.Errorf("backend Send packet type = %v, want CLOSE_REQ", pkt.Type)
+			return nil
+		}
+		closeReq := pkt.GetCloseRequest()
+		if closeReq == nil || closeReq.ConnectID != connectIDA {
+			t.Errorf("backend CLOSE_REQ = %v, want connectID %d", closeReq, connectIDA)
+		}
+		return nil
+	}).AnyTimes()
+	conn.EXPECT().Recv().DoAndReturn(func() (*client.Packet, error) {
+		if pkt, ok := <-packets; ok {
+			return pkt, nil
+		}
+		return nil, io.EOF
+	}).AnyTimes()
+	backend, err := NewBackend(conn)
+	if err != nil {
+		t.Fatalf("NewBackend: %v", err)
+	}
+
+	slowHTTP := newBlockingHTTPReadWriter()
+	connectionA := &ProxyClientConnection{
+		Mode:      ModeHTTPConnect,
+		HTTP:      slowHTTP,
+		CloseHTTP: func() error { slowHTTP.release(); return nil },
+		connected: make(chan struct{}),
+		connectID: connectIDA,
+		agentID:   agentID,
+		backend:   backend,
+	}
+	proxyServer.addEstablished(agentID, connectIDA, connectionA)
+
+	recordingHTTP := newRecordingHTTPReadWriter()
+	connectionB := &ProxyClientConnection{
+		Mode:      ModeHTTPConnect,
+		HTTP:      recordingHTTP,
+		CloseHTTP: func() error { return nil },
+		connected: make(chan struct{}),
+		dialID:    dialIDB,
+		agentID:   agentID,
+		start:     time.Now(),
+		backend:   backend,
+	}
+	proxyServer.PendingDial.Add(dialIDB, connectionB)
+
+	recvCh := make(chan *client.Packet, capacity)
+	stopCh := make(chan error, 1)
+	consumerDone := make(chan struct{})
+	readerDone := make(chan struct{})
+	go func() {
+		defer close(consumerDone)
+		proxyServer.serveRecvBackend(backend, agentID, recvCh)
+	}()
+	go func() {
+		defer close(readerDone)
+		proxyServer.readBackendToChannel(backend, recvCh, stopCh)
+	}()
+
+	// The feeder owns the packets channel: it delivers A's DATA, then (after the
+	// gate opens) B's DIAL_RSP, N+1 A fillers, and finally DATA for healthy B, then
+	// closes packets so the reader sees EOF. allPacketsPulled reports that the
+	// mock stream yielded every packet; it does NOT by itself prove those
+	// packets were inserted into recvCh or consumed. Delivery to B is the
+	// end-to-end progress proof.
+	allPacketsPulled := make(chan struct{})
+	go func() {
+		defer close(allPacketsPulled)
+		packets <- dataPkt(connectIDA, []byte("response for connection A"))
+		<-gateOpen
+		packets <- dialRSPFor(dialIDB, connectIDB)
+		for i := 0; i < fillerCount; i++ {
+			packets <- dataPkt(connectIDA, []byte("filler to saturate recvCh"))
+		}
+		packets <- dataPkt(connectIDB, []byte(payloadB))
+		close(packets)
+	}()
+
+	t.Cleanup(func() {
+		openGate()         // unblock the feeder if we failed before opening it.
+		slowHTTP.release() // unblock A so the consumer and reader can drain.
+		select {
+		case <-allPacketsPulled:
+		case <-time.After(holTestSafetyTimeout):
+			t.Errorf("feeder did not finish delivering packets during cleanup")
+		}
+		select {
+		case <-readerDone:
+			// Only safe to close recvCh once the reader has stopped sending.
+			close(recvCh) // mirrors production defer; lets the consumer loop end.
+			select {
+			case <-consumerDone:
+			case <-time.After(holTestSafetyTimeout):
+				t.Errorf("serveRecvBackend did not exit during test cleanup")
+			}
+		case <-time.After(holTestSafetyTimeout):
+			// Do not close recvCh while readBackendToChannel may still send to
+			// it; that would panic and mask the real failure.
+			t.Errorf("readBackendToChannel did not exit during test cleanup; leaving recvCh open to avoid send-on-closed")
+		}
+	})
+
+	// Wait until A is provably blocked inside its HTTP Write, then open the gate
+	// so any saturation is attributable to A.
+	select {
+	case <-slowHTTP.writeStarted:
+	case <-time.After(holTestSafetyTimeout):
+		t.Fatal("connection A did not enter the blocking HTTP Write")
+	}
+	openGate()
+
+	// Desired behavior: B establishes without the test releasing A.
+	select {
+	case <-connectionB.connected:
+	case <-time.After(holTestSafetyTimeout):
+		// Failure diagnosis: prove that the receive channel remained saturated.
+		// Poll rather than sampling once so scheduling does not hide the symptom;
+		// an implementation that keeps draining may never raise the gauge.
+		saturated := false
+		for i := 0; i < 100; i++ {
+			if promtest.ToFloat64(metrics.Metrics.FullRecvChannel(metrics.Connect)) >= 1 {
+				saturated = true
+				break
+			}
+			time.Sleep(10 * time.Millisecond)
+		}
+		if !saturated {
+			t.Errorf("expected FullRecvChannel gauge >= 1 while consumer is stalled")
+		}
+		t.Fatal("connection B did not establish while connection A's HTTP Write was blocked; receive channel saturated")
+	}
+
+	// Note: we deliberately do NOT assert here that A is still blocked. A valid
+	// bounded backpressure policy may close A while handling the fillers, and the
+	// implementation can reach that point before this goroutine runs. The "B was not
+	// rescued by killing A" invariant is proven deterministically in
+	// TestSlowHTTPFrontendDoesNotDelayDialResponse, which feeds no packets after
+	// B and therefore cannot legitimately close A at that point.
+
+	// Terminal end-to-end progress proof: healthy B receives its exact DATA even
+	// though A's filler traffic was staged first. This rejects control-only
+	// prioritization and a shared writer pool that remains blocked behind A,
+	// without requiring A's writes to use any particular dispatch mechanism.
+	select {
+	case got := <-recordingHTTP.writes:
+		if string(got) != payloadB {
+			t.Fatalf("connection B received payload %q, want %q", got, payloadB)
+		}
+	case <-time.After(holTestSafetyTimeout):
+		t.Fatal("connection B established but terminal DATA did not progress through the saturated backend receive path")
+	}
+
+	// A transient gauge blip is acceptable; require it to settle to zero once
+	// the consumer has drained the backlog. The shared backend receive channel
+	// must no longer be stuck.
+	settled := false
+	for i := 0; i < 100; i++ {
+		if promtest.ToFloat64(metrics.Metrics.FullRecvChannel(metrics.Connect)) == 0 {
+			settled = true
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	if !settled {
+		t.Errorf("FullRecvChannel gauge did not return to 0; backend ingress is still stalled")
 	}
 }
