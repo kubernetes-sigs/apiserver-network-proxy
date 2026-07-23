@@ -17,12 +17,10 @@ limitations under the License.
 package server
 
 import (
-	"bytes"
 	"context"
 	"errors"
 	"fmt"
 	"io"
-	"net/http"
 	runpprof "runtime/pprof"
 	"strconv"
 	"strings"
@@ -102,6 +100,22 @@ type ProxyClientConnection struct {
 	start       time.Time
 	backend     *Backend
 	dialAddress string // cached for logging
+
+	// HTTP-CONNECT output and terminal state. httpMu protects writer
+	// attachment, terminal-before-attachment, connection identifiers used by
+	// asynchronous cleanup, and CLOSE_REQ suppression. It is never held during
+	// HTTP or backend I/O.
+	httpMu                   sync.Mutex
+	httpWriter               *httpConnectWriter
+	httpTerminal             bool
+	httpInitialResponse      []byte
+	httpSuppressCloseRequest bool
+	closed                   chan struct{}
+
+	closeHTTPOnce    sync.Once
+	closeHTTPErr     error
+	closeRequestOnce sync.Once
+	httpCleanupOnce  sync.Once
 }
 
 const (
@@ -161,38 +175,7 @@ func (c *ProxyClientConnection) send(pkt *client.Packet) error {
 		return c.frontend.Send(pkt)
 	}
 	if c.Mode == ModeHTTPConnect {
-		if pkt.Type == client.PacketType_CLOSE_RSP {
-			return c.CloseHTTP()
-		} else if pkt.Type == client.PacketType_DIAL_CLS {
-			return c.CloseHTTP()
-		} else if pkt.Type == client.PacketType_DATA {
-			_, err := c.HTTP.Write(pkt.GetData().Data)
-			return err
-		} else if pkt.Type == client.PacketType_DIAL_RSP {
-			dialErr := pkt.GetDialResponse().Error
-			if dialErr != "" {
-				// // Map the error to appropriate HTTP status code
-				statusCode := mapDialErrorToHTTPStatus(dialErr)
-				statusText := http.StatusText(statusCode)
-				body := bytes.NewBufferString(dialErr)
-				t := http.Response{
-					StatusCode: statusCode,
-					Status:     fmt.Sprintf("%d %s", statusCode, statusText),
-					Body:       io.NopCloser(body),
-					Header: http.Header{
-						"Content-Type": []string{"text/plain; charset=utf-8"},
-					},
-					Proto:      "HTTP/1.1",
-					ProtoMinor: 1,
-					ProtoMajor: 1,
-				}
-
-				t.Write(c.HTTP)
-				return c.CloseHTTP()
-			}
-			return nil
-		}
-		return fmt.Errorf("attempt to send via unrecognized connection type %v", pkt.Type)
+		return fmt.Errorf("HTTP-CONNECT packet %v must be routed through its connection writer", pkt.Type)
 	}
 	return fmt.Errorf("attempt to send via unrecognized connection mode %q", c.Mode)
 }
@@ -272,8 +255,9 @@ type ProxyServer struct {
 	AgentAuthenticationOptions *AgentTokenAuthenticationOptions
 
 	// TODO: move strategies into BackendStorage
-	proxyStrategies []proxystrategies.ProxyStrategy
-	xfrChannelSize  int
+	proxyStrategies      []proxystrategies.ProxyStrategy
+	xfrChannelSize       int
+	httpConnectQueueSize int
 }
 
 // AgentTokenAuthenticationOptions contains list of parameters required for agent token based authentication
@@ -360,6 +344,24 @@ func (s *ProxyServer) removeEstablished(agentID string, connID int64) *ProxyClie
 	return ret
 }
 
+// removeEstablishedIf removes a connection only if expected is still the
+// registered pointer. Asynchronous completion from an old HTTP writer must not
+// remove a replacement that reused the same agent and connection IDs.
+func (s *ProxyServer) removeEstablishedIf(agentID string, connID int64, expected *ProxyClientConnection) *ProxyClientConnection {
+	s.fmu.Lock()
+	defer s.fmu.Unlock()
+	conns, ok := s.established[agentID]
+	if !ok || conns[connID] != expected {
+		return nil
+	}
+	delete(conns, connID)
+	if len(conns) == 0 {
+		delete(s.established, agentID)
+	}
+	metrics.Metrics.SetEstablishedConnCount(s.getCount(s.established))
+	return expected
+}
+
 func (s *ProxyServer) getFrontend(agentID string, connID int64) (*ProxyClientConnection, error) {
 	s.fmu.RLock()
 	defer s.fmu.RUnlock()
@@ -385,11 +387,14 @@ func (s *ProxyServer) removeEstablishedForBackendConn(agentID string, backend *B
 	if !ok {
 		return nil, fmt.Errorf("can't find agentID %s in the established", agentID)
 	}
-	for _, frontend := range established {
+	for connID, frontend := range established {
 		if frontend.backend == backend {
-			delete(s.established, agentID)
+			delete(established, connID)
 			ret = append(ret, frontend)
 		}
+	}
+	if len(established) == 0 {
+		delete(s.established, agentID)
 	}
 
 	metrics.Metrics.SetEstablishedConnCount(s.getCount(s.established))
@@ -458,6 +463,10 @@ func NewProxyServer(serverID string, proxyStrategies []proxystrategies.ProxyStra
 		Readiness:       bms[0],
 		proxyStrategies: proxyStrategies,
 		xfrChannelSize:  channelSize,
+		// V1 intentionally seeds each private HTTP write queue from the existing
+		// transfer-channel setting. Until a separate option exists, increasing
+		// xfr-channel-size also increases every HTTP connection memory allowance.
+		httpConnectQueueSize: max(1, channelSize),
 	}
 }
 
@@ -863,8 +872,9 @@ func (s *ProxyServer) serveRecvBackend(backend *Backend, agentID string, recvCh 
 	}()
 
 	defer func() {
-		// Close all established connections when the agent connection is closed
-		// TODO(#126): connections in PendingDial state should also be closed.
+		// Remove all connections owned by this backend before asynchronously
+		// aborting HTTP writers. The backend stream is dead, so suppress every
+		// connection-owned CLOSE_REQ.
 		established, err := s.removeEstablishedForBackendConn(agentID, backend)
 		if err != nil {
 			return
@@ -875,13 +885,18 @@ func (s *ProxyServer) serveRecvBackend(backend *Backend, agentID string, recvCh 
 		}
 
 		for _, frontend := range established {
+			if frontend.Mode == ModeHTTPConnect {
+				frontend.suppressBackendCloseRequest()
+				frontend.abortHTTP(s, httpConnectAbortBackendShutdown)
+				continue
+			}
+
 			pkt := &client.Packet{
 				Type: client.PacketType_CLOSE_RSP,
 				Payload: &client.Packet_CloseResponse{
-					CloseResponse: &client.CloseResponse{},
+					CloseResponse: &client.CloseResponse{ConnectID: frontend.connectID},
 				},
 			}
-			pkt.GetCloseResponse().ConnectID = frontend.connectID
 			if err := frontend.send(pkt); err != nil {
 				klog.ErrorS(err, "CLOSE_RSP to frontend failed", "agentID", agentID)
 			}
@@ -901,34 +916,40 @@ func (s *ProxyServer) serveRecvBackend(backend *Backend, agentID string, recvCh 
 				if resp.ConnectID != 0 {
 					s.sendBackendClose(backend, resp.ConnectID, resp.Random, "unknown dial id")
 				}
-			} else {
-				dialErr := false
-				if resp.Error != "" {
-					// Dial response with error should not contain a valid ConnID.
-					klog.ErrorS(errors.New(resp.Error), "DIAL_RSP contains failure", "dialID", resp.Random, "agentID", agentID)
-					metrics.Metrics.ObserveDialFailure(metrics.DialFailureErrorResponse)
-					dialErr = true
+				break
+			}
+
+			if resp.Error != "" {
+				klog.ErrorS(errors.New(resp.Error), "DIAL_RSP contains failure", "dialID", resp.Random, "agentID", agentID)
+				metrics.Metrics.ObserveDialFailure(metrics.DialFailureErrorResponse)
+				if frontend.Mode == ModeHTTPConnect {
+					writer, attached := frontend.attachHTTPWriter(s, serializeHTTPConnectDialError(resp.Error), false)
+					if !attached {
+						frontend.abortHTTP(s, httpConnectAbortDialClosed)
+						break
+					}
+					writer.start()
+					writer.beginGracefulClose()
+					break
 				}
-				err := frontend.send(pkt)
-				if err != nil {
+				if err := frontend.send(pkt); err != nil {
 					klog.ErrorS(err, "DIAL_RSP send to frontend stream failure",
 						"dialID", resp.Random, "agentID", agentID, "connectionID", resp.ConnectID)
-					if !dialErr { // Avoid double-counting.
-						metrics.Metrics.ObserveDialFailure(metrics.DialFailureSendResponse)
-					}
-					// If we never finish setting up the tunnel for ConnectID, then the connection is dead.
-					// Currently, the agent will no resend DIAL_RSP, so connection is dead.
-					// We already attempted to tell the frontend that. We should ensure we tell the backend.
 					s.sendBackendClose(backend, resp.ConnectID, resp.Random, "dial error")
-					dialErr = true
 				}
-				// Avoid adding the frontend if there was an error dialing the destination
-				if dialErr {
+				break
+			}
+
+			if frontend.Mode != ModeHTTPConnect {
+				if err := frontend.send(pkt); err != nil {
+					klog.ErrorS(err, "DIAL_RSP send to frontend stream failure",
+						"dialID", resp.Random, "agentID", agentID, "connectionID", resp.ConnectID)
+					metrics.Metrics.ObserveDialFailure(metrics.DialFailureSendResponse)
+					s.sendBackendClose(backend, resp.ConnectID, resp.Random, "dial error")
 					break
 				}
 				frontend.connectID = resp.ConnectID
 				frontend.agentID = agentID
-				// TODO: this connection may be cleaned on serveRecvFrontend exit, make it independent.
 				s.addEstablished(agentID, resp.ConnectID, frontend)
 				close(frontend.connected)
 				metrics.Metrics.ObserveDialLatency(time.Since(frontend.start))
@@ -939,7 +960,43 @@ func (s *ProxyServer) serveRecvBackend(backend *Backend, agentID string, recvCh 
 					"dialAddress", frontend.dialAddress,
 					"dialDuration", time.Since(frontend.start),
 				)
+				break
 			}
+
+			frontend.setHTTPConnectionDetails(agentID, resp.ConnectID)
+			writer, attached := frontend.configuredHTTPWriter(s, true)
+			if !attached {
+				// Teardown won before writer attachment. The backend has still
+				// created a real connection, so close it without blocking this
+				// shared consumer.
+				frontend.sendBackendCloseRequestAsync(s, string(httpConnectAbortSetupRace))
+				break
+			}
+			if frontend.httpWriterIsTerminal(writer) {
+				frontend.sendBackendCloseRequestAsync(s, string(httpConnectAbortSetupRace))
+				break
+			}
+
+			// Publish the exact connection before the writer starts so DATA can
+			// never observe an established HTTP connection without its writer.
+			s.addEstablished(agentID, resp.ConnectID, frontend)
+			if frontend.httpWriterIsTerminal(writer) {
+				// Teardown raced publication and won before establishment. Do
+				// not leave a newly published terminal entry behind.
+				s.removeEstablishedIf(agentID, resp.ConnectID, frontend)
+				writer.abort(httpConnectAbortSetupRace)
+				frontend.sendBackendCloseRequestAsync(s, string(httpConnectAbortSetupRace))
+				break
+			}
+			writer.start()
+			metrics.Metrics.ObserveDialLatency(time.Since(frontend.start))
+			klog.V(3).InfoS("Proxy connection established",
+				"dialID", resp.Random,
+				"connectionID", resp.ConnectID,
+				"agentID", agentID,
+				"dialAddress", frontend.dialAddress,
+				"dialDuration", time.Since(frontend.start),
+			)
 
 		case client.PacketType_DIAL_CLS:
 			resp := pkt.GetCloseDial()
@@ -947,20 +1004,22 @@ func (s *ProxyServer) serveRecvBackend(backend *Backend, agentID string, recvCh 
 			frontend := s.PendingDial.Remove(resp.Random)
 			if frontend == nil {
 				klog.V(2).InfoS("DIAL_CLS not recognized; dropped", "dialID", resp.Random, "agentID", agentID)
-			} else {
-				if err := frontend.send(pkt); err != nil {
-					klog.ErrorS(err, "DIAL_CLS send to client stream error", "agentID", agentID, "dialID", resp.Random)
-				} else {
-					klog.V(5).InfoS("DIAL_CLS sent to frontend", "dialID", resp.Random)
-				}
-				klog.ErrorS(nil, "Dial terminated (DIAL_CLS) by backend",
-					"dialID", resp.Random,
-					"agentID", agentID,
-					"dialAddress", frontend.dialAddress,
-					"dialDuration", time.Since(frontend.start),
-				)
-				metrics.Metrics.ObserveDialFailure(metrics.DialFailureBackendClose)
+				break
 			}
+			if frontend.Mode == ModeHTTPConnect {
+				frontend.abortHTTP(s, httpConnectAbortDialClosed)
+			} else if err := frontend.send(pkt); err != nil {
+				klog.ErrorS(err, "DIAL_CLS send to client stream error", "agentID", agentID, "dialID", resp.Random)
+			} else {
+				klog.V(5).InfoS("DIAL_CLS sent to frontend", "dialID", resp.Random)
+			}
+			klog.ErrorS(nil, "Dial terminated (DIAL_CLS) by backend",
+				"dialID", resp.Random,
+				"agentID", agentID,
+				"dialAddress", frontend.dialAddress,
+				"dialDuration", time.Since(frontend.start),
+			)
+			metrics.Metrics.ObserveDialFailure(metrics.DialFailureBackendClose)
 
 		case client.PacketType_DATA:
 			resp := pkt.GetData()
@@ -976,26 +1035,62 @@ func (s *ProxyServer) serveRecvBackend(backend *Backend, agentID string, recvCh 
 				s.sendBackendClose(backend, resp.ConnectID, 0, "missing frontend")
 				break
 			}
-			if err := frontend.send(pkt); err != nil {
-				klog.ErrorS(err, "send to client stream failure", "agentID", agentID, "connectionID", resp.ConnectID)
-			} else {
-				klog.V(5).InfoS("DATA sent to frontend")
+			if frontend.Mode != ModeHTTPConnect {
+				if err := frontend.send(pkt); err != nil {
+					klog.ErrorS(err, "send to client stream failure", "agentID", agentID, "connectionID", resp.ConnectID)
+				} else {
+					klog.V(5).InfoS("DATA sent to frontend")
+				}
+				break
+			}
+
+			writer, attached := frontend.attachHTTPWriter(s, nil, false)
+			if !attached {
+				// A still-registered terminal connection absorbs late DATA
+				// until CLOSE_RSP without generating repeated CLOSE_REQ packets.
+				break
+			}
+			writer.start()
+			switch writer.enqueueData(resp.Data) {
+			case httpConnectEnqueueAccepted:
+				klog.V(5).InfoS("HTTP-CONNECT DATA queued to frontend", "agentID", agentID, "connectionID", resp.ConnectID)
+			case httpConnectEnqueueClosed:
+				// The terminal entry deliberately remains registered until the
+				// backend acknowledges closure.
+			case httpConnectEnqueueOverflow:
+				// enqueueData already initiated connection-local forced cleanup.
 			}
 
 		case client.PacketType_CLOSE_RSP:
 			resp := pkt.GetCloseResponse()
 			klog.V(5).InfoS("Received CLOSE_RSP", "agentID", agentID, "connectionID", resp.ConnectID)
-			frontend := s.removeEstablished(agentID, resp.ConnectID)
-			if frontend == nil {
-				// assuming it is already closed, just log it
+			frontend, err := s.getFrontend(agentID, resp.ConnectID)
+			if err != nil {
 				klog.V(2).InfoS("could not get frontend client for closing", "agentID", agentID, "connectionID", resp.ConnectID)
 				break
 			}
-			if err := frontend.send(pkt); err != nil {
-				// Normal when frontend closes it.
-				klog.ErrorS(err, "CLOSE_RSP send to client stream error", "agentID", agentID, "connectionID", resp.ConnectID)
-			} else {
-				klog.V(5).InfoS("CLOSE_RSP sent to frontend", "connectionID", resp.ConnectID)
+			if frontend.Mode != ModeHTTPConnect {
+				frontend = s.removeEstablished(agentID, resp.ConnectID)
+				if frontend == nil {
+					break
+				}
+				if err := frontend.send(pkt); err != nil {
+					// Normal when frontend closes it.
+					klog.ErrorS(err, "CLOSE_RSP send to client stream error", "agentID", agentID, "connectionID", resp.ConnectID)
+				} else {
+					klog.V(5).InfoS("CLOSE_RSP sent to frontend", "connectionID", resp.ConnectID)
+				}
+				break
+			}
+
+			writer, attached := frontend.attachHTTPWriter(s, nil, false)
+			if !attached {
+				s.removeEstablishedIf(agentID, resp.ConnectID, frontend)
+				break
+			}
+			writer.start()
+			if writer.beginGracefulClose() == httpConnectCloseAlreadyForced {
+				s.removeEstablishedIf(agentID, resp.ConnectID, frontend)
 			}
 
 		case client.PacketType_DRAIN:

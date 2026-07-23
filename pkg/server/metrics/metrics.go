@@ -47,23 +47,24 @@ var (
 
 // ServerMetrics includes all the metrics of the proxy server.
 type ServerMetrics struct {
-	endpointLatencies    *prometheus.HistogramVec
-	frontendLatencies    *prometheus.HistogramVec
-	grpcConnections      *prometheus.GaugeVec
-	httpConnections      prometheus.Gauge
-	backend              *prometheus.GaugeVec
-	totalBackendCount    *prometheus.GaugeVec
-	pendingDials         *prometheus.GaugeVec
-	establishedConns     *prometheus.GaugeVec
-	fullRecvChannels     *prometheus.GaugeVec
-	dialFailures         *prometheus.CounterVec
-	streamPackets        *prometheus.CounterVec
-	streamErrors         *prometheus.CounterVec
-	culledLeases         prometheus.Counter
-	leaseDeleteLatencies *prometheus.HistogramVec
-	leaseDeletes         *prometheus.CounterVec
-	leaseListLatencies   *prometheus.HistogramVec
-	leaseLists           *prometheus.CounterVec
+	endpointLatencies      *prometheus.HistogramVec
+	frontendLatencies      *prometheus.HistogramVec
+	grpcConnections        *prometheus.GaugeVec
+	httpConnections        prometheus.Gauge
+	backend                *prometheus.GaugeVec
+	totalBackendCount      *prometheus.GaugeVec
+	pendingDials           *prometheus.GaugeVec
+	establishedConns       *prometheus.GaugeVec
+	fullRecvChannels       *prometheus.GaugeVec
+	dialFailures           *prometheus.CounterVec
+	httpConnectDisconnects *prometheus.CounterVec
+	streamPackets          *prometheus.CounterVec
+	streamErrors           *prometheus.CounterVec
+	culledLeases           prometheus.Counter
+	leaseDeleteLatencies   *prometheus.HistogramVec
+	leaseDeletes           *prometheus.CounterVec
+	leaseListLatencies     *prometheus.HistogramVec
+	leaseLists             *prometheus.CounterVec
 }
 
 // newServerMetrics create a new ServerMetrics, configured with default metric names.
@@ -167,6 +168,17 @@ func newServerMetrics() *ServerMetrics {
 			"reason",
 		},
 	)
+	httpConnectDisconnects := prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Namespace: Namespace,
+			Subsystem: Subsystem,
+			Name:      "http_connect_disconnect_count",
+			Help:      "Number of HTTP CONNECT frontends disconnected by the server, partitioned by reason.",
+		},
+		[]string{
+			"reason",
+		},
+	)
 	culledLeases := prometheus.NewCounter(prometheus.CounterOpts{
 		Namespace: Namespace,
 		Subsystem: Subsystem,
@@ -221,6 +233,7 @@ func newServerMetrics() *ServerMetrics {
 	prometheus.MustRegister(establishedConns)
 	prometheus.MustRegister(fullRecvChannels)
 	prometheus.MustRegister(dialFailures)
+	prometheus.MustRegister(httpConnectDisconnects)
 	prometheus.MustRegister(streamPackets)
 	prometheus.MustRegister(streamErrors)
 	prometheus.MustRegister(culledLeases)
@@ -229,23 +242,24 @@ func newServerMetrics() *ServerMetrics {
 	prometheus.MustRegister(leaseListLatencies)
 	prometheus.MustRegister(leaseLists)
 	return &ServerMetrics{
-		endpointLatencies:    endpointLatencies,
-		frontendLatencies:    frontendLatencies,
-		grpcConnections:      grpcConnections,
-		httpConnections:      httpConnections,
-		backend:              backend,
-		totalBackendCount:    totalBackendCount,
-		pendingDials:         pendingDials,
-		establishedConns:     establishedConns,
-		fullRecvChannels:     fullRecvChannels,
-		dialFailures:         dialFailures,
-		streamPackets:        streamPackets,
-		streamErrors:         streamErrors,
-		culledLeases:         culledLeases,
-		leaseDeleteLatencies: leaseDeleteLatencies,
-		leaseDeletes:         leaseDeletes,
-		leaseListLatencies:   leaseListLatencies,
-		leaseLists:           leaseLists,
+		endpointLatencies:      endpointLatencies,
+		frontendLatencies:      frontendLatencies,
+		grpcConnections:        grpcConnections,
+		httpConnections:        httpConnections,
+		backend:                backend,
+		totalBackendCount:      totalBackendCount,
+		pendingDials:           pendingDials,
+		establishedConns:       establishedConns,
+		fullRecvChannels:       fullRecvChannels,
+		dialFailures:           dialFailures,
+		httpConnectDisconnects: httpConnectDisconnects,
+		streamPackets:          streamPackets,
+		streamErrors:           streamErrors,
+		culledLeases:           culledLeases,
+		leaseDeleteLatencies:   leaseDeleteLatencies,
+		leaseDeletes:           leaseDeletes,
+		leaseListLatencies:     leaseListLatencies,
+		leaseLists:             leaseLists,
 	}
 }
 
@@ -260,6 +274,7 @@ func (s *ServerMetrics) Reset() {
 	s.establishedConns.Reset()
 	s.fullRecvChannels.Reset()
 	s.dialFailures.Reset()
+	s.httpConnectDisconnects.Reset()
 	s.streamPackets.Reset()
 	s.streamErrors.Reset()
 }
@@ -333,6 +348,16 @@ const (
 
 func (s *ServerMetrics) ObserveDialFailure(reason DialFailureReason) {
 	s.dialFailures.With(prometheus.Labels{"reason": string(reason)}).Inc()
+}
+
+type HTTPConnectDisconnectReason string
+
+const (
+	HTTPConnectDisconnectQueueOverflow HTTPConnectDisconnectReason = "queue_overflow"
+)
+
+func (s *ServerMetrics) ObserveHTTPConnectDisconnect(reason HTTPConnectDisconnectReason) {
+	s.httpConnectDisconnects.With(prometheus.Labels{"reason": string(reason)}).Inc()
 }
 
 func (s *ServerMetrics) ObservePacket(segment commonmetrics.Segment, packetType client.PacketType) {
