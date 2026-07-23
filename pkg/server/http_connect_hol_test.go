@@ -1210,3 +1210,221 @@ func TestHTTPConnectResponsePrecedesTunnelData(t *testing.T) {
 		t.Fatalf("frontend byte stream = %q, want CONNECT response followed by DATA %q", gotStream, wantStream)
 	}
 }
+
+// TestConcurrentHTTPFrontendAndBackendClose targets overlapping frontend EOF
+// and backend CLOSE_RSP for the same established HTTP-CONNECT tunnel.
+//
+// The test:
+//  1. Establishes a real Tunnel and verifies the successful HTTP 200 response.
+//  2. Closes the frontend peer so Tunnel initiates backend CLOSE_REQ.
+//  3. Pauses that CLOSE_REQ in flight and delivers backend CLOSE_RSP.
+//  4. Requires CLOSE_RSP to close the frontend, then releases CLOSE_REQ.
+//  5. Requires exactly one correctly addressed CLOSE_REQ, both serving paths to
+//     exit, no socket operation in flight, and no established or pending state.
+//
+// Close ownership is not assigned to any goroutine, queue, or state-machine
+// implementation; only protocol-visible shutdown and final state are asserted.
+func TestConcurrentHTTPFrontendAndBackendClose(t *testing.T) {
+	const (
+		agentID   = "agent-1"
+		connectID = int64(1001)
+		target    = "istiod-stable.istio-system.svc:443"
+	)
+	connectResponse := []byte("HTTP/1.1 200 Connection Established\r\n\r\n")
+
+	ctrl := gomock.NewController(t)
+	backendConn := mockAgentConn(ctrl, agentID, []string{})
+	dialRequests := make(chan *client.Packet, 1)
+	closeRequestStarted := make(chan struct{})
+	releaseCloseRequest := make(chan struct{})
+	var (
+		closeRequestCount atomic.Int32
+		closeStartedOnce  sync.Once
+		closeReleaseOnce  sync.Once
+	)
+	releaseBackendClose := func() {
+		closeReleaseOnce.Do(func() { close(releaseCloseRequest) })
+	}
+	backendConn.EXPECT().Send(gomock.Any()).DoAndReturn(func(pkt *client.Packet) error {
+		switch pkt.Type {
+		case client.PacketType_DIAL_REQ:
+			select {
+			case dialRequests <- pkt:
+			default:
+				t.Errorf("received duplicate backend DIAL_REQ")
+			}
+		case client.PacketType_CLOSE_REQ:
+			if count := closeRequestCount.Add(1); count != 1 {
+				t.Errorf("backend received %d CLOSE_REQ packets, want exactly one", count)
+			}
+			closePayload := pkt.GetCloseRequest()
+			if closePayload == nil {
+				t.Errorf("backend CLOSE_REQ did not contain a close request payload")
+			} else if closePayload.ConnectID != connectID {
+				t.Errorf("backend CLOSE_REQ connectID = %d, want %d", closePayload.ConnectID, connectID)
+			}
+			closeStartedOnce.Do(func() { close(closeRequestStarted) })
+			<-releaseCloseRequest
+		default:
+			t.Errorf("backend Send packet type = %v, want DIAL_REQ or CLOSE_REQ", pkt.Type)
+		}
+		return nil
+	}).AnyTimes()
+
+	backend, err := NewBackend(backendConn)
+	if err != nil {
+		t.Fatalf("NewBackend: %v", err)
+	}
+	backendCtx, cancelBackend := context.WithCancel(backend.Context())
+	backend.conn = &backendConnWithContext{
+		AgentService_ConnectServer: backendConn,
+		ctx:                        backendCtx,
+	}
+	proxyServer := NewProxyServer(
+		"",
+		[]proxystrategies.ProxyStrategy{proxystrategies.ProxyStrategyDefault},
+		1,
+		nil,
+		1,
+	)
+	proxyServer.addBackend(backend)
+
+	recvCh := make(chan *client.Packet)
+	consumerDone := make(chan struct{})
+	go func() {
+		defer close(consumerDone)
+		proxyServer.serveRecvBackend(backend, agentID, recvCh)
+	}()
+
+	frontendConn := newObservedHTTPConn()
+	// This test does not exercise a slow socket. Let the CONNECT response write
+	// complete normally before initiating either close path.
+	frontendConn.sink.release()
+	responseWriter := newHijackingResponseWriter(frontendConn)
+	request := httptest.NewRequest(http.MethodConnect, "http://example.invalid", nil)
+	request.Host = target
+	tunnelDone := make(chan struct{})
+	go func() {
+		defer close(tunnelDone)
+		(&Tunnel{Server: proxyServer}).ServeHTTP(responseWriter, request)
+	}()
+
+	var (
+		closeRecvOnce sync.Once
+		dialID        int64
+		dialCaptured  bool
+	)
+	closeRecv := func() { closeRecvOnce.Do(func() { close(recvCh) }) }
+	t.Cleanup(func() {
+		releaseBackendClose()
+		frontendConn.sink.release()
+		if dialCaptured {
+			if pending := proxyServer.PendingDial.Remove(dialID); pending != nil {
+				_ = pending.CloseHTTP()
+			}
+		}
+		_ = frontendConn.peer.Close()
+		_ = frontendConn.Close()
+		cancelBackend()
+		closeRecv()
+		select {
+		case <-consumerDone:
+		case <-time.After(holTestSafetyTimeout):
+			t.Errorf("serveRecvBackend did not exit during cleanup")
+		}
+		select {
+		case <-tunnelDone:
+		case <-time.After(holTestSafetyTimeout):
+			t.Errorf("HTTP tunnel did not exit during cleanup")
+		}
+	})
+
+	var dialRequest *client.Packet
+	select {
+	case dialRequest = <-dialRequests:
+	case <-time.After(holTestSafetyTimeout):
+		t.Fatal("HTTP tunnel did not send DIAL_REQ to the backend")
+	}
+	dial := dialRequest.GetDialRequest()
+	if dial == nil {
+		t.Fatal("backend DIAL_REQ did not contain a dial request payload")
+	}
+	dialID = dial.Random
+	dialCaptured = true
+	if dial.Address != target {
+		t.Fatalf("backend DIAL_REQ = %v, want address %q", dial, target)
+	}
+
+	recvCh <- &client.Packet{
+		Type: client.PacketType_DIAL_RSP,
+		Payload: &client.Packet_DialResponse{
+			DialResponse: &client.DialResponse{Random: dialID, ConnectID: connectID},
+		},
+	}
+	select {
+	case <-frontendConn.sink.streamUpdated:
+	case <-time.After(holTestSafetyTimeout):
+		t.Fatal("frontend did not receive the successful CONNECT response")
+	}
+	gotResponse, _, _, _ := frontendConn.sink.snapshot()
+	if !bytes.Equal(gotResponse, connectResponse) {
+		t.Fatalf("frontend byte stream before close = %q, want %q", gotResponse, connectResponse)
+	}
+
+	// Closing the peer supplies frontend EOF. Tunnel begins CLOSE_REQ and the
+	// mock pauses it in flight, creating a deterministic overlap window for the
+	// backend CLOSE_RSP path.
+	if err := frontendConn.peer.Close(); err != nil {
+		t.Fatalf("closing frontend peer: %v", err)
+	}
+	select {
+	case <-closeRequestStarted:
+	case <-time.After(holTestSafetyTimeout):
+		t.Fatal("frontend EOF did not initiate backend CLOSE_REQ")
+	}
+
+	recvCh <- &client.Packet{
+		Type: client.PacketType_CLOSE_RSP,
+		Payload: &client.Packet_CloseResponse{
+			CloseResponse: &client.CloseResponse{ConnectID: connectID},
+		},
+	}
+	select {
+	case <-frontendConn.sink.closeObserved:
+	case <-time.After(holTestSafetyTimeout):
+		t.Fatal("backend CLOSE_RSP did not close the frontend socket")
+	}
+
+	releaseBackendClose()
+	select {
+	case <-tunnelDone:
+	case <-time.After(holTestSafetyTimeout):
+		t.Fatal("HTTP tunnel did not exit after concurrent frontend/backend close")
+	}
+	closeRecv()
+	select {
+	case <-consumerDone:
+	case <-time.After(holTestSafetyTimeout):
+		t.Fatal("serveRecvBackend did not exit after concurrent close")
+	}
+
+	if got := closeRequestCount.Load(); got != 1 {
+		t.Fatalf("backend CLOSE_REQ count = %d, want 1", got)
+	}
+	_, _, closed, inFlight := frontendConn.sink.snapshot()
+	if !closed {
+		t.Fatal("frontend socket did not reach a terminal closed state")
+	}
+	if inFlight != 0 {
+		t.Fatalf("frontend closed with %d socket operations still in flight", inFlight)
+	}
+	if _, err := proxyServer.getFrontend(agentID, connectID); err == nil {
+		t.Fatal("connection remained or was recreated in established state after concurrent close")
+	}
+	proxyServer.PendingDial.mu.RLock()
+	_, stillPending := proxyServer.PendingDial.pendingDial[dialID]
+	proxyServer.PendingDial.mu.RUnlock()
+	if stillPending {
+		t.Fatal("connection reappeared in pending state after concurrent close")
+	}
+}
