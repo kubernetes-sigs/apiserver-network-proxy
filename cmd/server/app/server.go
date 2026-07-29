@@ -191,22 +191,22 @@ func (p *Proxy) Run(o *options.ProxyRunOptions, stopCh <-chan struct{}) error {
 
 	// If graceful shutdown timeout is 0, use the old behavior (immediate shutdown)
 	if o.GracefulShutdownTimeout == 0 {
-		if frontendStop != nil {
-			if err := frontendStop(context.Background()); err != nil {
-				klog.ErrorS(err, "failed to stop frontend server")
-			}
-		}
-		if p.agentServer != nil {
-			p.agentServer.Stop()
+		if p.healthServer != nil {
+			p.healthServer.Close()
 		}
 		if p.adminServer != nil {
 			p.adminServer.Close()
 		}
-		if p.healthServer != nil {
-			p.healthServer.Close()
-		}
 		if leaseController != nil {
 			leaseController.Stop()
+		}
+		if p.agentServer != nil {
+			p.agentServer.Stop()
+		}
+		if frontendStop != nil {
+			if err := frontendStop(ctx); err != nil {
+				klog.ErrorS(err, "failed to stop frontend server")
+			}
 		}
 		return nil
 	}
@@ -214,7 +214,7 @@ func (p *Proxy) Run(o *options.ProxyRunOptions, stopCh <-chan struct{}) error {
 	klog.V(1).Infoln("Initiating graceful shutdown.")
 
 	// Start graceful shutdown with timeout
-	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), o.GracefulShutdownTimeout)
+	shutdownCtx, shutdownCancel := context.WithTimeout(ctx, o.GracefulShutdownTimeout)
 	defer shutdownCancel()
 
 	// Create a WaitGroup to track shutdown of all components
