@@ -6,7 +6,7 @@ toolchain go1.26.2
 
 require (
 	github.com/google/uuid v1.6.0
-	github.com/prometheus/client_golang v1.24.0
+	github.com/prometheus/client_golang v1.24.1
 	github.com/prometheus/client_model v0.6.2
 	github.com/prometheus/common v0.70.1
 	github.com/spf13/cobra v1.10.2
