@@ -106,8 +106,10 @@ func (t *Tunnel) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		Mode: ModeHTTPConnect,
 		HTTP: io.ReadWriter(conn), // pass as ReadWriter so the caller must close with CloseHTTP
 		CloseHTTP: func() error {
-			closeOnce.Do(func() { conn.Close() })
-			close(closed)
+			closeOnce.Do(func() {
+				conn.Close()
+				close(closed)
+			})
 			return nil
 		},
 		connected: connected,
