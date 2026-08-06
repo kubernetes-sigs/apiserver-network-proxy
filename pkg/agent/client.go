@@ -53,18 +53,18 @@ type endpointConn struct {
 	// dataCh is a queue to decouple reads from the ANP Server
 	// to the corresponding writes to the data plane.
 	// This is for traffic coming from the KAS.
-	dataCh    chan []byte
+	dataCh chan []byte
 	// dialDone should be closed by dialChannelToRemote which is reading from the dialCh.
 	// It should only be closed when it has read to the end of the channel and sent the packets.
-	dialDone  chan struct{}
+	dialDone chan struct{}
 
 	// sendCh is a queue to decouple reads from the data plane
 	// to the corresponding writes to the ANP Server.
 	// This is for traffic going toward the KAS
-	sendCh    chan []byte
+	sendCh chan []byte
 	// sendDone should be closed by sendChannelToProxy which is reading from sendCh.
 	// It should only be closed when it has read to the end of the channel and sent the packets.
-	sendDone  chan struct{}
+	sendDone chan struct{}
 
 	cleanOnce sync.Once
 	warnChLim bool
@@ -482,11 +482,11 @@ func (a *Client) Serve() {
 						// the channel as it may not have been closed yet and we
 						// don't want to leave a goroutine hanging.
 						select {
-    						case <- eConn.sendCh:
+						case <-eConn.sendCh:
 							discardedPktCount++
-    						default:
+						default:
 							reading = false
-    						}
+						}
 					}
 					if discardedPktCount > 0 {
 						klog.V(1).InfoS("Discard packets from failed Dial", "pktCount", discardedPktCount, "dialID", dialReq.Random, "connectionID", connID)
