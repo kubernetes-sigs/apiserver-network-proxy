@@ -367,7 +367,11 @@ func TestDrain(t *testing.T) {
 	defer close(stopCh)
 
 	// Ensure Serve is blocked in Recv before requesting drain.
-	<-recvStarted
+	select {
+	case <-recvStarted:
+	case <-time.After(5 * time.Second):
+		t.Fatal("timed out waiting for Serve to call Recv")
+	}
 
 	// Simulate pod first shutdown signal
 	close(drainCh)
