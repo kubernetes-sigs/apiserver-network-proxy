@@ -344,7 +344,6 @@ func TestFailedSend_DialResp_GRPC(t *testing.T) {
 }
 
 func TestDrain(t *testing.T) {
-	var stream agent.AgentService_ConnectClient
 	drainCh := make(chan struct{})
 	stopCh := make(chan struct{})
 	cs := &ClientSet{
@@ -358,11 +357,17 @@ func TestDrain(t *testing.T) {
 		stopCh:      stopCh,
 		cs:          cs,
 	}
-	testClient.stream, stream = pipe()
+	agentStream, stream := pipe()
+	recvStarted := make(chan struct{}, 1)
+	agentStream.recvStarted = recvStarted
+	testClient.stream = agentStream
 
 	// Start agent
 	go testClient.Serve()
 	defer close(stopCh)
+
+	// Ensure Serve is blocked in Recv before requesting drain.
+	<-recvStarted
 
 	// Simulate pod first shutdown signal
 	close(drainCh)
@@ -380,11 +385,12 @@ func TestDrain(t *testing.T) {
 // fakeStream implements AgentService_ConnectClient
 type fakeStream struct {
 	grpc.ClientStream
-	r <-chan *client.Packet
-	w chan<- *client.Packet
+	r           <-chan *client.Packet
+	w           chan<- *client.Packet
+	recvStarted chan struct{}
 }
 
-func pipe() (agent.AgentService_ConnectClient, agent.AgentService_ConnectClient) {
+func pipe() (*fakeStream, *fakeStream) {
 	r, w := make(chan *client.Packet, 2), make(chan *client.Packet, 2)
 	s1, s2 := &fakeStream{}, &fakeStream{}
 	s1.r, s1.w = r, w
@@ -399,6 +405,10 @@ func (s *fakeStream) Send(packet *client.Packet) error {
 }
 
 func (s *fakeStream) Recv() (*client.Packet, error) {
+	select {
+	case s.recvStarted <- struct{}{}:
+	default:
+	}
 	select {
 	case pkt := <-s.r:
 		klog.V(4).InfoS("[DEBUG] recv", "packet", pkt)
