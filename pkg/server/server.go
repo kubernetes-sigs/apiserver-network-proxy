@@ -464,6 +464,8 @@ func (s *ProxyServer) removeEstablishedForBackendConn(agentID string, backend *B
 	}
 	if len(established) == 0 {
 		delete(s.established, agentID)
+	} else {
+		klog.V(2).InfoS("Frontends established over other backend connections remain after backend removal", "agentID", agentID, "remaining", len(established))
 	}
 
 	metrics.Metrics.SetEstablishedConnCount(s.getCount(s.established))
