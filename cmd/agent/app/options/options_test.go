@@ -18,7 +18,6 @@ package options
 
 import (
 	"fmt"
-	"reflect"
 	"testing"
 	"time"
 
@@ -51,6 +50,11 @@ func TestDefaultServerOptions(t *testing.T) {
 	assertDefaultValue(t, "WarnOnChannelLimit", defaultAgentOptions.WarnOnChannelLimit, false)
 	assertDefaultValue(t, "SyncForever", defaultAgentOptions.SyncForever, false)
 	assertDefaultValue(t, "XfrChannelSize", defaultAgentOptions.XfrChannelSize, 150)
+	assertDefaultValue(t, "CountServerLeases", defaultAgentOptions.CountServerLeases, false)
+	assertDefaultValue(t, "LeaseNamespace", defaultAgentOptions.LeaseNamespace, "kube-system")
+	assertDefaultValue(t, "LeaseLabelSelector", defaultAgentOptions.LeaseLabelSelector.String(), "k8s-app=konnectivity-server")
+	assertDefaultValue(t, "ServerCountSource", defaultAgentOptions.ServerCountSource, "default")
+	assertDefaultValue(t, "KubeconfigPath", defaultAgentOptions.KubeconfigPath, "")
 	assertDefaultValue(t, "APIContentType", defaultAgentOptions.APIContentType, "application/vnd.kubernetes.protobuf")
 }
 
@@ -62,126 +66,170 @@ func assertDefaultValue(t *testing.T, fieldName string, actual, expected interfa
 
 func TestValidate(t *testing.T) {
 	for desc, tc := range map[string]struct {
-		fieldMap map[string]interface{}
-		expected error
+		fieldMap map[string]any
+		expected string
 	}{
 		"default": {
-			fieldMap: map[string]interface{}{},
-			expected: nil,
+			fieldMap: map[string]any{},
+			expected: "",
 		},
 		"ZeroProxyServerPort": {
-			fieldMap: map[string]interface{}{"ProxyServerPort": 0},
-			expected: fmt.Errorf("proxy server port 0 must be greater than 0"),
+			fieldMap: map[string]any{"proxy-server-port": 0},
+			expected: "proxy server port 0 must be greater than 0",
 		},
 		"NegativeProxyServerPort": {
-			fieldMap: map[string]interface{}{"ProxyServerPort": -1},
-			expected: fmt.Errorf("proxy server port -1 must be greater than 0"),
+			fieldMap: map[string]any{"proxy-server-port": -1},
+			expected: "proxy server port -1 must be greater than 0",
 		},
 		"ReservedProxyServerPort": {
-			fieldMap: map[string]interface{}{"ProxyServerPort": 1023},
-			expected: nil, //TODO: fmt.Errorf("please do not try to use reserved port 1023 for the proxy server port"),
+			fieldMap: map[string]any{"proxy-server-port": 1023},
+			expected: "", //TODO: "please do not try to use reserved port 1023 for the proxy server port",
 		},
 		"StartValidProxyServerPort": {
-			fieldMap: map[string]interface{}{"ProxyServerPort": 1024},
-			expected: nil,
+			fieldMap: map[string]any{"proxy-server-port": 1024},
+			expected: "",
 		},
 		"EndValidProxyServerPort": {
-			fieldMap: map[string]interface{}{"ProxyServerPort": 49151},
-			expected: nil,
+			fieldMap: map[string]any{"proxy-server-port": 49151},
+			expected: "",
 		},
 		"StartEphemeralProxyServerPort": {
-			fieldMap: map[string]interface{}{"ProxyServerPort": 49152},
-			expected: nil, //TODO: fmt.Errorf("please do not try to use ephemeral port 49152 for the proxy server port"),
+			fieldMap: map[string]any{"proxy-server-port": 49152},
+			expected: "", //TODO: "please do not try to use ephemeral port 49152 for the proxy server port",
 		},
 		"ZeroHealthServerPort": {
-			fieldMap: map[string]interface{}{"HealthServerPort": 0},
-			expected: fmt.Errorf("health server port 0 must be greater than 0"),
+			fieldMap: map[string]any{"health-server-port": 0},
+			expected: "health server port 0 must be greater than 0",
 		},
 		"NegativeHealthServerPort": {
-			fieldMap: map[string]interface{}{"HealthServerPort": -1},
-			expected: fmt.Errorf("health server port -1 must be greater than 0"),
+			fieldMap: map[string]any{"health-server-port": -1},
+			expected: "health server port -1 must be greater than 0",
 		},
 		"ReservedHealthServerPort": {
-			fieldMap: map[string]interface{}{"HealthServerPort": 1023},
-			expected: nil, //TODO: fmt.Errorf("please do not try to use reserved port 1023 for the health server port"),
+			fieldMap: map[string]any{"health-server-port": 1023},
+			expected: "", //TODO: "please do not try to use reserved port 1023 for the health server port",
 		},
 		"StartValidHealthServerPort": {
-			fieldMap: map[string]interface{}{"HealthServerPort": 1024},
-			expected: nil,
+			fieldMap: map[string]any{"health-server-port": 1024},
+			expected: "",
 		},
 		"EndValidHealthServerPort": {
-			fieldMap: map[string]interface{}{"HealthServerPort": 49151},
-			expected: nil,
+			fieldMap: map[string]any{"health-server-port": 49151},
+			expected: "",
 		},
 		"StartEphemeralHealthServerPort": {
-			fieldMap: map[string]interface{}{"HealthServerPort": 49152},
-			expected: nil, //TODO: fmt.Errorf("please do not try to use ephemeral port 49152 for the health server port"),
+			fieldMap: map[string]any{"health-server-port": 49152},
+			expected: "", //TODO: "please do not try to use ephemeral port 49152 for the health server port",
 		},
 		"ZeroAdminServerPort": {
-			fieldMap: map[string]interface{}{"AdminServerPort": 0},
-			expected: fmt.Errorf("admin server port 0 must be greater than 0"),
+			fieldMap: map[string]any{"admin-server-port": 0},
+			expected: "admin server port 0 must be greater than 0",
 		},
 		"NegativeAdminServerPort": {
-			fieldMap: map[string]interface{}{"AdminServerPort": -1},
-			expected: fmt.Errorf("admin server port -1 must be greater than 0"),
+			fieldMap: map[string]any{"admin-server-port": -1},
+			expected: "admin server port -1 must be greater than 0",
 		},
 		"ReservedAdminServerPort": {
-			fieldMap: map[string]interface{}{"AdminServerPort": 1023},
-			expected: nil, //TODO: fmt.Errorf("please do not try to use reserved port 1023 for the health port"),
+			fieldMap: map[string]any{"admin-server-port": 1023},
+			expected: "", //TODO: "please do not try to use reserved port 1023 for the health port",
 		},
 		"StartValidAdminServerPort": {
-			fieldMap: map[string]interface{}{"AdminServerPort": 1024},
-			expected: nil,
+			fieldMap: map[string]any{"admin-server-port": 1024},
+			expected: "",
 		},
 		"EndValidAdminServerPort": {
-			fieldMap: map[string]interface{}{"AdminServerPort": 49151},
-			expected: nil,
+			fieldMap: map[string]any{"admin-server-port": 49151},
+			expected: "",
 		},
 		"StartEphemeralAdminServerPort": {
-			fieldMap: map[string]interface{}{"AdminServerPort": 49152},
-			expected: nil, //TODO: fmt.Errorf("please do not try to use ephemeral port 49152 for the health port"),
+			fieldMap: map[string]any{"admin-server-port": 49152},
+			expected: "", //TODO: "please do not try to use ephemeral port 49152 for the health port",
 		},
 		"ContentionProfilingRequiresProfiling": {
-			fieldMap: map[string]interface{}{
-				"EnableContentionProfiling": true,
-				"EnableProfiling":           false,
+			fieldMap: map[string]any{
+				"enable-contention-profiling": true,
+				"enable-profiling":            false,
 			},
-			expected: fmt.Errorf("if --enable-contention-profiling is set, --enable-profiling must also be set"),
+			expected: "if --enable-contention-profiling is set, --enable-profiling must also be set",
 		},
 		"ZeroXfrChannelSize": {
-			fieldMap: map[string]interface{}{"XfrChannelSize": 0},
-			expected: fmt.Errorf("channel size 0 must be greater than 0"),
+			fieldMap: map[string]any{"xfr-channel-size": 0},
+			expected: "channel size 0 must be greater than 0",
 		},
 		"NegativeXfrChannelSize": {
-			fieldMap: map[string]interface{}{"XfrChannelSize": -10},
-			expected: fmt.Errorf("channel size -10 must be greater than 0"),
+			fieldMap: map[string]any{"xfr-channel-size": -10},
+			expected: "channel size -10 must be greater than 0",
 		},
 		"ServerCountSource": {
-			fieldMap: map[string]interface{}{"ServerCountSource": "foobar"},
-			expected: fmt.Errorf("--server-count-source must be one of '', 'default', 'max', got foobar"),
+			fieldMap: map[string]any{"server-count-source": "foobar"},
+			expected: "--server-count-source must be one of '', 'default', 'max', got foobar",
+		},
+		"LeaseLabelValid": {
+			fieldMap: map[string]any{
+				"lease-label": "k8s-app=konnectivity-server",
+			},
+			expected: "",
+		},
+		"LeaseLabelEmpty": {
+			fieldMap: map[string]any{
+				"lease-label": "",
+			},
+			expected: "",
+		},
+		"LeaseLabelInvalidFormat": {
+			fieldMap: map[string]any{
+				"lease-label": "*notavalidlabel*",
+			},
+			expected: `invalid argument "*notavalidlabel*" for "--lease-label" flag`,
+		},
+		"LeaseLabelMultipleValid": {
+			fieldMap: map[string]any{
+				"lease-label": "k8s-app=konnectivity-server,component=proxy",
+			},
+			expected: "",
+		},
+		"LeaseLabelSelectorValid": {
+			fieldMap: map[string]any{
+				"lease-label-selector": "k8s-app=konnectivity-server",
+			},
+			expected: "",
+		},
+		"LeaseLabelSelectorEmpty": {
+			fieldMap: map[string]any{
+				"lease-label-selector": "",
+			},
+			expected: "",
+		},
+		"LeaseLabelSelectorInvalidFormat": {
+			fieldMap: map[string]any{
+				"lease-label-selector": "*notavalidlabel*",
+			},
+			expected: `invalid argument "*notavalidlabel*" for "--lease-label-selector" flag`,
+		},
+		"LeaseLabelSelectorMultipleValid": {
+			fieldMap: map[string]any{
+				"lease-label-selector": "k8s-app=konnectivity-server,component=proxy",
+			},
+			expected: "",
 		},
 	} {
 		t.Run(desc, func(t *testing.T) {
 			testAgentOptions := NewGrpcProxyAgentOptions()
+			args := make([]string, 0, len(tc.fieldMap))
 			for field, value := range tc.fieldMap {
-				rv := reflect.ValueOf(testAgentOptions)
-				rv = rv.Elem()
-				fv := rv.FieldByName(field)
-				switch reflect.TypeOf(value).Kind() {
-				case reflect.String:
-					svalue := value.(string)
-					fv.SetString(svalue)
-				case reflect.Int:
-					ivalue := value.(int)
-					fv.SetInt(int64(ivalue))
-				case reflect.Bool:
-					bvalue := value.(bool)
-					fv.SetBool(bvalue)
-				}
+				args = append(args, "--"+field+"="+fmt.Sprint(value))
 			}
-			actual := testAgentOptions.Validate()
-			assert.IsType(t, tc.expected, actual, "Validation for case %s, got the wrong type.", desc)
-			assert.Equal(t, tc.expected, actual, "Validation for case %s, got the wrong value.", desc)
+
+			actual := testAgentOptions.Flags().Parse(args)
+			if actual == nil {
+				actual = testAgentOptions.Validate()
+			}
+
+			if tc.expected == "" {
+				assert.NoError(t, actual)
+			} else if assert.Errorf(t, actual, "Expected message: %s", tc.expected) {
+				assert.ErrorContains(t, actual, tc.expected)
+			}
 		})
 	}
 }
