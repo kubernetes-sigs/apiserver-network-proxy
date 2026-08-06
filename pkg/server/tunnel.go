@@ -107,8 +107,8 @@ func (t *Tunnel) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		HTTP: io.ReadWriter(conn), // pass as ReadWriter so the caller must close with CloseHTTP
 		CloseHTTP: func() error {
 			closeOnce.Do(func() {
+				defer close(closed)
 				conn.Close()
-				close(closed)
 			})
 			return nil
 		},
