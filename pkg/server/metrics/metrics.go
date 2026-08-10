@@ -59,6 +59,7 @@ type ServerMetrics struct {
 	pendingDials         *prometheus.GaugeVec
 	establishedConns     *prometheus.GaugeVec
 	fullRecvChannels     *prometheus.GaugeVec
+	fullWriteChannels    *prometheus.GaugeVec
 	dialFailures         *prometheus.CounterVec
 	streamPackets        *prometheus.CounterVec
 	streamErrors         *prometheus.CounterVec
@@ -169,6 +170,15 @@ func newServerMetrics() *ServerMetrics {
 			"service_method",
 		},
 	)
+	fullFrontendWriteChannels := prometheus.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Namespace: Namespace,
+			Subsystem: Subsystem,
+			Name:      "frontend_write_channel_full",
+			Help:      "Number of HTTP CONNECT connections currently blocked by a full frontend write channel.",
+		},
+		[]string{},
+	)
 	dialFailures := prometheus.NewCounterVec(
 		prometheus.CounterOpts{
 			Namespace: Namespace,
@@ -234,6 +244,7 @@ func newServerMetrics() *ServerMetrics {
 	prometheus.MustRegister(pendingDials)
 	prometheus.MustRegister(establishedConns)
 	prometheus.MustRegister(fullRecvChannels)
+	prometheus.MustRegister(fullFrontendWriteChannels)
 	prometheus.MustRegister(dialFailures)
 	prometheus.MustRegister(streamPackets)
 	prometheus.MustRegister(streamErrors)
@@ -253,6 +264,7 @@ func newServerMetrics() *ServerMetrics {
 		pendingDials:         pendingDials,
 		establishedConns:     establishedConns,
 		fullRecvChannels:     fullRecvChannels,
+		fullWriteChannels:    fullFrontendWriteChannels,
 		dialFailures:         dialFailures,
 		streamPackets:        streamPackets,
 		streamErrors:         streamErrors,
@@ -275,6 +287,7 @@ func (s *ServerMetrics) Reset() {
 	s.pendingDials.Reset()
 	s.establishedConns.Reset()
 	s.fullRecvChannels.Reset()
+	s.fullWriteChannels.Reset()
 	s.dialFailures.Reset()
 	s.streamPackets.Reset()
 	s.streamErrors.Reset()
@@ -339,6 +352,12 @@ func (s *ServerMetrics) SetEstablishedConnCount(count int) {
 // FullRecvChannel retrieves the metric for counting full receive channels.
 func (s *ServerMetrics) FullRecvChannel(serviceMethod string) prometheus.Gauge {
 	return s.fullRecvChannels.With(prometheus.Labels{"service_method": serviceMethod})
+}
+
+// FullFrontendWriteChannels returns the number of HTTP CONNECT connections
+// currently blocking backend dispatch on a full frontend write channel.
+func (s *ServerMetrics) FullFrontendWriteChannels() prometheus.Gauge {
+	return s.fullWriteChannels.WithLabelValues()
 }
 
 type DialFailureReason string
