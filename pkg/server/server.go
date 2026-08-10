@@ -456,11 +456,14 @@ func (s *ProxyServer) removeEstablishedForBackendConn(agentID string, backend *B
 	if !ok {
 		return nil, fmt.Errorf("can't find agentID %s in the established", agentID)
 	}
-	for _, frontend := range established {
+	for connID, frontend := range established {
 		if frontend.backend == backend {
-			delete(s.established, agentID)
+			delete(established, connID)
 			ret = append(ret, frontend)
 		}
+	}
+	if len(established) == 0 {
+		delete(s.established, agentID)
 	}
 
 	metrics.Metrics.SetEstablishedConnCount(s.getCount(s.established))

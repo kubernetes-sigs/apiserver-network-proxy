@@ -679,6 +679,34 @@ func TestRemoveEstablishedForBackendConn(t *testing.T) {
 	}
 }
 
+func TestRemoveEstablishedForBackendConnPreservesOtherBackend(t *testing.T) {
+	metrics.Metrics.Reset()
+	const agentID = "agent"
+
+	targetBackend := &Backend{}
+	otherBackend := &Backend{}
+	targetFrontend := &ProxyClientConnection{backend: targetBackend}
+	otherFrontend := &ProxyClientConnection{backend: otherBackend}
+	p := NewProxyServer("", []proxystrategies.ProxyStrategy{proxystrategies.ProxyStrategyDefault}, 1, nil, xfrChannelSize)
+	p.addEstablished(agentID, 1, targetFrontend)
+	p.addEstablished(agentID, 2, otherFrontend)
+
+	removed, err := p.removeEstablishedForBackendConn(agentID, targetBackend)
+	if err != nil {
+		t.Fatalf("removeEstablishedForBackendConn failed: %v", err)
+	}
+	if len(removed) != 1 || removed[0] != targetFrontend {
+		t.Fatalf("removed frontends = %v, want only %p", removed, targetFrontend)
+	}
+	if frontend, err := p.getFrontend(agentID, 1); err == nil || frontend != nil {
+		t.Fatalf("target backend frontend remains tracked: got %p, err %v", frontend, err)
+	}
+	if frontend, err := p.getFrontend(agentID, 2); err != nil || frontend != otherFrontend {
+		t.Fatalf("other backend frontend was removed: got %p, err %v, want %p", frontend, err, otherFrontend)
+	}
+	assertEstablishedConnsMetric(t, 1)
+}
+
 func TestRemoveEstablishedForStream(t *testing.T) {
 	streamUID := "target-uuid"
 	backend1 := &Backend{}
