@@ -68,6 +68,8 @@ func (b *Backend) SetDraining() {
 	b.draining.Store(true)
 }
 
+// Retire marks the backend as draining and closes Done once.
+// It does not remove the backend from its backend managers.
 func (b *Backend) Retire() {
 	b.SetDraining()
 	b.retireOnce.Do(func() {
@@ -184,10 +186,18 @@ type BackendManager interface {
 	Backend(ctx context.Context) (*Backend, error)
 	// AddBackend adds a backend.
 	AddBackend(backend *Backend)
-	// RemoveBackend adds a backend.
+	// RemoveBackend removes a backend.
 	RemoveBackend(backend *Backend)
 	BackendStorage
 	ReadinessManager
+}
+
+// backendDrainingMarker is implemented by managers that maintain an index of
+// non-draining backends and therefore need notification of state transitions.
+// The caller must publish the backend's draining state before notification;
+// implementations only reclassify their own index.
+type backendDrainingMarker interface {
+	markBackendDraining(backend *Backend)
 }
 
 var _ BackendManager = &DefaultBackendManager{}
@@ -208,6 +218,11 @@ func (dbm *DefaultBackendManager) AddBackend(backend *Backend) {
 	dbm.addBackend(agentID, header.UID, backend)
 }
 
+func (dbm *DefaultBackendManager) markBackendDraining(backend *Backend) {
+	agentID := backend.GetAgentID()
+	dbm.DefaultBackendStorage.markIdentifierBackendDraining(agentID, header.UID, backend)
+}
+
 func (dbm *DefaultBackendManager) RemoveBackend(backend *Backend) {
 	agentID := backend.GetAgentID()
 	klog.V(5).InfoS("Remove the agent from the DefaultBackendManager", "agentID", agentID)
@@ -225,12 +240,14 @@ type DefaultBackendStorage struct {
 	// TODO: fix documentation. This is not always agentID, e.g. in
 	// the case of DestHostBackendManager.
 	backends map[string][]*Backend
-	// agentID is tracked in this slice to enable randomly picking an
-	// agentID in the Backend() method. There is no reliable way to
-	// randomly pick a key from a map (in this case, the backends) in
-	// Golang.
-	agentIDs []string
-	random   *rand.Rand
+	// These slices are the candidate index used by random routing. Each
+	// registered agent ID appears in exactly one slice, classified by the
+	// draining state of backends[agentID][0]. Destination-host routing does not
+	// use this index.
+	nonDrainingAgentIDs        []string
+	drainingAgentIDs           []string
+	maintainRandomRoutingIndex bool
+	random                     *rand.Rand
 	// idTypes contains the valid identifier types for this
 	// DefaultBackendStorage. The DefaultBackendStorage may only tolerate certain
 	// types of identifiers when associating to a specific BackendManager,
@@ -258,15 +275,54 @@ func NewDefaultBackendStorage(idTypes []header.IdentifierType, proxyStrategy pro
 	metrics.Metrics.SetTotalBackendCount(proxyStrategy, 0)
 
 	return &DefaultBackendStorage{
-		backends:      make(map[string][]*Backend),
-		random:        rand.New(rand.NewSource(time.Now().UnixNano())), /* #nosec G404 */
-		idTypes:       idTypes,
+		backends: make(map[string][]*Backend),
+		random:   rand.New(rand.NewSource(time.Now().UnixNano())), /* #nosec G404 */
+		idTypes:  idTypes,
+		maintainRandomRoutingIndex: proxyStrategy == proxystrategies.ProxyStrategyDefault ||
+			proxyStrategy == proxystrategies.ProxyStrategyDefaultRoute,
 		proxyStrategy: proxyStrategy,
 	}
 }
 
 func containIDType(idTypes []header.IdentifierType, idType header.IdentifierType) bool {
 	return slices.Contains(idTypes, idType)
+}
+
+// removeIdentifier removes identifier by replacing it with the final element.
+// It does not preserve order.
+func removeIdentifier(identifiers []string, identifier string) []string {
+	for i := range identifiers {
+		if identifiers[i] == identifier {
+			identifiers[i] = identifiers[len(identifiers)-1]
+			return identifiers[:len(identifiers)-1]
+		}
+	}
+	return identifiers
+}
+
+// refreshIdentifierState reconciles identifier's routing-index membership with
+// its primary backend. An identifier with no backends is removed from both
+// lists; otherwise it belongs to exactly one list. The caller must hold s.mu.
+func (s *DefaultBackendStorage) refreshIdentifierState(identifier string) {
+	backends := s.backends[identifier]
+	if len(backends) == 0 {
+		s.nonDrainingAgentIDs = removeIdentifier(s.nonDrainingAgentIDs, identifier)
+		s.drainingAgentIDs = removeIdentifier(s.drainingAgentIDs, identifier)
+		return
+	}
+	if backends[0].IsDraining() {
+		s.nonDrainingAgentIDs = removeIdentifier(s.nonDrainingAgentIDs, identifier)
+		if slices.Contains(s.drainingAgentIDs, identifier) {
+			return
+		}
+		s.drainingAgentIDs = append(s.drainingAgentIDs, identifier)
+		return
+	}
+	s.drainingAgentIDs = removeIdentifier(s.drainingAgentIDs, identifier)
+	if slices.Contains(s.nonDrainingAgentIDs, identifier) {
+		return
+	}
+	s.nonDrainingAgentIDs = append(s.nonDrainingAgentIDs, identifier)
 }
 
 // addBackend adds a backend.
@@ -290,9 +346,32 @@ func (s *DefaultBackendStorage) addBackend(identifier string, idType header.Iden
 		return
 	}
 	s.backends[identifier] = []*Backend{backend}
+	if s.maintainRandomRoutingIndex {
+		if backend.IsDraining() {
+			s.drainingAgentIDs = append(s.drainingAgentIDs, identifier)
+		} else {
+			s.nonDrainingAgentIDs = append(s.nonDrainingAgentIDs, identifier)
+		}
+	}
 	metrics.Metrics.SetBackendCountDeprecated(len(s.backends))
 	metrics.Metrics.SetTotalBackendCount(s.proxyStrategy, len(s.backends))
-	s.agentIDs = append(s.agentIDs, identifier)
+}
+
+// markIdentifierBackendDraining moves an identifier only when backend is its
+// primary connection. A draining secondary affects routing only if it is later
+// promoted.
+func (s *DefaultBackendStorage) markIdentifierBackendDraining(identifier string, idType header.IdentifierType, backend *Backend) {
+	if !containIDType(s.idTypes, idType) {
+		klog.ErrorS(&ErrWrongIDType{idType, s.idTypes}, "fail to mark backend draining")
+		return
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	backends, ok := s.backends[identifier]
+	if !ok || len(backends) == 0 || backends[0] != backend {
+		return
+	}
+	s.refreshIdentifierState(identifier)
 }
 
 // removeBackend removes a backend.
@@ -321,13 +400,9 @@ func (s *DefaultBackendStorage) removeBackend(identifier string, idType header.I
 	}
 	if len(s.backends[identifier]) == 0 {
 		delete(s.backends, identifier)
-		for i := range s.agentIDs {
-			if s.agentIDs[i] == identifier {
-				s.agentIDs[i] = s.agentIDs[len(s.agentIDs)-1]
-				s.agentIDs = s.agentIDs[:len(s.agentIDs)-1]
-				break
-			}
-		}
+	}
+	if s.maintainRandomRoutingIndex {
+		s.refreshIdentifierState(identifier)
 	}
 	if !found {
 		klog.V(1).InfoS("Could not find connection matching identifier to remove", "agentID", identifier, "idType", idType)
@@ -367,7 +442,8 @@ func ignoreNotFound(err error) error {
 	return err
 }
 
-// GetRandomBackend returns a random backend connection from all connected agents.
+// GetRandomBackend returns a random non-draining backend, falling back to a
+// random draining backend only when no non-draining agents are available.
 func (s *DefaultBackendStorage) GetRandomBackend() (*Backend, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -375,34 +451,25 @@ func (s *DefaultBackendStorage) GetRandomBackend() (*Backend, error) {
 		return nil, &ErrNotFound{}
 	}
 
-	var firstDrainingBackend *Backend
-
-	// Start at a random agent and check each agent in sequence
-	startIdx := s.random.Intn(len(s.agentIDs))
-	for i := 0; i < len(s.agentIDs); i++ {
-		// Wrap around using modulo
-		currentIdx := (startIdx + i) % len(s.agentIDs)
-		agentID := s.agentIDs[currentIdx]
-		// always return the first connection to an agent, because the agent
-		// will close later connections if there are multiple.
+	for len(s.nonDrainingAgentIDs) > 0 {
+		index := s.random.Intn(len(s.nonDrainingAgentIDs))
+		agentID := s.nonDrainingAgentIDs[index]
 		backend := s.backends[agentID][0]
-
-		if !backend.IsDraining() {
-			klog.V(3).InfoS("Pick agent as backend", "agentID", agentID)
-			return backend, nil
+		// SetDraining publishes before each manager updates its state lists.
+		// Repair that short-lived stale entry instead of routing to it.
+		if backend.IsDraining() {
+			s.refreshIdentifierState(agentID)
+			continue
 		}
-
-		// Keep track of first draining backend as fallback
-		if firstDrainingBackend == nil {
-			firstDrainingBackend = backend
-		}
+		klog.V(3).InfoS("Pick agent as backend", "agentID", agentID)
+		return backend, nil
 	}
 
-	// All agents are draining, use one as fallback
-	if firstDrainingBackend != nil {
-		agentID := firstDrainingBackend.id
+	if len(s.drainingAgentIDs) > 0 {
+		agentID := s.drainingAgentIDs[s.random.Intn(len(s.drainingAgentIDs))]
+		backend := s.backends[agentID][0]
 		klog.V(3).InfoS("No non-draining backends available, using draining backend as fallback", "agentID", agentID)
-		return firstDrainingBackend, nil
+		return backend, nil
 	}
 
 	return nil, &ErrNotFound{}
