@@ -900,10 +900,11 @@ func (s *ProxyServer) Connect(stream agent.AgentService_ConnectServer) error {
 	}
 
 	klog.V(2).InfoS("Agent connected", "agentID", agentID, "serverID", s.serverID)
+	recvCh := make(chan *client.Packet, s.xfrChannelSize)
+	backend.recvCh = recvCh
+
 	s.addBackend(backend)
 	defer s.removeBackend(backend)
-
-	recvCh := make(chan *client.Packet, s.xfrChannelSize)
 
 	go runpprof.Do(context.Background(), labels, func(context.Context) { s.serveRecvBackend(backend, agentID, recvCh) })
 
