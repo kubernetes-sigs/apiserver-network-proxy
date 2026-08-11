@@ -352,7 +352,7 @@ func (p *Proxy) runUDSFrontendServer(ctx context.Context, o *options.ProxyRunOpt
 		}
 	}
 	var stop StopFunc
-	if o.Mode == "grpc" {
+	if o.Mode == server.ModeGRPC {
 		frontendServerOptions := []grpc.ServerOption{
 			grpc.KeepaliveParams(keepalive.ServerParameters{Time: o.FrontendKeepaliveTime}),
 		}
@@ -454,7 +454,7 @@ func (p *Proxy) runMTLSFrontendServer(_ context.Context, o *options.ProxyRunOpti
 
 	addr := net.JoinHostPort(o.ServerBindAddress, strconv.Itoa(o.ServerPort))
 
-	if o.Mode == "grpc" {
+	if o.Mode == server.ModeGRPC {
 		frontendServerOptions := []grpc.ServerOption{
 			grpc.Creds(credentials.NewTLS(tlsConfig)),
 			grpc.KeepaliveParams(keepalive.ServerParameters{Time: o.FrontendKeepaliveTime}),

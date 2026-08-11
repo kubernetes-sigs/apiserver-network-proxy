@@ -686,7 +686,7 @@ func (s *ProxyServer) serveRecvFrontend(frontend *GrpcFrontend, recvCh <-chan *c
 			s.PendingDial.Add(
 				random,
 				&ProxyClientConnection{
-					Mode:        "grpc",
+					Mode:        ModeGRPC,
 					frontend:    frontend,
 					dialID:      random,
 					connected:   make(chan struct{}),
