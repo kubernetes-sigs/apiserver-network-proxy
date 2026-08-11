@@ -41,6 +41,24 @@ func mockAgentConn(ctrl *gomock.Controller, agentID string, agentIdentifiers []s
 	return agentConn
 }
 
+func assertAgentIDs(t *testing.T, got []string, want ...string) {
+	t.Helper()
+	if len(got) != len(want) {
+		t.Fatalf("agent IDs = %v, want %v", got, want)
+	}
+	gotSet := make(map[string]struct{}, len(got))
+	for _, agentID := range got {
+		gotSet[agentID] = struct{}{}
+	}
+	wantSet := make(map[string]struct{}, len(want))
+	for _, agentID := range want {
+		wantSet[agentID] = struct{}{}
+	}
+	if !reflect.DeepEqual(gotSet, wantSet) {
+		t.Fatalf("agent IDs = %v, want %v", got, want)
+	}
+}
+
 func TestNewBackend(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	defer ctrl.Finish()
@@ -124,7 +142,7 @@ func TestDefaultBackendManager_AddRemoveBackends(t *testing.T) {
 	if e, a := expectedBackends, p.backends; !reflect.DeepEqual(e, a) {
 		t.Errorf("expected %v, got %v", e, a)
 	}
-	if e, a := expectedAgentIDs, p.agentIDs; !reflect.DeepEqual(e, a) {
+	if e, a := expectedAgentIDs, p.nonDrainingAgentIDs; !reflect.DeepEqual(e, a) {
 		t.Errorf("expected %v, got %v", e, a)
 	}
 
@@ -147,9 +165,53 @@ func TestDefaultBackendManager_AddRemoveBackends(t *testing.T) {
 	if e, a := expectedBackends, p.backends; !reflect.DeepEqual(e, a) {
 		t.Errorf("expected %v, got %v", e, a)
 	}
-	if e, a := expectedAgentIDs, p.agentIDs; !reflect.DeepEqual(e, a) {
+	if e, a := expectedAgentIDs, p.nonDrainingAgentIDs; !reflect.DeepEqual(e, a) {
 		t.Errorf("expected %v, got %v", e, a)
 	}
+}
+
+func TestDefaultBackendManager_AgentListsFollowPrimaryBackendState(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	primary, _ := NewBackend(mockAgentConn(ctrl, "agent1", nil))
+	drainingReplacement, _ := NewBackend(mockAgentConn(ctrl, "agent1", nil))
+	healthyReplacement, _ := NewBackend(mockAgentConn(ctrl, "agent1", nil))
+	drainingAgent, _ := NewBackend(mockAgentConn(ctrl, "agent2", nil))
+	drainingAgent.SetDraining()
+
+	manager := NewDefaultBackendManager()
+	manager.AddBackend(primary)
+	manager.AddBackend(drainingReplacement)
+	manager.AddBackend(healthyReplacement)
+	manager.AddBackend(drainingAgent)
+	assertAgentIDs(t, manager.nonDrainingAgentIDs, "agent1")
+	assertAgentIDs(t, manager.drainingAgentIDs, "agent2")
+
+	// Draining a secondary connection does not change the agent's state while
+	// its non-draining primary remains selected.
+	drainingReplacement.SetDraining()
+	manager.markBackendDraining(drainingReplacement)
+	assertAgentIDs(t, manager.nonDrainingAgentIDs, "agent1")
+	assertAgentIDs(t, manager.drainingAgentIDs, "agent2")
+
+	primary.SetDraining()
+	manager.markBackendDraining(primary)
+	manager.markBackendDraining(primary) // The state transition is idempotent.
+	assertAgentIDs(t, manager.nonDrainingAgentIDs)
+	assertAgentIDs(t, manager.drainingAgentIDs, "agent1", "agent2")
+
+	// Removing primaries reclassifies the agent according to the promoted
+	// connection rather than retaining the removed primary's state.
+	manager.RemoveBackend(primary)
+	assertAgentIDs(t, manager.nonDrainingAgentIDs)
+	assertAgentIDs(t, manager.drainingAgentIDs, "agent1", "agent2")
+	manager.RemoveBackend(drainingReplacement)
+	assertAgentIDs(t, manager.nonDrainingAgentIDs, "agent1")
+	assertAgentIDs(t, manager.drainingAgentIDs, "agent2")
+
+	manager.RemoveBackend(healthyReplacement)
+	manager.RemoveBackend(drainingAgent)
+	assertAgentIDs(t, manager.nonDrainingAgentIDs)
+	assertAgentIDs(t, manager.drainingAgentIDs)
 }
 
 func TestDefaultRouteBackendManager_AddRemoveBackends(t *testing.T) {
@@ -171,7 +233,7 @@ func TestDefaultRouteBackendManager_AddRemoveBackends(t *testing.T) {
 	if e, a := expectedBackends, p.backends; !reflect.DeepEqual(e, a) {
 		t.Errorf("expected %v, got %v", e, a)
 	}
-	if e, a := expectedAgentIDs, p.agentIDs; !reflect.DeepEqual(e, a) {
+	if e, a := expectedAgentIDs, p.nonDrainingAgentIDs; !reflect.DeepEqual(e, a) {
 		t.Errorf("expected %v, got %v", e, a)
 	}
 
@@ -196,9 +258,35 @@ func TestDefaultRouteBackendManager_AddRemoveBackends(t *testing.T) {
 	if e, a := expectedBackends, p.backends; !reflect.DeepEqual(e, a) {
 		t.Errorf("expected %v, got %v", e, a)
 	}
-	if e, a := expectedAgentIDs, p.agentIDs; !reflect.DeepEqual(e, a) {
+	if e, a := expectedAgentIDs, p.nonDrainingAgentIDs; !reflect.DeepEqual(e, a) {
 		t.Errorf("expected %v, got %v", e, a)
 	}
+}
+
+func TestDefaultBackendManager_SelectionRepairsDirectRetirement(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	retired, _ := NewBackend(mockAgentConn(ctrl, "retired", nil))
+	healthy, _ := NewBackend(mockAgentConn(ctrl, "healthy", nil))
+
+	manager := NewDefaultBackendManager()
+	manager.AddBackend(retired)
+	manager.AddBackend(healthy)
+
+	// Some lifecycle paths publish retirement immediately and remove the
+	// backend from its managers shortly afterward. Selection must repair the
+	// classification during that interval.
+	retired.Retire()
+	for i := 0; i < 20; i++ {
+		got, err := manager.Backend(context.Background())
+		if err != nil {
+			t.Fatalf("Backend failed: %v", err)
+		}
+		if got != healthy {
+			t.Fatalf("Backend returned retired backend %q, want %q", got.id, healthy.id)
+		}
+	}
+	assertAgentIDs(t, manager.nonDrainingAgentIDs, "healthy")
+	assertAgentIDs(t, manager.drainingAgentIDs, "retired")
 }
 
 func TestDestHostBackendManager_AddRemoveBackends(t *testing.T) {
@@ -216,11 +304,7 @@ func TestDestHostBackendManager_AddRemoveBackends(t *testing.T) {
 	p.AddBackend(backend1)
 	p.RemoveBackend(backend1)
 	expectedBackends := make(map[string][]*Backend)
-	expectedAgentIDs := []string{}
 	if e, a := expectedBackends, p.backends; !reflect.DeepEqual(e, a) {
-		t.Errorf("expected %v, got %v", e, a)
-	}
-	if e, a := expectedAgentIDs, p.agentIDs; !reflect.DeepEqual(e, a) {
 		t.Errorf("expected %v, got %v", e, a)
 	}
 
@@ -233,17 +317,7 @@ func TestDestHostBackendManager_AddRemoveBackends(t *testing.T) {
 		"9878::7675:1292:9183:7562": {backend1},
 		"node1.mydomain.com":        {backend1},
 	}
-	expectedAgentIDs = []string{
-		"1.2.3.4",
-		"9878::7675:1292:9183:7562",
-		"localhost",
-		"node1.mydomain.com",
-	}
-
 	if e, a := expectedBackends, p.backends; !reflect.DeepEqual(e, a) {
-		t.Errorf("expected %v, got %v", e, a)
-	}
-	if e, a := expectedAgentIDs, p.agentIDs; !reflect.DeepEqual(e, a) {
 		t.Errorf("expected %v, got %v", e, a)
 	}
 
@@ -259,22 +333,11 @@ func TestDestHostBackendManager_AddRemoveBackends(t *testing.T) {
 		"9878::7675:1292:9183:7562": {backend1},
 		"::":                        {backend3},
 	}
-	expectedAgentIDs = []string{
-		"1.2.3.4",
-		"9878::7675:1292:9183:7562",
-		"localhost",
-		"node1.mydomain.com",
-		"5.6.7.8",
-		"::",
-		"node2.mydomain.com",
-	}
-
 	if e, a := expectedBackends, p.backends; !reflect.DeepEqual(e, a) {
 		t.Errorf("expected %v, got %v", e, a)
 	}
-	if e, a := expectedAgentIDs, p.agentIDs; !reflect.DeepEqual(e, a) {
-		t.Errorf("expected %v, got %v", e, a)
-	}
+	assertAgentIDs(t, p.nonDrainingAgentIDs)
+	assertAgentIDs(t, p.drainingAgentIDs)
 
 	p.RemoveBackend(backend2)
 	p.RemoveBackend(backend1)
@@ -284,27 +347,14 @@ func TestDestHostBackendManager_AddRemoveBackends(t *testing.T) {
 		"5.6.7.8":            {backend3},
 		"::":                 {backend3},
 	}
-	expectedAgentIDs = []string{
-		"node2.mydomain.com",
-		"::",
-		"5.6.7.8",
-	}
-
 	if e, a := expectedBackends, p.backends; !reflect.DeepEqual(e, a) {
-		t.Errorf("expected %v, got %v", e, a)
-	}
-	if e, a := expectedAgentIDs, p.agentIDs; !reflect.DeepEqual(e, a) {
 		t.Errorf("expected %v, got %v", e, a)
 	}
 
 	p.RemoveBackend(backend3)
 	expectedBackends = map[string][]*Backend{}
-	expectedAgentIDs = []string{}
 
 	if e, a := expectedBackends, p.backends; !reflect.DeepEqual(e, a) {
-		t.Errorf("expected %v, got %v", e, a)
-	}
-	if e, a := expectedAgentIDs, p.agentIDs; !reflect.DeepEqual(e, a) {
 		t.Errorf("expected %v, got %v", e, a)
 	}
 }
@@ -332,22 +382,11 @@ func TestDestHostBackendManager_WithDuplicateIdents(t *testing.T) {
 		"node1.mydomain.com":        {backend1, backend2},
 		"node2.mydomain.com":        {backend3},
 	}
-	expectedAgentIDs := []string{
-		"1.2.3.4",
-		"9878::7675:1292:9183:7562",
-		"localhost",
-		"node1.mydomain.com",
-		"5.6.7.8",
-		"::",
-		"node2.mydomain.com",
-	}
-
 	if e, a := expectedBackends, p.backends; !reflect.DeepEqual(e, a) {
 		t.Errorf("expected %v, got %v", e, a)
 	}
-	if e, a := expectedAgentIDs, p.agentIDs; !reflect.DeepEqual(e, a) {
-		t.Errorf("expected %v, got %v", e, a)
-	}
+	assertAgentIDs(t, p.nonDrainingAgentIDs)
+	assertAgentIDs(t, p.drainingAgentIDs)
 
 	p.RemoveBackend(backend1)
 	p.RemoveBackend(backend3)
@@ -358,28 +397,14 @@ func TestDestHostBackendManager_WithDuplicateIdents(t *testing.T) {
 		"9878::7675:1292:9183:7562": {backend2},
 		"node1.mydomain.com":        {backend2},
 	}
-	expectedAgentIDs = []string{
-		"1.2.3.4",
-		"9878::7675:1292:9183:7562",
-		"localhost",
-		"node1.mydomain.com",
-	}
-
 	if e, a := expectedBackends, p.backends; !reflect.DeepEqual(e, a) {
-		t.Errorf("expected %v, got %v", e, a)
-	}
-	if e, a := expectedAgentIDs, p.agentIDs; !reflect.DeepEqual(e, a) {
 		t.Errorf("expected %v, got %v", e, a)
 	}
 
 	p.RemoveBackend(backend2)
 	expectedBackends = map[string][]*Backend{}
-	expectedAgentIDs = []string{}
 
 	if e, a := expectedBackends, p.backends; !reflect.DeepEqual(e, a) {
-		t.Errorf("expected %v, got %v", e, a)
-	}
-	if e, a := expectedAgentIDs, p.agentIDs; !reflect.DeepEqual(e, a) {
 		t.Errorf("expected %v, got %v", e, a)
 	}
 }
@@ -416,6 +441,7 @@ func TestDefaultBackendManager_GetRandomBackend_DrainingFallback(t *testing.T) {
 
 	// Test 3: When some backends are draining, non-draining ones are prioritized
 	backend1.SetDraining()
+	p.markBackendDraining(backend1)
 
 	// Call multiple times to ensure we never get the draining backend
 	for i := 0; i < 20; i++ {
@@ -430,7 +456,9 @@ func TestDefaultBackendManager_GetRandomBackend_DrainingFallback(t *testing.T) {
 
 	// Test 4: When all backends are draining, fallback to a draining backend
 	backend2.SetDraining()
+	p.markBackendDraining(backend2)
 	backend3.SetDraining()
+	p.markBackendDraining(backend3)
 
 	b, err = p.Backend(context.Background())
 	if err != nil {

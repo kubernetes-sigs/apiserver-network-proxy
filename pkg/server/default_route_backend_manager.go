@@ -50,6 +50,13 @@ func (dibm *DefaultRouteBackendManager) AddBackend(backend *Backend) {
 	}
 }
 
+func (dibm *DefaultRouteBackendManager) markBackendDraining(backend *Backend) {
+	agentID := backend.GetAgentID()
+	if backend.GetAgentIdentifiers().DefaultRoute {
+		dibm.DefaultBackendStorage.markIdentifierBackendDraining(agentID, header.DefaultRoute, backend)
+	}
+}
+
 func (dibm *DefaultRouteBackendManager) RemoveBackend(backend *Backend) {
 	agentID := backend.GetAgentID()
 	agentIdentifiers := backend.GetAgentIdentifiers()

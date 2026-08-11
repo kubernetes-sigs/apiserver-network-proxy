@@ -389,6 +389,17 @@ func (s *ProxyServer) addBackend(backend *Backend) {
 	}
 }
 
+func (s *ProxyServer) markBackendDraining(backend *Backend) {
+	// Publish the state before notifying managers so concurrent selection can
+	// reject or repair a stale non-draining index entry.
+	backend.SetDraining()
+	for _, bm := range s.BackendManagers {
+		if marker, ok := bm.(backendDrainingMarker); ok {
+			marker.markBackendDraining(backend)
+		}
+	}
+}
+
 func (s *ProxyServer) removeBackend(backend *Backend) {
 	for _, bm := range s.BackendManagers {
 		bm.RemoveBackend(backend)
@@ -1106,7 +1117,7 @@ func (s *ProxyServer) serveRecvBackend(backend *Backend, agentID string, recvCh 
 
 		case client.PacketType_DRAIN:
 			klog.V(2).InfoS("agent is draining", "agentID", agentID)
-			backend.SetDraining()
+			s.markBackendDraining(backend)
 			klog.V(2).InfoS("marked backend as draining, will not route new requests to this agent", "agentID", agentID)
 		default:
 			klog.V(5).InfoS("Ignoring unrecognized packet from backend", "packet", pkt, "agentID", agentID)
