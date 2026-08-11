@@ -1087,3 +1087,29 @@ func dialClosePkt(dialID int64) *client.Packet {
 		},
 	}
 }
+
+func TestRemoveEstablishedForBackendConnPreservesOtherBackends(t *testing.T) {
+	p := NewProxyServer("", []proxystrategies.ProxyStrategy{proxystrategies.ProxyStrategyDefault}, 1, nil, xfrChannelSize)
+
+	backend1 := &Backend{}
+	backend2 := &Backend{}
+
+	conn1 := &ProxyClientConnection{backend: backend1}
+	conn2 := &ProxyClientConnection{backend: backend2}
+	p.addEstablished("agent1", int64(1), conn1)
+	p.addEstablished("agent1", int64(2), conn2)
+
+	ret, err := p.removeEstablishedForBackendConn("agent1", backend1)
+	if err != nil {
+		t.Fatalf("removeEstablishedForBackendConn returned error: %v", err)
+	}
+	if len(ret) != 1 || ret[0] != conn1 {
+		t.Fatalf("expected only conn1 returned, got %v", ret)
+	}
+	if got, err := p.getFrontend("agent1", int64(2)); err != nil || got != conn2 {
+		t.Errorf("conn2 on backend2 was wrongly evicted: got %v, err %v", got, err)
+	}
+	if got, err := p.getFrontend("agent1", int64(1)); err == nil && got != nil {
+		t.Errorf("conn1 on backend1 should have been removed, got %v", got)
+	}
+}
