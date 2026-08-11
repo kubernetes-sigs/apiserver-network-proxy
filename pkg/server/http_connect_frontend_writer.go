@@ -18,7 +18,10 @@ package server
 
 import (
 	"errors"
+	"sync"
+	"sync/atomic"
 
+	"github.com/prometheus/client_golang/prometheus"
 	"k8s.io/klog/v2"
 
 	"sigs.k8s.io/apiserver-network-proxy/konnectivity-client/proto/client"
@@ -29,6 +32,14 @@ const defaultFrontendWriteChannelSize = 10
 
 var errFrontendWriterStopped = errors.New("frontend writer stopped")
 var errFrontendBackendStopped = errors.New("frontend backend stopped")
+
+type frontendWriteQueueMetrics struct {
+	mu   sync.Mutex
+	full atomic.Bool // transitions are serialized by mu; loads avoid locking on most packets
+
+	fullGauge prometheus.Gauge // guarded by mu; keeps Inc and Dec on the same GaugeVec child
+	stopped   bool             // guarded by mu
+}
 
 // startFrontendWriter starts the bounded per-connection writer used by
 // established HTTP CONNECT tunnels. It is intentionally a no-op for gRPC;
@@ -53,6 +64,9 @@ func (c *ProxyClientConnection) initializeFrontendWriter(queueSize int) {
 	if c.Mode != ModeHTTPConnect || c.frontendWriteCh != nil {
 		return
 	}
+	if queueSize <= 0 {
+		queueSize = defaultFrontendWriteChannelSize
+	}
 	c.frontendWriteCh = make(chan *client.Packet, queueSize)
 	c.frontendWriteStopCh = make(chan struct{})
 	c.frontendWriteDone = make(chan struct{})
@@ -66,6 +80,7 @@ func (c *ProxyClientConnection) serveFrontendWrites() {
 			c.frontendWriterDone()
 		}
 	}()
+	defer c.stopFrontendWriter()
 
 	select {
 	case <-c.frontendWriteReady:
@@ -82,6 +97,7 @@ func (c *ProxyClientConnection) serveFrontendWrites() {
 
 		select {
 		case pkt := <-c.frontendWriteCh:
+			c.updateFrontendWriteQueueMetric()
 			if err := c.send(pkt); err != nil {
 				klog.ErrorS(err, "Queued send to frontend failed",
 					"packetType", pkt.Type,
@@ -90,7 +106,6 @@ func (c *ProxyClientConnection) serveFrontendWrites() {
 				)
 			}
 			if pkt.Type == client.PacketType_CLOSE_RSP {
-				c.stopFrontendWriter()
 				return
 			}
 		case <-c.frontendWriteStopCh:
@@ -119,6 +134,7 @@ func (c *ProxyClientConnection) sendEstablished(pkt *client.Packet) error {
 
 	select {
 	case c.frontendWriteCh <- pkt:
+		c.updateFrontendWriteQueueMetric()
 		return nil
 	case <-c.frontendWriteStopCh:
 		return errFrontendWriterStopped
@@ -131,12 +147,13 @@ func (c *ProxyClientConnection) sendEstablished(pkt *client.Packet) error {
 		"agentID", c.agentID,
 		"connectionID", c.connectID,
 	)
-	fullFrontendWriteChannels := metrics.Metrics.FullFrontendWriteChannels()
-	fullFrontendWriteChannels.Inc()
-	defer fullFrontendWriteChannels.Dec()
+	blockedFrontendWriteChannels := metrics.Metrics.BlockedFrontendWriteChannels()
+	blockedFrontendWriteChannels.Inc()
+	defer blockedFrontendWriteChannels.Dec()
 
 	select {
 	case c.frontendWriteCh <- pkt:
+		c.updateFrontendWriteQueueMetric()
 		return nil
 	case <-c.frontendWriteStopCh:
 		return errFrontendWriterStopped
@@ -152,6 +169,53 @@ func (c *ProxyClientConnection) backendDone() <-chan struct{} {
 	return c.backend.Done()
 }
 
+func (c *ProxyClientConnection) updateFrontendWriteQueueMetric() {
+	state := &c.frontendWriteMetrics
+	full := len(c.frontendWriteCh) == cap(c.frontendWriteCh)
+	if state.full.Load() == full {
+		return
+	}
+
+	state.mu.Lock()
+	defer state.mu.Unlock()
+	if state.stopped {
+		return
+	}
+	// Re-read after taking the lock because the writer and backend receive
+	// goroutines can change the channel length concurrently.
+	full = len(c.frontendWriteCh) == cap(c.frontendWriteCh)
+	if state.full.Load() == full {
+		return
+	}
+
+	state.full.Store(full)
+	if full {
+		state.fullGauge = metrics.Metrics.FullFrontendWriteQueues()
+		state.fullGauge.Inc()
+	} else {
+		state.fullGauge.Dec()
+		state.fullGauge = nil
+	}
+}
+
+// stopFrontendWriteQueueMetric releases the durable full-queue accounting.
+// Every initialized writer must reach stopFrontendWriter; frontendWriteStopOnce
+// guarantees that the metric cleanup and stop signal happen exactly once.
+func (c *ProxyClientConnection) stopFrontendWriteQueueMetric() {
+	state := &c.frontendWriteMetrics
+	state.mu.Lock()
+	defer state.mu.Unlock()
+	if state.stopped {
+		return
+	}
+
+	state.stopped = true
+	if state.full.Swap(false) {
+		state.fullGauge.Dec()
+		state.fullGauge = nil
+	}
+}
+
 func (c *ProxyClientConnection) markFrontendWriteReady() {
 	c.frontendWriteReadyOnce.Do(func() { close(c.frontendWriteReady) })
 }
@@ -162,5 +226,8 @@ func (c *ProxyClientConnection) stopFrontendWriter() {
 	}
 	// Stopping cancels queued writes. It is only used when the HTTP connection
 	// is already closing; ordinary CLOSE_RSP packets remain ordered in writeCh.
-	c.frontendWriteStopOnce.Do(func() { close(c.frontendWriteStopCh) })
+	c.frontendWriteStopOnce.Do(func() {
+		c.stopFrontendWriteQueueMetric()
+		close(c.frontendWriteStopCh)
+	})
 }

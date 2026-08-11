@@ -117,6 +117,7 @@ type ProxyClientConnection struct {
 	frontendWriteReady     chan struct{}
 	frontendWriteReadyOnce sync.Once
 	frontendWriterDone     func()
+	frontendWriteMetrics   frontendWriteQueueMetrics
 }
 
 const (

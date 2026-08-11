@@ -106,16 +106,28 @@ func waitForTestWrite(t *testing.T, ch <-chan string, want string) {
 	}
 }
 
-func waitForFullFrontendWriteChannels(t *testing.T, want float64) {
+func waitForFullFrontendWriteQueues(t *testing.T, want float64) {
 	t.Helper()
 	deadline := time.Now().Add(5 * time.Second)
 	for time.Now().Before(deadline) {
-		if got := promtest.ToFloat64(metrics.Metrics.FullFrontendWriteChannels()); got == want {
+		if got := promtest.ToFloat64(metrics.Metrics.FullFrontendWriteQueues()); got == want {
 			return
 		}
 		time.Sleep(time.Millisecond)
 	}
-	t.Fatalf("got full frontend write channels %v, want %v", promtest.ToFloat64(metrics.Metrics.FullFrontendWriteChannels()), want)
+	t.Fatalf("got full frontend write queues %v, want %v", promtest.ToFloat64(metrics.Metrics.FullFrontendWriteQueues()), want)
+}
+
+func waitForBlockedFrontendWriteChannels(t *testing.T, want float64) {
+	t.Helper()
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		if got := promtest.ToFloat64(metrics.Metrics.BlockedFrontendWriteChannels()); got == want {
+			return
+		}
+		time.Sleep(time.Millisecond)
+	}
+	t.Fatalf("got blocked frontend write channels %v, want %v", promtest.ToFloat64(metrics.Metrics.BlockedFrontendWriteChannels()), want)
 }
 
 func waitForFrontendWriteQueueLength(t *testing.T, frontend *ProxyClientConnection, want int) {
@@ -213,6 +225,27 @@ func TestHTTPConnectFrontendWriterWaitsUntilTunnelReady(t *testing.T) {
 	waitForTestWrite(t, writes, "data")
 }
 
+func TestInitializeFrontendWriterDefaultsNonPositiveQueueSize(t *testing.T) {
+	tests := []struct {
+		name      string
+		queueSize int
+	}{
+		{name: "zero", queueSize: 0},
+		{name: "negative", queueSize: -1},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			frontend := &ProxyClientConnection{Mode: ModeHTTPConnect}
+			frontend.initializeFrontendWriter(test.queueSize)
+
+			if got := cap(frontend.frontendWriteCh); got != defaultFrontendWriteChannelSize {
+				t.Fatalf("frontend write queue capacity is %d, want default %d", got, defaultFrontendWriteChannelSize)
+			}
+		})
+	}
+}
+
 func TestHTTPConnectFrontendWriterPreservesDataAndCloseOrder(t *testing.T) {
 	const (
 		agentID   = "agent"
@@ -258,6 +291,54 @@ func TestHTTPConnectFrontendWriterPreservesDataAndCloseOrder(t *testing.T) {
 	if got, err := proxyServer.getFrontend(agentID, connectID); err == nil || got != nil {
 		t.Fatalf("frontend remains tracked after queued CLOSE_RSP completed: got %p, err %v", got, err)
 	}
+}
+
+func TestHTTPConnectFrontendWriterFullQueueMetricCountsConnections(t *testing.T) {
+	metrics.Metrics.Reset()
+	const queueSize = 1
+
+	firstStarted := make(chan struct{})
+	firstUnblock := make(chan struct{})
+	first := newReadyHTTPFrontend(
+		&controlledHTTPReadWriter{started: firstStarted, unblock: firstUnblock},
+		nil, "agent", 1, queueSize, func() error { return nil }, nil,
+	)
+	secondStarted := make(chan struct{})
+	secondUnblock := make(chan struct{})
+	second := newReadyHTTPFrontend(
+		&controlledHTTPReadWriter{started: secondStarted, unblock: secondUnblock},
+		nil, "agent", 2, queueSize, func() error { return nil }, nil,
+	)
+
+	if err := first.sendEstablished(dataPkt(1, []byte("first-blocked"))); err != nil {
+		t.Fatalf("failed to start first blocked write: %v", err)
+	}
+	waitForTestSignal(t, firstStarted, "first frontend write to block")
+	if err := first.sendEstablished(dataPkt(1, []byte("first-queued"))); err != nil {
+		t.Fatalf("failed to fill first frontend queue: %v", err)
+	}
+
+	if err := second.sendEstablished(dataPkt(2, []byte("second-blocked"))); err != nil {
+		t.Fatalf("failed to start second blocked write: %v", err)
+	}
+	waitForTestSignal(t, secondStarted, "second frontend write to block")
+	if err := second.sendEstablished(dataPkt(2, []byte("second-queued"))); err != nil {
+		t.Fatalf("failed to fill second frontend queue: %v", err)
+	}
+	waitForFullFrontendWriteQueues(t, 2)
+
+	// Teardown removes a full queue from the aggregate even while its writer is
+	// still blocked in the socket write.
+	first.stopFrontendWriter()
+	waitForFullFrontendWriteQueues(t, 1)
+	close(firstUnblock)
+	waitForTestSignal(t, first.frontendWriteDone, "first frontend writer to stop")
+
+	// Draining the other queue accounts for its transition out of capacity.
+	close(secondUnblock)
+	waitForFullFrontendWriteQueues(t, 0)
+	second.stopFrontendWriter()
+	waitForTestSignal(t, second.frontendWriteDone, "second frontend writer to stop")
 }
 
 func TestHTTPConnectFrontendWriterStopRemovesQueuedClose(t *testing.T) {
@@ -455,6 +536,7 @@ func TestServeRecvBackendHTTPConnectWriterDelaysHOLByQueueDepth(t *testing.T) {
 		waitForTestWrite(t, healthyWrites, healthyPayload)
 	}
 	waitForFrontendWriteQueueLength(t, slowFrontend, writeQueueSize)
+	waitForFullFrontendWriteQueues(t, 1)
 
 	// The following slow packet exceeds that budget and restores the old
 	// blocking behavior. A healthy packet behind it cannot be dispatched yet.
@@ -465,7 +547,7 @@ func TestServeRecvBackendHTTPConnectWriterDelaysHOLByQueueDepth(t *testing.T) {
 		recvCh <- dataPkt(healthyID, []byte("healthy-after-full"))
 		close(healthyPacketReceived)
 	}()
-	waitForFullFrontendWriteChannels(t, 1)
+	waitForBlockedFrontendWriteChannels(t, 1)
 	select {
 	case <-healthyPacketReceived:
 		t.Fatal("healthy packet was received while serveRecvBackend was blocked on a full slow queue")
@@ -480,7 +562,8 @@ func TestServeRecvBackendHTTPConnectWriterDelaysHOLByQueueDepth(t *testing.T) {
 	close(slowUnblock)
 	waitForTestSignal(t, healthyPacketReceived, "healthy packet dispatch after slow frontend resumed")
 	waitForTestWrite(t, healthyWrites, "healthy-after-full")
-	waitForFullFrontendWriteChannels(t, 0)
+	waitForFullFrontendWriteQueues(t, 0)
+	waitForBlockedFrontendWriteChannels(t, 0)
 	for i := 1; i <= writeQueueSize+2; i++ {
 		want := fmt.Sprintf("slow-%d", i)
 		waitForTestWrite(t, slowWrites, want)
@@ -535,10 +618,11 @@ func TestBackendDisconnectCancelsFullHTTPConnectWriteQueue(t *testing.T) {
 	recvCh <- dataPkt(slowID, []byte("slow-1"))
 	waitForTestSignal(t, slowStarted, "slow frontend write to block")
 	recvCh <- dataPkt(slowID, []byte("slow-2"))
+	waitForFullFrontendWriteQueues(t, 1)
 	// The writer owns slow-1, slow-2 fills its queue, and dispatch blocks
 	// trying to enqueue slow-3.
 	recvCh <- dataPkt(slowID, []byte("slow-3"))
-	waitForFullFrontendWriteChannels(t, 1)
+	waitForBlockedFrontendWriteChannels(t, 1)
 
 	close(recvCh)
 	backend.Retire()
@@ -548,7 +632,8 @@ func TestBackendDisconnectCancelsFullHTTPConnectWriteQueue(t *testing.T) {
 	waitForTestSignal(t, serveDone, "backend receive loop to stop")
 	waitForTestSignal(t, slowFrontend.frontendWriteDone, "slow frontend writer to stop")
 	waitForTestSignal(t, healthyFrontend.frontendWriteDone, "healthy frontend writer to stop")
-	waitForFullFrontendWriteChannels(t, 0)
+	waitForFullFrontendWriteQueues(t, 0)
+	waitForBlockedFrontendWriteChannels(t, 0)
 	if got := slowConn.closeCalls.Load(); got != 1 {
 		t.Fatalf("slow conn.Close called %d times, want 1", got)
 	}
