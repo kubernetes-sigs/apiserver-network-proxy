@@ -18,31 +18,16 @@ package util //nolint:revive
 
 import (
 	"crypto/tls"
-	"crypto/x509"
 	"fmt"
-	"os"
-	"path/filepath"
-)
 
-// getCACertPool loads CA certificates to pool
-func getCACertPool(caFile string) (*x509.CertPool, error) {
-	certPool := x509.NewCertPool()
-	caCert, err := os.ReadFile(filepath.Clean(caFile))
-	if err != nil {
-		return nil, fmt.Errorf("failed to read CA cert %s: %v", caFile, err)
-	}
-	ok := certPool.AppendCertsFromPEM(caCert)
-	if !ok {
-		return nil, fmt.Errorf("failed to append CA cert to the cert pool")
-	}
-	return certPool, nil
-}
+	certutil "k8s.io/client-go/util/cert"
+)
 
 // GetClientTLSConfig returns tlsConfig based on x509 certs
 func GetClientTLSConfig(caFile, certFile, keyFile, serverName string, protos []string) (*tls.Config, error) {
-	certPool, err := getCACertPool(caFile)
+	certPool, err := certutil.NewPool(caFile)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("failed to load CA cert: %w", err)
 	}
 
 	tlsConfig := &tls.Config{
@@ -59,7 +44,7 @@ func GetClientTLSConfig(caFile, certFile, keyFile, serverName string, protos []s
 
 	cert, err := tls.LoadX509KeyPair(certFile, keyFile)
 	if err != nil {
-		return nil, fmt.Errorf("failed to load X509 key pair %s and %s: %v", certFile, keyFile, err)
+		return nil, fmt.Errorf("failed to load X509 key pair %s and %s: %w", certFile, keyFile, err)
 	}
 
 	tlsConfig.ServerName = serverName
