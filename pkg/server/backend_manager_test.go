@@ -18,12 +18,14 @@ package server
 
 import (
 	"context"
+	"math/rand"
 	"reflect"
 	"testing"
 
 	"go.uber.org/mock/gomock"
 	"google.golang.org/grpc/metadata"
 
+	client "sigs.k8s.io/apiserver-network-proxy/konnectivity-client/proto/client"
 	agentmock "sigs.k8s.io/apiserver-network-proxy/proto/agent/mocks"
 )
 
@@ -57,6 +59,25 @@ func assertAgentIDs(t *testing.T, got []string, want ...string) {
 	if !reflect.DeepEqual(gotSet, wantSet) {
 		t.Fatalf("agent IDs = %v, want %v", got, want)
 	}
+}
+
+func markRandomBackendDraining(t *testing.T, manager BackendManager, backend *Backend) {
+	t.Helper()
+	backend.SetDraining()
+	marker, ok := manager.(backendDrainingMarker)
+	if !ok {
+		t.Fatalf("manager %T does not maintain draining-state lists", manager)
+	}
+	marker.markBackendDraining(backend)
+}
+
+func setBackendRecvChannel(backend *Backend, capacity, packets int) chan *client.Packet {
+	recvCh := make(chan *client.Packet, capacity)
+	for i := 0; i < packets; i++ {
+		recvCh <- &client.Packet{}
+	}
+	backend.recvCh = recvCh
+	return recvCh
 }
 
 func TestNewBackend(t *testing.T) {
@@ -454,9 +475,21 @@ func TestDefaultBackendManager_GetRandomBackend_DrainingFallback(t *testing.T) {
 		}
 	}
 
-	// Test 4: When all backends are draining, fallback to a draining backend
+	// Test 4: When only one backend is not draining, always use it
 	backend2.SetDraining()
 	p.markBackendDraining(backend2)
+
+	for i := 0; i < 20; i++ {
+		b, err = p.Backend(context.Background())
+		if err != nil {
+			t.Fatalf("unexpected error with one non-draining backend: %v", err)
+		}
+		if b != backend3 {
+			t.Fatalf("expected sole non-draining backend3, got %p", b)
+		}
+	}
+
+	// Test 5: When all backends are draining, fallback to a draining backend
 	backend3.SetDraining()
 	p.markBackendDraining(backend3)
 
@@ -469,6 +502,181 @@ func TestDefaultBackendManager_GetRandomBackend_DrainingFallback(t *testing.T) {
 	}
 	if !b.IsDraining() {
 		t.Error("expected draining backend as fallback")
+	}
+}
+
+func TestRandomBackendManagersPreferLowerRecvChannelOccupancyAmongNonDrainingAgents(t *testing.T) {
+	tests := []struct {
+		name             string
+		agentIdentifiers []string
+		newManager       func() BackendManager
+	}{
+		{
+			name:       "default",
+			newManager: func() BackendManager { return NewDefaultBackendManager() },
+		},
+		{
+			name:             "default route",
+			agentIdentifiers: []string{"default-route=true"},
+			newManager:       func() BackendManager { return NewDefaultRouteBackendManager() },
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			ctrl := gomock.NewController(t)
+			busy, _ := NewBackend(mockAgentConn(ctrl, "busy", test.agentIdentifiers))
+			lessBusy, _ := NewBackend(mockAgentConn(ctrl, "less-busy", test.agentIdentifiers))
+			draining, _ := NewBackend(mockAgentConn(ctrl, "draining", test.agentIdentifiers))
+			setBackendRecvChannel(busy, 10, 9)
+			setBackendRecvChannel(lessBusy, 10, 1)
+			setBackendRecvChannel(draining, 10, 0)
+
+			manager := test.newManager()
+			manager.AddBackend(busy)
+			manager.AddBackend(lessBusy)
+			manager.AddBackend(draining)
+			markRandomBackendDraining(t, manager, draining)
+
+			for i := 0; i < 20; i++ {
+				got, err := manager.Backend(context.Background())
+				if err != nil {
+					t.Fatalf("Backend failed: %v", err)
+				}
+				if got != lessBusy {
+					t.Fatalf("Backend returned %p, want less occupied backend %p", got, lessBusy)
+				}
+			}
+		})
+	}
+}
+
+func TestDefaultBackendManager_GetRandomBackend_RecvChannelOccupancyRecovers(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	first, _ := NewBackend(mockAgentConn(ctrl, "first", nil))
+	second, _ := NewBackend(mockAgentConn(ctrl, "second", nil))
+	setBackendRecvChannel(first, 10, 2)
+	secondRecvCh := setBackendRecvChannel(second, 10, 8)
+
+	manager := NewDefaultBackendManager()
+	manager.AddBackend(first)
+	manager.AddBackend(second)
+
+	for i := 0; i < 20; i++ {
+		got, err := manager.Backend(context.Background())
+		if err != nil {
+			t.Fatalf("Backend failed: %v", err)
+		}
+		if got != first {
+			t.Fatalf("Backend returned %p, want initially less occupied backend %p", got, first)
+		}
+	}
+
+	for i := 0; i < 7; i++ {
+		<-secondRecvCh
+	}
+	for i := 0; i < 20; i++ {
+		got, err := manager.Backend(context.Background())
+		if err != nil {
+			t.Fatalf("Backend failed after recovery: %v", err)
+		}
+		if got != second {
+			t.Fatalf("Backend returned %p after recovery, want %p", got, second)
+		}
+	}
+}
+
+func TestDefaultBackendManager_GetRandomBackend_BreaksOccupancyTiesRandomly(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	first, _ := NewBackend(mockAgentConn(ctrl, "first", nil))
+	second, _ := NewBackend(mockAgentConn(ctrl, "second", nil))
+	setBackendRecvChannel(first, 10, 0)
+	setBackendRecvChannel(second, 10, 0)
+
+	manager := NewDefaultBackendManager()
+	manager.random = rand.New(rand.NewSource(1)) // #nosec G404 -- deterministic test source
+	manager.AddBackend(first)
+	manager.AddBackend(second)
+
+	selected := map[*Backend]int{}
+	for i := 0; i < 200; i++ {
+		got, err := manager.Backend(context.Background())
+		if err != nil {
+			t.Fatalf("Backend failed: %v", err)
+		}
+		selected[got]++
+	}
+	for _, backend := range []*Backend{first, second} {
+		if selected[backend] < 70 || selected[backend] > 130 {
+			t.Fatalf("backend %q selected %d times, want a random share", backend.id, selected[backend])
+		}
+	}
+}
+
+func TestDefaultBackendManager_GetRandomBackend_UsesPowerOfTwoChoices(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	leastBusy, _ := NewBackend(mockAgentConn(ctrl, "least-busy", nil))
+	middle, _ := NewBackend(mockAgentConn(ctrl, "middle", nil))
+	mostBusy, _ := NewBackend(mockAgentConn(ctrl, "most-busy", nil))
+	setBackendRecvChannel(leastBusy, 10, 0)
+	setBackendRecvChannel(middle, 10, 5)
+	setBackendRecvChannel(mostBusy, 10, 10)
+
+	manager := NewDefaultBackendManager()
+	manager.random = rand.New(rand.NewSource(2)) // #nosec G404 -- deterministic test source
+	manager.AddBackend(leastBusy)
+	manager.AddBackend(middle)
+	manager.AddBackend(mostBusy)
+
+	selected := map[*Backend]bool{}
+	for i := 0; i < 200; i++ {
+		got, err := manager.Backend(context.Background())
+		if err != nil {
+			t.Fatalf("Backend failed: %v", err)
+		}
+		if got == mostBusy {
+			t.Fatal("most occupied backend won a two-backend comparison")
+		}
+		selected[got] = true
+	}
+	if !selected[leastBusy] || !selected[middle] {
+		t.Fatalf("selected backends = %v, want both lower-pressure choices to be reachable", selected)
+	}
+}
+
+func TestDefaultBackendManager_GetRandomBackend_DrainingAgentsDoNotBiasEligibleSelection(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	manager := NewDefaultBackendManager()
+	manager.random = rand.New(rand.NewSource(3)) // #nosec G404 -- deterministic test source
+
+	selected := map[*Backend]int{}
+	for _, agentID := range []string{"eligible-a", "eligible-b", "eligible-c"} {
+		backend, _ := NewBackend(mockAgentConn(ctrl, agentID, nil))
+		setBackendRecvChannel(backend, 10, 0)
+		manager.AddBackend(backend)
+		selected[backend] = 0
+	}
+	for _, agentID := range []string{"draining-a", "draining-b", "draining-c"} {
+		backend, _ := NewBackend(mockAgentConn(ctrl, agentID, nil))
+		setBackendRecvChannel(backend, 10, 0)
+		backend.SetDraining()
+		manager.AddBackend(backend)
+	}
+
+	for i := 0; i < 6000; i++ {
+		got, err := manager.Backend(context.Background())
+		if err != nil {
+			t.Fatalf("Backend failed: %v", err)
+		}
+		if got.IsDraining() {
+			t.Fatalf("selected draining backend %q", got.id)
+		}
+		selected[got]++
+	}
+	for backend, count := range selected {
+		if count < 1700 || count > 2300 {
+			t.Fatalf("backend %q selected %d times, want approximately 2000", backend.id, count)
+		}
 	}
 }
 

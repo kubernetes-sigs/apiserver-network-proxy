@@ -457,27 +457,68 @@ func ignoreNotFound(err error) error {
 	return err
 }
 
-// GetRandomBackend returns a random non-draining backend, falling back to a
-// random draining backend only when no non-draining agents are available.
+// lessOccupiedBackend returns the backend with less receive-channel pressure.
+// Equal occupancy is resolved randomly so idle backends continue to share load.
+// The caller must hold s.mu.
+func (s *DefaultBackendStorage) lessOccupiedBackend(first, second *Backend) *Backend {
+	firstOccupancy := first.RecvChannelOccupancy()
+	secondOccupancy := second.RecvChannelOccupancy()
+	if firstOccupancy < secondOccupancy {
+		return first
+	}
+	if secondOccupancy < firstOccupancy {
+		return second
+	}
+	if s.random.Intn(2) == 0 {
+		return first
+	}
+	return second
+}
+
+// GetRandomBackend samples two distinct non-draining agents and prefers the
+// primary backend with less receive-channel pressure. A sole non-draining
+// agent is used directly; draining agents are used only as a last resort.
+// The storage must maintain the random-routing index; otherwise this method
+// returns ErrNotFound even when backends are registered.
 func (s *DefaultBackendStorage) GetRandomBackend() (*Backend, error) {
+	// Selection may repair a state-list entry after observing a concurrently
+	// published draining transition, and rand.Rand is not safe for concurrent use.
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if len(s.backends) == 0 {
 		return nil, &ErrNotFound{}
 	}
-
 	for len(s.nonDrainingAgentIDs) > 0 {
-		index := s.random.Intn(len(s.nonDrainingAgentIDs))
-		agentID := s.nonDrainingAgentIDs[index]
-		backend := s.backends[agentID][0]
+		firstIndex := s.random.Intn(len(s.nonDrainingAgentIDs))
+		firstAgentID := s.nonDrainingAgentIDs[firstIndex]
+		first := s.backends[firstAgentID][0]
 		// SetDraining publishes before each manager updates its state lists.
 		// Repair that short-lived stale entry instead of routing to it.
-		if backend.IsDraining() {
-			s.refreshIdentifierState(agentID)
+		if first.IsDraining() {
+			s.refreshIdentifierState(firstAgentID)
 			continue
 		}
-		klog.V(3).InfoS("Pick agent as backend", "agentID", agentID)
-		return backend, nil
+		if len(s.nonDrainingAgentIDs) == 1 {
+			klog.V(3).InfoS("Pick agent as backend", "agentID", firstAgentID)
+			return first, nil
+		}
+
+		secondIndex := s.random.Intn(len(s.nonDrainingAgentIDs) - 1)
+		if secondIndex >= firstIndex {
+			secondIndex++
+		}
+		secondAgentID := s.nonDrainingAgentIDs[secondIndex]
+		second := s.backends[secondAgentID][0]
+		if second.IsDraining() {
+			s.refreshIdentifierState(secondAgentID)
+			// Redraw both candidates. Returning first here would degrade this
+			// selection to a single random choice whenever a stale entry is found.
+			continue
+		}
+
+		selected := s.lessOccupiedBackend(first, second)
+		klog.V(3).InfoS("Pick agent as backend", "agentID", selected.GetAgentID())
+		return selected, nil
 	}
 
 	if len(s.drainingAgentIDs) > 0 {
@@ -487,5 +528,11 @@ func (s *DefaultBackendStorage) GetRandomBackend() (*Backend, error) {
 		return backend, nil
 	}
 
+	klog.ErrorS(nil, "Backends exist but no agent identifiers are classified",
+		"backendCount", len(s.backends),
+		"nonDrainingAgentCount", len(s.nonDrainingAgentIDs),
+		"drainingAgentCount", len(s.drainingAgentIDs),
+		"maintainRandomRoutingIndex", s.maintainRandomRoutingIndex,
+		"proxyStrategy", s.proxyStrategy)
 	return nil, &ErrNotFound{}
 }
