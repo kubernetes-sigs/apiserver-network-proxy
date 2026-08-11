@@ -456,11 +456,16 @@ func (s *ProxyServer) removeEstablishedForBackendConn(agentID string, backend *B
 	if !ok {
 		return nil, fmt.Errorf("can't find agentID %s in the established", agentID)
 	}
-	for _, frontend := range established {
+	for connID, frontend := range established {
 		if frontend.backend == backend {
-			delete(s.established, agentID)
+			delete(established, connID)
 			ret = append(ret, frontend)
 		}
+	}
+	if len(established) == 0 {
+		delete(s.established, agentID)
+	} else {
+		klog.V(2).InfoS("Frontends established over other backend connections remain after backend removal", "agentID", agentID, "remaining", len(established))
 	}
 
 	metrics.Metrics.SetEstablishedConnCount(s.getCount(s.established))
@@ -681,7 +686,7 @@ func (s *ProxyServer) serveRecvFrontend(frontend *GrpcFrontend, recvCh <-chan *c
 			s.PendingDial.Add(
 				random,
 				&ProxyClientConnection{
-					Mode:        "grpc",
+					Mode:        ModeGRPC,
 					frontend:    frontend,
 					dialID:      random,
 					connected:   make(chan struct{}),

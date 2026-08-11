@@ -34,6 +34,9 @@ export GOPATH := $(shell go env GOPATH)
 endif
 GOOS ?= $(shell go env GOOS)
 GOARCH ?= $(shell go env GOARCH)
+CFSSL_VERSION ?= 1.6.5
+CFSSL_URL ?= https://github.com/cloudflare/cfssl/releases/download/v$(CFSSL_VERSION)/cfssl_$(CFSSL_VERSION)_$(GOOS)_$(GOARCH); \
+CFSSLJSON_URL ?= https://github.com/cloudflare/cfssl/releases/download/v$(CFSSL_VERSION)/cfssljson_$(CFSSL_VERSION)_$(GOOS)_$(GOARCH)
 INSTALL_LOCATION:=$(shell go env GOPATH)/bin
 GOLANGCI_LINT_VERSION ?= 2.9.0
 GOSEC_VERSION ?= 2.13.1
@@ -175,15 +178,29 @@ easy-rsa: easy-rsa.tar.gz
 
 cfssl:
 	@if ! command -v cfssl &> /dev/null; then \
-		curl --retry 10 -L -o cfssl https://github.com/cloudflare/cfssl/releases/download/v1.6.5/cfssl_1.6.5_$(GOOS)_$(GOARCH); \
-		chmod +x cfssl; \
+	if curl --output /dev/null --silent --head --fail $(CFSSL_URL); then \
+		echo "URL exists; Pulling prebuilt cfssl."; \
+		curl --retry 10 -L -o cfssljson $(CFSSL_URL); \
+		chmod +x cfssljson; \
+	else \
+		echo "URL does not exist; Building cfssljson."; \
+		GOBIN=`pwd` go install github.com/cloudflare/cfssl/cmd/...@v$(CFSSL_VERSION); \
+	fi \
 	fi
 
 cfssljson:
 	@if ! command -v cfssljson &> /dev/null; then \
-		curl --retry 10 -L -o cfssljson https://github.com/cloudflare/cfssl/releases/download/v1.6.5/cfssljson_1.6.5_$(GOOS)_$(GOARCH); \
+	if curl --output /dev/null --silent --head --fail $(CFSSLJSON_URL); then \
+		echo "URL exists; Pulling prebuilt cfssljson."; \
+		curl --retry 10 -L -o cfssljson $(CFSSLJSON_URL); \
 		chmod +x cfssljson; \
+	else \
+		echo "URL does not exist; Building cfssljson."; \
+		GOBIN=`pwd` go install github.com/cloudflare/cfssl/cmd/...@v$(CFSSL_VERSION); \
+	fi \
 	fi
+
+.PHONY: certs
 
 .PHONY: certs
 certs: export PATH := $(shell pwd):$(PATH)

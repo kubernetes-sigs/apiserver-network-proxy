@@ -2,9 +2,15 @@
 /certs/
 /cfssl
 /cfssljson
+/cfssl-bundle
+/cfssl-certinfo
+/cfssl-newkey
+/cfssl-scan
 /easy-rsa-master/
 /easy-rsa.tar.gz
 /easy-rsa
+/mkbundle
+/multirootca
 
 # editor and IDE paraphernalia
 .idea
