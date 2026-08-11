@@ -353,7 +353,7 @@ func (a *Client) Serve() {
 					},
 				}
 				if err := a.Send(drainPkt); err != nil {
-					klog.ErrorS(err, "drain failure", "")
+					klog.ErrorS(err, "drain failure", "serverID", a.serverID, "agentID", a.agentID)
 				}
 			})
 		default:
