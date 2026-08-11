@@ -53,18 +53,18 @@ type endpointConn struct {
 	// dataCh is a queue to decouple reads from the ANP Server
 	// to the corresponding writes to the data plane.
 	// This is for traffic coming from the KAS.
-	dataCh    chan []byte
+	dataCh chan []byte
 	// dialDone should be closed by dialChannelToRemote which is reading from the dialCh.
 	// It should only be closed when it has read to the end of the channel and sent the packets.
-	dialDone  chan struct{}
+	dialDone chan struct{}
 
 	// sendCh is a queue to decouple reads from the data plane
 	// to the corresponding writes to the ANP Server.
 	// This is for traffic going toward the KAS
-	sendCh    chan []byte
+	sendCh chan []byte
 	// sendDone should be closed by sendChannelToProxy which is reading from sendCh.
 	// It should only be closed when it has read to the end of the channel and sent the packets.
-	sendDone  chan struct{}
+	sendDone chan struct{}
 
 	cleanOnce sync.Once
 	warnChLim bool
@@ -151,9 +151,8 @@ type Client struct {
 	opts    []grpc.DialOption
 	conn    *grpc.ClientConn
 
-	drainCh   <-chan struct{}
-	drainOnce sync.Once
-	stopCh    chan struct{}
+	drainCh <-chan struct{}
+	stopCh  chan struct{}
 
 	// locks
 	sendLock      sync.Mutex
@@ -338,24 +337,12 @@ func (a *Client) Serve() {
 
 	klog.V(2).InfoS("Start serving", "serverID", a.serverID, "agentID", a.agentID)
 	go a.probe()
+	go a.sendDrainWhenRequested()
 	for {
 		select {
 		case <-a.stopCh:
 			klog.V(2).InfoS("stop agent client.")
 			return
-		case <-a.drainCh:
-			a.drainOnce.Do(func() {
-				klog.V(2).InfoS("drain agent client", "serverID", a.serverID, "agentID", a.agentID)
-				drainPkt := &client.Packet{
-					Type: client.PacketType_DRAIN,
-					Payload: &client.Packet_Drain{
-						Drain: &client.Drain{},
-					},
-				}
-				if err := a.Send(drainPkt); err != nil {
-					klog.ErrorS(err, "drain failure", "serverID", a.serverID, "agentID", a.agentID)
-				}
-			})
 		default:
 		}
 
@@ -482,11 +469,11 @@ func (a *Client) Serve() {
 						// the channel as it may not have been closed yet and we
 						// don't want to leave a goroutine hanging.
 						select {
-    						case <- eConn.sendCh:
+						case <-eConn.sendCh:
 							discardedPktCount++
-    						default:
+						default:
 							reading = false
-    						}
+						}
 					}
 					if discardedPktCount > 0 {
 						klog.V(1).InfoS("Discard packets from failed Dial", "pktCount", discardedPktCount, "dialID", dialReq.Random, "connectionID", connID)
@@ -573,6 +560,26 @@ func (a *Client) Serve() {
 		default:
 			klog.V(5).InfoS("unrecognized packet", "type", pkt)
 		}
+	}
+}
+
+// sendDrainWhenRequested sends DRAIN independently of the receive loop, which
+// can block indefinitely on an idle stream.
+func (a *Client) sendDrainWhenRequested() {
+	select {
+	case <-a.stopCh:
+		return
+	case <-a.drainCh:
+	}
+	klog.V(2).InfoS("drain agent client", "serverID", a.serverID, "agentID", a.agentID)
+	drainPkt := &client.Packet{
+		Type: client.PacketType_DRAIN,
+		Payload: &client.Packet_Drain{
+			Drain: &client.Drain{},
+		},
+	}
+	if err := a.Send(drainPkt); err != nil {
+		klog.ErrorS(err, "drain failure", "serverID", a.serverID, "agentID", a.agentID)
 	}
 }
 
