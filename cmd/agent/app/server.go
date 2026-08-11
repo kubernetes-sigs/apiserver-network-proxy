@@ -19,7 +19,6 @@ package app
 import (
 	"bytes"
 	"context"
-	"crypto/tls"
 	"fmt"
 	"net"
 	"net/http"
@@ -47,6 +46,7 @@ import (
 	"k8s.io/utils/clock"
 	"sigs.k8s.io/apiserver-network-proxy/cmd/agent/app/options"
 	"sigs.k8s.io/apiserver-network-proxy/pkg/agent"
+	"sigs.k8s.io/apiserver-network-proxy/pkg/agent/metrics"
 	"sigs.k8s.io/apiserver-network-proxy/pkg/util"
 )
 
@@ -80,8 +80,10 @@ func (a *Agent) Run(o *options.GrpcProxyAgentOptions, drainCh, stopCh <-chan str
 	if err := o.Validate(); err != nil {
 		return fmt.Errorf("failed to validate agent options with %v", err)
 	}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
 
-	cs, err := a.runProxyConnection(o, drainCh, stopCh)
+	cs, err := a.runProxyConnection(ctx, o, drainCh, stopCh)
 	if err != nil {
 		return fmt.Errorf("failed to run proxy connection with %v", err)
 	}
@@ -127,14 +129,28 @@ func handleSignals(signalCh chan os.Signal, drainCh, stopCh chan struct{}) {
 	close(stopCh)
 }
 
-func (a *Agent) runProxyConnection(o *options.GrpcProxyAgentOptions, drainCh, stopCh <-chan struct{}) (*agent.ClientSet, error) {
-	var tlsConfig *tls.Config
-	var err error
-	if tlsConfig, err = util.GetClientTLSConfig(o.CaCert, o.AgentCert, o.AgentKey, o.ProxyServerHost, o.AlpnProtos); err != nil {
+func (a *Agent) tlsCredentials(ctx context.Context, o *options.GrpcProxyAgentOptions) (credentials.TransportCredentials, error) {
+	if o.EnableTLSCertificateReload {
+		hooks := util.TLSReloadHooks{
+			OnSuccess: metrics.Metrics.ObserveTLSReloadSuccess,
+			OnFailure: metrics.Metrics.ObserveTLSReloadFailure,
+		}
+		return util.GetReloadingClientTLSCredentials(ctx, o.CaCert, o.AgentCert, o.AgentKey, o.ProxyServerHost, o.AlpnProtos, hooks)
+	}
+	tlsConfig, err := util.GetClientTLSConfig(o.CaCert, o.AgentCert, o.AgentKey, o.ProxyServerHost, o.AlpnProtos)
+	if err != nil {
+		return nil, err
+	}
+	return credentials.NewTLS(tlsConfig), nil
+}
+
+func (a *Agent) runProxyConnection(ctx context.Context, o *options.GrpcProxyAgentOptions, drainCh, stopCh <-chan struct{}) (*agent.ClientSet, error) {
+	tlsCredentials, err := a.tlsCredentials(ctx, o)
+	if err != nil {
 		return nil, err
 	}
 	dialOptions := []grpc.DialOption{
-		grpc.WithTransportCredentials(credentials.NewTLS(tlsConfig)),
+		grpc.WithTransportCredentials(tlsCredentials),
 		grpc.WithKeepaliveParams(keepalive.ClientParameters{
 			Time:                o.KeepaliveTime,
 			Timeout:             o.KeepaliveTimeout,

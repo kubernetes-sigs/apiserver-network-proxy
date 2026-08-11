@@ -94,7 +94,7 @@ fast-test:
 # Unit tests with fuller coverage, invoked by CI system.
 .PHONY: test
 test:
-	$(eval TEST_LIST := $(shell go list -test ./... | egrep " \[.*\]" | cut -d' ' -f1 | grep -v -e "/e2e$$" -e "/e2e/.*"))
+	$(eval TEST_LIST := $(shell go list -mod=vendor -f '{{if or .TestGoFiles .XTestGoFiles}}{{.ImportPath}}{{end}}' ./... | grep -v -e "/e2e$$" -e "/e2e/.*"))
 	echo "Running tests on $(TEST_LIST)"
 	$(info GOTOOLCHAIN is $(GOTOOLCHAIN))
 	go test -v -mod=vendor -race -covermode=atomic -coverprofile=konnectivity.out $(TEST_LIST) && go tool cover -html=konnectivity.out -o=konnectivity.html

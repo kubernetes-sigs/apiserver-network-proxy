@@ -76,6 +76,16 @@ konnectivity_network_proxy_agent_open_endpoint_connections %d`
 # HELP konnectivity_network_proxy_agent_server_connection_attempts_total Number of attempts to connect to a proxy server, by result: connected (new server), error.
 # TYPE konnectivity_network_proxy_agent_server_connection_attempts_total counter`
 	agentServerConnectionAttemptsSample = `konnectivity_network_proxy_agent_server_connection_attempts_total{result="%s"} %d`
+
+	serverTLSReloadFailuresHeader = `
+# HELP konnectivity_network_proxy_server_tls_certificate_reload_failure_total Count of failed TLS certificate reload attempts, labeled by the purpose (frontend or cluster) the certificates are configured for.
+# TYPE konnectivity_network_proxy_server_tls_certificate_reload_failure_total counter`
+	serverTLSReloadFailuresSample = `konnectivity_network_proxy_server_tls_certificate_reload_failure_total{purpose="%s"} %d`
+
+	agentTLSReloadFailures = `
+# HELP konnectivity_network_proxy_agent_tls_certificate_reload_failure_total Count of failed TLS certificate reload attempts.
+# TYPE konnectivity_network_proxy_agent_tls_certificate_reload_failure_total counter
+konnectivity_network_proxy_agent_tls_certificate_reload_failure_total %d`
 )
 
 var DefaultTester = &Tester{}
@@ -95,6 +105,7 @@ type ServerTester interface {
 	ExpectServerReadyBackends(int) error
 	ExpectServerEstablishedConns(int) error
 	ExpectServerEstablishedConnsClosed(map[server.ConnectionClosedReason]int) error
+	ExpectServerTLSReloadFailures(map[string]int) error
 }
 
 type AgentTester interface {
@@ -103,6 +114,7 @@ type AgentTester interface {
 	ExpectAgentEndpointConnections(int) error
 	ExpectAgentServerConnectionsLost(map[agent.ServerConnectionLostReason]int) error
 	ExpectAgentServerConnectionAttempts(map[agent.ServerConnectionAttemptResult]int) error
+	ExpectAgentTLSReloadFailures(int) error
 }
 
 func (t *Tester) ExpectServerDialFailures(expected map[server.DialFailureReason]int) error {
@@ -182,6 +194,21 @@ func (t *Tester) ExpectAgentServerConnectionAttempts(expected map[agent.ServerCo
 		expect += fmt.Sprintf(agentServerConnectionAttemptsSample+"\n", r, v)
 	}
 	return t.ExpectMetric(agent.Namespace, agent.Subsystem, "server_connection_attempts_total", expect)
+}
+
+// ExpectServerTLSReloadFailures checks the failed TLS reload count of every
+// purpose that reloads.
+func (t *Tester) ExpectServerTLSReloadFailures(expected map[string]int) error {
+	expect := serverTLSReloadFailuresHeader + "\n"
+	for purpose, v := range expected {
+		expect += fmt.Sprintf(serverTLSReloadFailuresSample+"\n", purpose, v)
+	}
+	return t.ExpectMetric(server.Namespace, server.Subsystem, "tls_certificate_reload_failure_total", expect)
+}
+
+func (t *Tester) ExpectAgentTLSReloadFailures(count int) error {
+	expect := fmt.Sprintf(agentTLSReloadFailures+"\n", count)
+	return t.ExpectMetric(agent.Namespace, agent.Subsystem, "tls_certificate_reload_failure_total", expect)
 }
 
 func (t *Tester) ExpectMetric(namespace, subsystem, name, expected string) error {
