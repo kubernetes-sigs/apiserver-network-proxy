@@ -41,6 +41,10 @@ type ProxyServerOpts struct {
 	AgentPort   int // Defaults to random port.
 	// Nil keeps the server default; a pointer to zero disables the writer queue.
 	FrontendWriteChannelSize *int
+	// Defaults to the shared CertsDir.
+	CertsDir string
+	// EnableTLSCertificateReload sets --enable-tls-certificate-reload.
+	EnableTLSCertificateReload bool
 }
 
 type ProxyServerRunner interface {
@@ -163,9 +167,14 @@ func serverOptions(t testing.TB, opts ProxyServerOpts) (*serveropts.ProxyRunOpti
 	o.UdsName = prefix + uid + ".sock"
 	o.ServerPort = 0 // Required for UDS
 
-	o.ClusterCert = filepath.Join(CertsDir, TestServerCertFile)
-	o.ClusterKey = filepath.Join(CertsDir, TestServerKeyFile)
-	o.ClusterCaCert = filepath.Join(CertsDir, TestCAFile)
+	certsDir := opts.CertsDir
+	if certsDir == "" {
+		certsDir = CertsDir
+	}
+	o.ClusterCert = filepath.Join(certsDir, TestServerCertFile)
+	o.ClusterKey = filepath.Join(certsDir, TestServerKeyFile)
+	o.ClusterCaCert = filepath.Join(certsDir, TestCAFile)
+	o.EnableTLSCertificateReload = opts.EnableTLSCertificateReload
 
 	const localhost = "127.0.0.1"
 	o.AgentBindAddress = localhost

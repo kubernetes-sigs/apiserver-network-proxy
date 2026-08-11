@@ -62,6 +62,11 @@ spec:
             readOnly: true
           - mountPath: /var/run/secrets/tokens
             name: konnectivity-agent-token
+          {{- range .SecretVolumes }}
+          - name: {{ .Name }}
+            mountPath: {{ .MountPath }}
+            readOnly: true
+          {{- end }}
         ports:
         - name: serverport
           containerPort: 8090
@@ -85,4 +90,9 @@ spec:
           - serviceAccountToken:
               path: konnectivity-agent-token
               audience: system:konnectivity-server
+      {{- range .SecretVolumes }}
+      - name: {{ .Name }}
+        secret:
+          secretName: {{ .SecretName }}
+      {{- end }}
       serviceAccountName: konnectivity-agent

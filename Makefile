@@ -106,12 +106,12 @@ test-integration: build
 
 .PHONY: test-e2e
 test-e2e: docker-build
-	go test -mod=vendor ./e2e -race -agent-image ${AGENT_FULL_IMAGE}-$(TARGETARCH):${TAG} -server-image ${SERVER_FULL_IMAGE}-$(TARGETARCH):${TAG} -kind-image ${KIND_IMAGE} -mode ${CONNECTION_MODE}
+	go test -mod=vendor ./e2e -race -timeout=20m -agent-image ${AGENT_FULL_IMAGE}-$(TARGETARCH):${TAG} -server-image ${SERVER_FULL_IMAGE}-$(TARGETARCH):${TAG} -kind-image ${KIND_IMAGE} -mode ${CONNECTION_MODE}
 
 # e2e test runner for continuous integration that does not build a new image.
 .PHONY: test-e2e-ci
 test-e2e-ci:
-	go test -mod=vendor ./e2e -race -agent-image ${AGENT_FULL_IMAGE}-$(TARGETARCH):${TAG} -server-image ${SERVER_FULL_IMAGE}-$(TARGETARCH):${TAG} -kind-image ${KIND_IMAGE} -mode ${CONNECTION_MODE}
+	go test -mod=vendor ./e2e -race -timeout=20m -agent-image ${AGENT_FULL_IMAGE}-$(TARGETARCH):${TAG} -server-image ${SERVER_FULL_IMAGE}-$(TARGETARCH):${TAG} -kind-image ${KIND_IMAGE} -mode ${CONNECTION_MODE}
 
 ## --------------------------------------
 ## Binaries

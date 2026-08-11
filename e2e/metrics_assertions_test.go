@@ -19,6 +19,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"net/http"
 	"testing"
 
 	"github.com/prometheus/common/expfmt"
@@ -29,7 +30,21 @@ import (
 	"sigs.k8s.io/e2e-framework/pkg/envconf"
 )
 
-func getMetricsGaugeValue(restCfg *rest.Config, namespace string, podName string, adminPort int, metricName string) (int, error) {
+const (
+	// The agent serves its metrics from the health server; 8094 is its admin
+	// server. The server serves metrics from its admin server.
+	agentHealthPort = 8093
+	serverAdminPort = 8095
+
+	agentSelector  = "k8s-app=konnectivity-agent"
+	serverSelector = "k8s-app=konnectivity-server"
+
+	agentOpenServerConnectionsMetric    = "konnectivity_network_proxy_agent_open_server_connections"
+	agentKnownServerCountMetric         = "konnectivity_network_proxy_agent_known_server_count"
+	serverReadyBackendConnectionsMetric = "konnectivity_network_proxy_server_ready_backend_connections"
+)
+
+func getMetricsGaugeValue(ctx context.Context, restCfg *rest.Config, namespace string, podName string, adminPort int, metricName string) (int, error) {
 	client, err := rest.HTTPClientFor(restCfg)
 	if err != nil {
 		return 0, fmt.Errorf("could not create http client from RESTConfig: %w", err)
@@ -41,10 +56,16 @@ func getMetricsGaugeValue(restCfg *rest.Config, namespace string, podName string
 		podName,
 		adminPort,
 	)
-	resp, err := client.Get(url)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	if err != nil {
+		return 0, fmt.Errorf("could not create metrics request for URL %q: %w", url, err)
+	}
+	resp, err := client.Do(req)
 	if err != nil {
 		return 0, fmt.Errorf("could not get metrics from URL %q: %w", url, err)
-	} else if resp.StatusCode != 200 {
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != 200 {
 		body, _ := io.ReadAll(resp.Body)
 		return 0, fmt.Errorf("got invalid response from metrics endpoint %q, status code %v: %v", url, resp.StatusCode, string(body))
 	}
@@ -54,7 +75,6 @@ func getMetricsGaugeValue(restCfg *rest.Config, namespace string, podName string
 	if err != nil {
 		return 0, fmt.Errorf("could not parse metrics: %w", err)
 	}
-	defer resp.Body.Close()
 
 	metricFamily, exists := metricsFamilies[metricName]
 	if !exists {
@@ -70,15 +90,15 @@ func assertAgentsAreConnected(expectedConnections int) func(context.Context, *te
 		client := cfg.Client()
 
 		agentPods := &corev1.PodList{}
-		err := client.Resources().List(ctx, agentPods, resources.WithLabelSelector("k8s-app=konnectivity-agent"))
+		err := client.Resources().List(ctx, agentPods, resources.WithLabelSelector(agentSelector))
 		if err != nil {
-			t.Fatalf("couldn't get agent pods (label selector 'k8s-app=konnectivity-agent'): %v", err)
+			t.Fatalf("couldn't get agent pods (label selector %q): %v", agentSelector, err)
 		}
 
 		for _, agentPod := range agentPods.Items {
-			numConnections, err := getMetricsGaugeValue(cfg.Client().RESTConfig(), agentPod.Namespace, agentPod.Name, 8093, "konnectivity_network_proxy_agent_open_server_connections")
+			numConnections, err := getMetricsGaugeValue(ctx, cfg.Client().RESTConfig(), agentPod.Namespace, agentPod.Name, agentHealthPort, agentOpenServerConnectionsMetric)
 			if err != nil {
-				t.Fatalf("couldn't get agent metric 'konnectivity_network_proxy_agent_open_server_connections' for pod %v: %v", agentPod.Name, err)
+				t.Fatalf("couldn't get agent metric %q for pod %v: %v", agentOpenServerConnectionsMetric, agentPod.Name, err)
 			}
 
 			if numConnections != expectedConnections {
@@ -95,15 +115,15 @@ func assertServersAreConnected(expectedConnections int) func(context.Context, *t
 		client := cfg.Client()
 
 		serverPods := &corev1.PodList{}
-		err := client.Resources().List(ctx, serverPods, resources.WithLabelSelector("k8s-app=konnectivity-server"))
+		err := client.Resources().List(ctx, serverPods, resources.WithLabelSelector(serverSelector))
 		if err != nil {
-			t.Fatalf("couldn't get server pods (label selector 'k8s-app=konnectivity-server'): %v", err)
+			t.Fatalf("couldn't get server pods (label selector %q): %v", serverSelector, err)
 		}
 
 		for _, serverPod := range serverPods.Items {
-			numConnections, err := getMetricsGaugeValue(cfg.Client().RESTConfig(), serverPod.Namespace, serverPod.Name, 8095, "konnectivity_network_proxy_server_ready_backend_connections")
+			numConnections, err := getMetricsGaugeValue(ctx, cfg.Client().RESTConfig(), serverPod.Namespace, serverPod.Name, serverAdminPort, serverReadyBackendConnectionsMetric)
 			if err != nil {
-				t.Fatalf("couldn't get server metric 'konnectivity_network_proxy_server_ready_backend_connections' for pod %v: %v", serverPod.Name, err)
+				t.Fatalf("couldn't get server metric %q for pod %v: %v", serverReadyBackendConnectionsMetric, serverPod.Name, err)
 			}
 
 			if numConnections != expectedConnections {
@@ -120,15 +140,15 @@ func assertAgentKnownServerCount(expectedServerCount int) func(context.Context, 
 		client := cfg.Client()
 
 		agentPods := &corev1.PodList{}
-		err := client.Resources().List(ctx, agentPods, resources.WithLabelSelector("k8s-app=konnectivity-agent"))
+		err := client.Resources().List(ctx, agentPods, resources.WithLabelSelector(agentSelector))
 		if err != nil {
 			t.Fatalf("couldn't get server pods: %v", err)
 		}
 
 		for _, agentPod := range agentPods.Items {
-			knownServerCount, err := getMetricsGaugeValue(cfg.Client().RESTConfig(), agentPod.Namespace, agentPod.Name, 8093, "konnectivity_network_proxy_agent_known_server_count")
+			knownServerCount, err := getMetricsGaugeValue(ctx, cfg.Client().RESTConfig(), agentPod.Namespace, agentPod.Name, agentHealthPort, agentKnownServerCountMetric)
 			if err != nil {
-				t.Fatalf("couldn't get agent metric 'konnectivity_network_proxy_agent_known_server_count' for pod %v", agentPod.Name)
+				t.Fatalf("couldn't get agent metric %q for pod %v", agentKnownServerCountMetric, agentPod.Name)
 			}
 
 			if knownServerCount != expectedServerCount {

@@ -67,6 +67,11 @@ spec:
           readOnly: true
         - name: konnectivity-home
           mountPath: /etc/kubernetes/konnectivity-server
+        {{- range .SecretVolumes }}
+        - name: {{ .Name }}
+          mountPath: {{ .MountPath }}
+          readOnly: true
+        {{- end }}
       volumes:
       - name: varlogkonnectivityserver
         hostPath:
@@ -79,3 +84,8 @@ spec:
         hostPath:
           path: /etc/kubernetes/konnectivity-server
           type: DirectoryOrCreate
+      {{- range .SecretVolumes }}
+      - name: {{ .Name }}
+        secret:
+          secretName: {{ .SecretName }}
+      {{- end }}
