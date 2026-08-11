@@ -389,7 +389,7 @@ func NewProxyRunOptions() *ProxyRunOptions {
 		ClusterCert:               "",
 		ClusterKey:                "",
 		ClusterCaCert:             "",
-		Mode:                      "grpc",
+		Mode:                      server.ModeGRPC,
 		UdsName:                   "",
 		DeleteUDSFile:             true,
 		ServerPort:                8090,
