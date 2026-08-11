@@ -40,6 +40,8 @@ const (
 var (
 	// Use buckets ranging from 10 ns to 12.5 seconds.
 	latencyBuckets = []float64{0.000001, 0.00001, 0.0001, 0.005, 0.025, 0.1, 0.5, 2.5, 12.5}
+	// Use buckets ranging from 1 second to 24 hours.
+	connectionDurationBuckets = []float64{1, 5, 15, 30, 60, 300, 900, 1800, 3600, 14400, 43200, 86400}
 
 	// Metrics provides access to all dial metrics.
 	Metrics = newServerMetrics()
@@ -49,6 +51,7 @@ var (
 type ServerMetrics struct {
 	endpointLatencies    *prometheus.HistogramVec
 	frontendLatencies    *prometheus.HistogramVec
+	connectionDuration   *prometheus.HistogramVec
 	grpcConnections      *prometheus.GaugeVec
 	httpConnections      prometheus.Gauge
 	backend              *prometheus.GaugeVec
@@ -85,6 +88,16 @@ func newServerMetrics() *ServerMetrics {
 			Name:      "frontend_write_duration_seconds",
 			Help:      "Latency of write to the frontend in seconds",
 			Buckets:   latencyBuckets,
+		},
+		[]string{},
+	)
+	connectionDuration := prometheus.NewHistogramVec(
+		prometheus.HistogramOpts{
+			Namespace: Namespace,
+			Subsystem: Subsystem,
+			Name:      "connection_duration_seconds",
+			Help:      "Duration in seconds a proxied end-to-end connection was established (post-dial) before being closed.",
+			Buckets:   connectionDurationBuckets,
 		},
 		[]string{},
 	)
@@ -213,6 +226,7 @@ func newServerMetrics() *ServerMetrics {
 	streamErrors := commonmetrics.MakeStreamErrorsTotalMetric(Namespace, Subsystem)
 	prometheus.MustRegister(endpointLatencies)
 	prometheus.MustRegister(frontendLatencies)
+	prometheus.MustRegister(connectionDuration)
 	prometheus.MustRegister(grpcConnections)
 	prometheus.MustRegister(httpConnections)
 	prometheus.MustRegister(backend)
@@ -231,6 +245,7 @@ func newServerMetrics() *ServerMetrics {
 	return &ServerMetrics{
 		endpointLatencies:    endpointLatencies,
 		frontendLatencies:    frontendLatencies,
+		connectionDuration:   connectionDuration,
 		grpcConnections:      grpcConnections,
 		httpConnections:      httpConnections,
 		backend:              backend,
@@ -253,6 +268,7 @@ func newServerMetrics() *ServerMetrics {
 func (s *ServerMetrics) Reset() {
 	s.endpointLatencies.Reset()
 	s.frontendLatencies.Reset()
+	s.connectionDuration.Reset()
 	s.grpcConnections.Reset()
 	s.backend.Reset()
 	s.totalBackendCount.Reset()
@@ -272,6 +288,11 @@ func (s *ServerMetrics) CulledLeasesInc() {
 // ObserveDialLatency records the latency of dial to the remote endpoint.
 func (s *ServerMetrics) ObserveDialLatency(elapsed time.Duration) {
 	s.endpointLatencies.WithLabelValues().Observe(elapsed.Seconds())
+}
+
+// ObserveConnectionDuration records how long an established end-to-end connection remained open.
+func (s *ServerMetrics) ObserveConnectionDuration(elapsed time.Duration) {
+	s.connectionDuration.WithLabelValues().Observe(elapsed.Seconds())
 }
 
 // ObserveFrontendWriteLatency records the latency of blocking on stream send to the client.

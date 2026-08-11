@@ -95,17 +95,18 @@ const defaultBackendDialTimeout = 0
 var errBackendDialTimeout = errors.New("timed out waiting for backend dial")
 
 type ProxyClientConnection struct {
-	Mode        string
-	HTTP        io.ReadWriter
-	frontend    *GrpcFrontend
-	CloseHTTP   func() error
-	connected   chan struct{}
-	dialID      int64
-	connectID   int64
-	agentID     string
-	start       time.Time
-	backend     *Backend
-	dialAddress string // cached for logging
+	Mode          string
+	HTTP          io.ReadWriter
+	frontend      *GrpcFrontend
+	CloseHTTP     func() error
+	connected     chan struct{}
+	dialID        int64
+	connectID     int64
+	agentID       string
+	start         time.Time
+	establishedAt time.Time
+	backend       *Backend
+	dialAddress   string // cached for logging
 }
 
 const (
@@ -407,6 +408,7 @@ func (s *ProxyServer) addEstablished(agentID string, connID int64, p *ProxyClien
 	if _, ok := s.established[agentID]; !ok {
 		s.established[agentID] = make(map[int64]*ProxyClientConnection)
 	}
+	p.establishedAt = time.Now()
 	s.established[agentID][connID] = p
 
 	metrics.Metrics.SetEstablishedConnCount(s.getCount(s.established))
@@ -428,6 +430,7 @@ func (s *ProxyServer) removeEstablished(agentID string, connID int64) *ProxyClie
 		delete(s.established, agentID)
 	}
 	metrics.Metrics.SetEstablishedConnCount(s.getCount(s.established))
+	metrics.Metrics.ObserveConnectionDuration(time.Since(ret.establishedAt))
 	return ret
 }
 
@@ -460,6 +463,7 @@ func (s *ProxyServer) removeEstablishedForBackendConn(agentID string, backend *B
 		if frontend.backend == backend {
 			delete(established, connID)
 			ret = append(ret, frontend)
+			metrics.Metrics.ObserveConnectionDuration(time.Since(frontend.establishedAt))
 		}
 	}
 	if len(established) == 0 {

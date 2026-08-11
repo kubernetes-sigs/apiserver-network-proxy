@@ -31,6 +31,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/prometheus/client_golang/prometheus"
 	"go.uber.org/mock/gomock"
 	"google.golang.org/grpc/metadata"
 
@@ -647,6 +648,29 @@ func TestEstablishedConnsMetric(t *testing.T) {
 	assertEstablishedConnsMetric(t, 1)
 	p.removeEstablished("agent3", int64(1))
 	assertEstablishedConnsMetric(t, 0)
+}
+
+func TestConnectionDurationMetric(t *testing.T) {
+	metrics.Metrics.Reset()
+
+	p := NewProxyServer("", []proxystrategies.ProxyStrategy{proxystrategies.ProxyStrategyDefault}, 1, nil, xfrChannelSize)
+	p.addEstablished("agent1", int64(1), new(ProxyClientConnection))
+	p.removeEstablished("agent1", int64(1))
+
+	metricFamilies, err := prometheus.DefaultGatherer.Gather()
+	if err != nil {
+		t.Fatalf("failed to gather metrics: %v", err)
+	}
+	for _, metricFamily := range metricFamilies {
+		if metricFamily.GetName() != "konnectivity_network_proxy_server_connection_duration_seconds" {
+			continue
+		}
+		if got := metricFamily.GetMetric()[0].GetHistogram().GetSampleCount(); got != 1 {
+			t.Fatalf("expected 1 connection duration observation, got %d", got)
+		}
+		return
+	}
+	t.Fatal("connection duration metric not found")
 }
 
 func TestRemoveEstablishedForBackendConn(t *testing.T) {
