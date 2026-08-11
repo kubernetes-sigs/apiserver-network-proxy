@@ -56,6 +56,10 @@ type Backend struct {
 
 	// draining indicates if this backend is draining and should not accept new connections
 	draining atomic.Bool
+
+	// recvCh is assigned before the backend is published and is immutable
+	// afterward. It is observed only to measure receive-path pressure.
+	recvCh <-chan *client.Packet
 }
 
 // IsDraining returns true if the backend is draining
@@ -66,6 +70,17 @@ func (b *Backend) IsDraining() bool {
 // SetDraining marks the backend as draining
 func (b *Backend) SetDraining() {
 	b.draining.Store(true)
+}
+
+// RecvChannelOccupancy reports how much of the backend's receive channel is
+// occupied. Channel length is safe to sample concurrently, but the result is
+// only a point-in-time routing signal. An unavailable sample is treated as
+// neutral.
+func (b *Backend) RecvChannelOccupancy() float64 {
+	if b.recvCh == nil || cap(b.recvCh) == 0 {
+		return 0
+	}
+	return float64(len(b.recvCh)) / float64(cap(b.recvCh))
 }
 
 // Retire marks the backend as draining and closes Done once.
