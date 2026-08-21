@@ -18,6 +18,7 @@ package server
 
 import (
 	"context"
+	"math/rand"
 	"reflect"
 	"testing"
 
@@ -39,6 +40,17 @@ func mockAgentConn(ctrl *gomock.Controller, agentID string, agentIdentifiers []s
 	agentConnCtx := metadata.NewIncomingContext(context.Background(), agentConnMD)
 	agentConn.EXPECT().Context().Return(agentConnCtx).AnyTimes()
 	return agentConn
+}
+
+func expectedBackendIndex(backends map[string][]*Backend) map[string]map[*Backend]int {
+	index := make(map[string]map[*Backend]int, len(backends))
+	for identifier, bes := range backends {
+		index[identifier] = make(map[*Backend]int, len(bes))
+		for i, backend := range bes {
+			index[identifier][backend] = i
+		}
+	}
+	return index
 }
 
 func TestNewBackend(t *testing.T) {
@@ -384,6 +396,74 @@ func TestDestHostBackendManager_WithDuplicateIdents(t *testing.T) {
 	}
 }
 
+func TestDestHostBackendManager_NonDrainingCacheTracksCurrentBackends(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+
+	backend1, _ := NewBackend(mockAgentConn(ctrl, "agent1", []string{"host=localhost"}))
+	backend2, _ := NewBackend(mockAgentConn(ctrl, "agent2", []string{"host=localhost"}))
+	backend2.SetDraining()
+	backend3, _ := NewBackend(mockAgentConn(ctrl, "agent3", []string{"host=localhost"}))
+
+	p := NewDestHostBackendManager()
+
+	p.AddBackend(backend1)
+	p.AddBackend(backend2)
+
+	expectedBackends := map[string][]*Backend{
+		"localhost": {backend1, backend2},
+	}
+	expectedNonDraining := map[string][]*Backend{
+		"localhost": {backend1},
+	}
+
+	if e, a := expectedBackends, p.backends; !reflect.DeepEqual(e, a) {
+		t.Fatalf("expected %v, got %v", e, a)
+	}
+	if e, a := expectedNonDraining, p.nonDrainingBackends; !reflect.DeepEqual(e, a) {
+		t.Fatalf("expected %v, got %v", e, a)
+	}
+	if e, a := expectedBackendIndex(expectedNonDraining), p.nonDrainingIndex; !reflect.DeepEqual(e, a) {
+		t.Fatalf("expected %v, got %v", e, a)
+	}
+
+	p.RemoveBackend(backend1)
+
+	expectedBackends = map[string][]*Backend{
+		"localhost": {backend2},
+	}
+	expectedNonDraining = map[string][]*Backend{}
+
+	if e, a := expectedBackends, p.backends; !reflect.DeepEqual(e, a) {
+		t.Fatalf("expected %v, got %v", e, a)
+	}
+	if e, a := expectedNonDraining, p.nonDrainingBackends; !reflect.DeepEqual(e, a) {
+		t.Fatalf("expected %v, got %v", e, a)
+	}
+	if e, a := expectedBackendIndex(expectedNonDraining), p.nonDrainingIndex; !reflect.DeepEqual(e, a) {
+		t.Fatalf("expected %v, got %v", e, a)
+	}
+
+	p.AddBackend(backend3)
+
+	expectedBackends = map[string][]*Backend{
+		"localhost": {backend2, backend3},
+	}
+	expectedNonDraining = map[string][]*Backend{
+		"localhost": {backend3},
+	}
+
+	if e, a := expectedBackends, p.backends; !reflect.DeepEqual(e, a) {
+		t.Fatalf("expected %v, got %v", e, a)
+	}
+	if e, a := expectedNonDraining, p.nonDrainingBackends; !reflect.DeepEqual(e, a) {
+		t.Fatalf("expected %v, got %v", e, a)
+	}
+	if e, a := expectedBackendIndex(expectedNonDraining), p.nonDrainingIndex; !reflect.DeepEqual(e, a) {
+		t.Fatalf("expected %v, got %v", e, a)
+	}
+}
+
 func TestDefaultBackendManager_GetRandomBackend_DrainingFallback(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	defer ctrl.Finish()
@@ -441,6 +521,44 @@ func TestDefaultBackendManager_GetRandomBackend_DrainingFallback(t *testing.T) {
 	}
 	if !b.IsDraining() {
 		t.Error("expected draining backend as fallback")
+	}
+}
+
+func TestDefaultBackendManager_GetRandomBackend_LazilyEvictsDrainingCandidate(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+
+	backend1, _ := NewBackend(mockAgentConn(ctrl, "agent1", []string{}))
+	backend2, _ := NewBackend(mockAgentConn(ctrl, "agent2", []string{}))
+
+	p := NewDefaultBackendManager()
+	// Seed so the first selection checks the stale entry for agent1.
+	p.random = rand.New(rand.NewSource(0))
+
+	p.AddBackend(backend1)
+	p.AddBackend(backend2)
+
+	if e, a := []string{"agent1", "agent2"}, p.nonDrainingIDs; !reflect.DeepEqual(e, a) {
+		t.Fatalf("expected %v, got %v", e, a)
+	}
+	if e, a := map[string]int{"agent1": 0, "agent2": 1}, p.nonDrainingIndex; !reflect.DeepEqual(e, a) {
+		t.Fatalf("expected %v, got %v", e, a)
+	}
+
+	backend1.SetDraining()
+
+	b, err := p.Backend(context.Background())
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if b != backend2 {
+		t.Fatalf("expected backend2 after lazy eviction, got %v", b)
+	}
+	if e, a := []string{"agent2"}, p.nonDrainingIDs; !reflect.DeepEqual(e, a) {
+		t.Fatalf("expected %v, got %v", e, a)
+	}
+	if e, a := map[string]int{"agent2": 0}, p.nonDrainingIndex; !reflect.DeepEqual(e, a) {
+		t.Fatalf("expected %v, got %v", e, a)
 	}
 }
 
@@ -510,5 +628,91 @@ func TestDestHostBackendManager_Backend_DrainingFallback(t *testing.T) {
 	}
 	if b.IsDraining() {
 		t.Error("expected non-draining backend for otherhost")
+	}
+}
+
+func TestDefaultBackendManager_GetRandomBackend_DistributesAcrossNonDrainingCandidates(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+
+	backend1, _ := NewBackend(mockAgentConn(ctrl, "agent1", []string{}))
+	backend2, _ := NewBackend(mockAgentConn(ctrl, "agent2", []string{}))
+	backend3, _ := NewBackend(mockAgentConn(ctrl, "agent3", []string{}))
+
+	p := NewDefaultBackendManager()
+	// Use a deterministic random source so this test is stable.
+	p.random = rand.New(rand.NewSource(7))
+
+	p.AddBackend(backend1)
+	p.AddBackend(backend2)
+	p.AddBackend(backend3)
+	backend1.SetDraining()
+
+	const iterations = 6000
+	counts := map[*Backend]int{
+		backend2: 0,
+		backend3: 0,
+	}
+
+	for i := 0; i < iterations; i++ {
+		b, err := p.Backend(context.Background())
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if b == backend1 {
+			t.Fatalf("expected non-draining backend, got draining backend1")
+		}
+		counts[b]++
+	}
+
+	diff := counts[backend2] - counts[backend3]
+	if diff < 0 {
+		diff = -diff
+	}
+	// With random selection from the non-draining set, distribution should be
+	// approximately even. Allow 5% skew to avoid flakiness.
+	if diff > iterations/20 {
+		t.Fatalf("expected near-even distribution across non-draining backends, got backend2=%d backend3=%d", counts[backend2], counts[backend3])
+	}
+}
+
+func TestDestHostBackendManager_Backend_DistributesAcrossNonDrainingCandidates(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+
+	backend1, _ := NewBackend(mockAgentConn(ctrl, "agent1", []string{"host=localhost"}))
+	backend2, _ := NewBackend(mockAgentConn(ctrl, "agent2", []string{"host=localhost"}))
+
+	p := NewDestHostBackendManager()
+	// Use a deterministic random source so this test is stable.
+	p.random = rand.New(rand.NewSource(11))
+
+	p.AddBackend(backend1)
+	p.AddBackend(backend2)
+
+	ctx := context.WithValue(context.Background(), destHostKey, "localhost")
+
+	const iterations = 6000
+	counts := map[*Backend]int{
+		backend1: 0,
+		backend2: 0,
+	}
+
+	for i := 0; i < iterations; i++ {
+		b, err := p.Backend(ctx)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		counts[b]++
+	}
+
+	diff := counts[backend1] - counts[backend2]
+	if diff < 0 {
+		diff = -diff
+	}
+	// With random selection from non-draining candidates, distribution should
+	// be approximately even. Allow 5% skew to avoid flakiness.
+	if diff > iterations/20 {
+		t.Fatalf("expected near-even distribution across non-draining backends, got backend1=%d backend2=%d", counts[backend1], counts[backend2])
 	}
 }
