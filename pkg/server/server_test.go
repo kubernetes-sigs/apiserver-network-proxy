@@ -327,6 +327,28 @@ func TestHTTPConnectTunnelBlockedBackendDialSendTimesOutCleansPendingDialAndReti
 	}
 }
 
+func TestBackendDrainPacketReclassifiesAgent(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	backend, err := NewBackend(mockAgentConn(ctrl, "agent1", nil))
+	if err != nil {
+		t.Fatalf("NewBackend failed: %v", err)
+	}
+	manager := NewDefaultBackendManager()
+	manager.AddBackend(backend)
+	proxyServer := &ProxyServer{
+		BackendManagers: []BackendManager{manager},
+		established:     map[string]map[int64]*ProxyClientConnection{"agent1": {}},
+	}
+	recvCh := make(chan *client.Packet, 1)
+	recvCh <- &client.Packet{Type: client.PacketType_DRAIN}
+	close(recvCh)
+
+	proxyServer.serveRecvBackend(backend, "agent1", recvCh)
+
+	assertAgentIDs(t, manager.nonDrainingAgentIDs)
+	assertAgentIDs(t, manager.drainingAgentIDs, "agent1")
+}
+
 func TestAddRemoveFrontends(t *testing.T) {
 	agent1ConnID1 := new(ProxyClientConnection)
 	agent1ConnID2 := new(ProxyClientConnection)
