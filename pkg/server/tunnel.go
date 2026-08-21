@@ -46,6 +46,17 @@ var bufferPool = sync.Pool{
 	},
 }
 
+func newHTTPConnectionCloseFunc(conn io.Closer, closed chan struct{}) func() error {
+	var closeOnce sync.Once
+	return func() error {
+		closeOnce.Do(func() {
+			defer close(closed)
+			conn.Close()
+		})
+		return nil
+	}
+}
+
 // Tunnel implements Proxy based on HTTP Connect, which tunnels the traffic to
 // the agent registered in ProxyServer.
 type Tunnel struct {
@@ -77,8 +88,9 @@ func (t *Tunnel) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var closeOnce sync.Once
-	defer closeOnce.Do(func() { conn.Close() })
+	closed := make(chan struct{})
+	closeHTTP := newHTTPConnectionCloseFunc(conn, closed)
+	defer closeHTTP()
 
 	random := rand.Int63() /* #nosec G404 */
 	dialRequest := &client.Packet{
@@ -97,27 +109,22 @@ func (t *Tunnel) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		klog.ErrorS(err, "no tunnels available")
 		conn.Write([]byte(fmt.Sprintf("HTTP/1.1 500 Internal Server Error\r\nContent-Type: text/plain\r\n\r\ncurrently no tunnels available: %v", err)))
-		// The hijacked connection will be closed by the closeOnce defer.
+		// The hijacked connection will be closed by the closeHTTP defer.
 		return
 	}
-	closed := make(chan struct{})
 	connected := make(chan struct{})
 	connection := &ProxyClientConnection{
-		Mode: ModeHTTPConnect,
-		HTTP: io.ReadWriter(conn), // pass as ReadWriter so the caller must close with CloseHTTP
-		CloseHTTP: func() error {
-			closeOnce.Do(func() {
-				defer close(closed)
-				conn.Close()
-			})
-			return nil
-		},
+		Mode:      ModeHTTPConnect,
+		HTTP:      io.ReadWriter(conn), // pass as ReadWriter so the caller must close with CloseHTTP
+		CloseHTTP: closeHTTP,
 		connected: connected,
 		start:     time.Now(),
 		backend:   backend,
 		dialID:    random,
 		agentID:   backend.GetAgentID(),
 	}
+	connection.initializeFrontendWriter(t.Server.frontendWriteChannelSize)
+	defer connection.stopFrontendWriter()
 	t.Server.PendingDial.Add(random, connection)
 
 	// This defer acts as a safeguard to ensure we clean up the pending dial
@@ -174,6 +181,7 @@ func (t *Tunnel) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			// is responsible for the established connection now.
 			return
 		}
+		connection.markFrontendWriteReady()
 		klog.V(3).InfoS("Connection established, sent 200 OK", "host", r.Host, "agentID", connection.agentID, "connectionID", connection.connectID)
 
 	case <-closed: // Connection was closed by the client before being established

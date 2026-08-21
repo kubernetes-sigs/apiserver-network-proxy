@@ -64,6 +64,7 @@ func TestDefaultServerOptions(t *testing.T) {
 	assertDefaultValue(t, "CipherSuites", defaultServerOptions.CipherSuites, make([]string, 0))
 	assertDefaultValue(t, "TLSMinVersion", defaultServerOptions.TLSMinVersion, "")
 	assertDefaultValue(t, "XfrChannelSize", defaultServerOptions.XfrChannelSize, 10)
+	assertDefaultValue(t, "FrontendWriteChannelSize", defaultServerOptions.FrontendWriteChannelSize, 10)
 	assertDefaultValue(t, "APIContentType", defaultServerOptions.APIContentType, "application/vnd.kubernetes.protobuf")
 	assertDefaultValue(t, "GracefulShutdownTimeout", defaultServerOptions.GracefulShutdownTimeout, 0*time.Second)
 	assertDefaultValue(t, "BackendDialTimeout", defaultServerOptions.BackendDialTimeout, 0*time.Second)
@@ -205,6 +206,16 @@ func TestValidate(t *testing.T) {
 			field:    "XfrChannelSize",
 			value:    -10,
 			expected: fmt.Errorf("channel size -10 must be greater than 0"),
+		},
+		"ZeroFrontendWriteChannelSize": {
+			field:    "FrontendWriteChannelSize",
+			value:    0,
+			expected: fmt.Errorf("frontend write channel size 0 must be greater than 0"),
+		},
+		"NegativeFrontendWriteChannelSize": {
+			field:    "FrontendWriteChannelSize",
+			value:    -10,
+			expected: fmt.Errorf("frontend write channel size -10 must be greater than 0"),
 		},
 		"NegativeGracefulShutdownTimeout": {
 			field:    "GracefulShutdownTimeout",

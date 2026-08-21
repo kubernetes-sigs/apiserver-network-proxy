@@ -109,8 +109,9 @@ type ProxyRunOptions struct {
 	// Minimum TLS version for server connections.
 	// Accepted values: VersionTLS10, VersionTLS11, VersionTLS12, VersionTLS13.
 	// If empty, defaults to VersionTLS12.
-	TLSMinVersion  string
-	XfrChannelSize int
+	TLSMinVersion            string
+	XfrChannelSize           int
+	FrontendWriteChannelSize int
 
 	// Lease controller configuration
 	EnableLeaseController bool
@@ -162,6 +163,7 @@ func (o *ProxyRunOptions) Flags() *pflag.FlagSet {
 	flags.StringSliceVar(&o.CipherSuites, "cipher-suites", o.CipherSuites, "The comma separated list of allowed cipher suites. Has no effect on TLS1.3. Empty means allow default list.")
 	flags.StringVar(&o.TLSMinVersion, "tls-min-version", o.TLSMinVersion, "Minimum TLS version for server connections. Accepted values: VersionTLS10, VersionTLS11, VersionTLS12, VersionTLS13. Empty defaults to VersionTLS12.")
 	flags.IntVar(&o.XfrChannelSize, "xfr-channel-size", o.XfrChannelSize, "The size of the two KNP server channels used in server for transferring data. One channel is for data coming from the Kubernetes API Server, and the other one is for data coming from the KNP agent.")
+	flags.IntVar(&o.FrontendWriteChannelSize, "frontend-write-channel-size", o.FrontendWriteChannelSize, "The number of packets buffered for each HTTP CONNECT frontend before backend receive processing blocks.")
 	flags.BoolVar(&o.EnableLeaseController, "enable-lease-controller", o.EnableLeaseController, "Enable lease controller to publish and garbage collect proxy server leases.")
 	flags.StringVar(&o.LeaseNamespace, "lease-namespace", o.LeaseNamespace, "The namespace where lease objects are managed by the controller.")
 	flags.StringVar(&o.LeaseLabel, "lease-label", o.LeaseLabel, "The labels on which the lease objects are managed.")
@@ -211,6 +213,7 @@ func (o *ProxyRunOptions) Print() {
 	klog.V(1).Infof("CipherSuites set to %q.\n", o.CipherSuites)
 	klog.V(1).Infof("TLSMinVersion set to %q.\n", o.TLSMinVersion)
 	klog.V(1).Infof("XfrChannelSize set to %d.\n", o.XfrChannelSize)
+	klog.V(1).Infof("FrontendWriteChannelSize set to %d.\n", o.FrontendWriteChannelSize)
 	klog.V(1).Infof("GracefulShutdownTimeout set to %v.\n", o.GracefulShutdownTimeout)
 	klog.V(1).Infof("BackendDialTimeout set to %v.\n", o.BackendDialTimeout)
 }
@@ -340,6 +343,9 @@ func (o *ProxyRunOptions) Validate() error {
 	if o.XfrChannelSize <= 0 {
 		return fmt.Errorf("channel size %d must be greater than 0", o.XfrChannelSize)
 	}
+	if o.FrontendWriteChannelSize <= 0 {
+		return fmt.Errorf("frontend write channel size %d must be greater than 0", o.FrontendWriteChannelSize)
+	}
 	// validate the TLS min version
 	if o.TLSMinVersion != "" {
 		tlsVer, err := util.GetTLSVersion(o.TLSMinVersion)
@@ -417,6 +423,7 @@ func NewProxyRunOptions() *ProxyRunOptions {
 		CipherSuites:              make([]string, 0),
 		TLSMinVersion:             "",
 		XfrChannelSize:            10,
+		FrontendWriteChannelSize:  10,
 		EnableLeaseController:     false,
 		LeaseNamespace:            "kube-system",
 		LeaseLabel:                "k8s-app=konnectivity-server",

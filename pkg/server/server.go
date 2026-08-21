@@ -107,6 +107,17 @@ type ProxyClientConnection struct {
 	establishedAt time.Time
 	backend       *Backend
 	dialAddress   string // cached for logging
+	closing       bool   // guarded by ProxyServer.fmu
+
+	frontendWriteCh        chan *client.Packet
+	frontendWriteStopCh    chan struct{}
+	frontendWriteDone      chan struct{}
+	frontendWriteStartOnce sync.Once
+	frontendWriteStopOnce  sync.Once
+	frontendWriteReady     chan struct{}
+	frontendWriteReadyOnce sync.Once
+	frontendWriterDone     func()
+	frontendWriteMetrics   frontendWriteQueueMetrics
 }
 
 const (
@@ -277,8 +288,9 @@ type ProxyServer struct {
 	AgentAuthenticationOptions *AgentTokenAuthenticationOptions
 
 	// TODO: move strategies into BackendStorage
-	proxyStrategies []proxystrategies.ProxyStrategy
-	xfrChannelSize  int
+	proxyStrategies          []proxystrategies.ProxyStrategy
+	xfrChannelSize           int
+	frontendWriteChannelSize int
 
 	backendDialTimeout time.Duration
 }
@@ -445,7 +457,33 @@ func (s *ProxyServer) getFrontend(agentID string, connID int64) (*ProxyClientCon
 	if !ok {
 		return nil, fmt.Errorf("can't find connID %d in the established[%s]", connID, agentID)
 	}
+	if conn.closing {
+		return nil, fmt.Errorf("connID %d in the established[%s] is closing", connID, agentID)
+	}
 	return conn, nil
+}
+
+// beginFrontendClose makes an HTTP CONNECT frontend non-routable while leaving
+// it tracked so backend teardown can still interrupt a blocked frontend write.
+// The returned bool is false when the connection is already closing.
+func (s *ProxyServer) beginFrontendClose(agentID string, connID int64) (*ProxyClientConnection, bool, error) {
+	s.fmu.Lock()
+	defer s.fmu.Unlock()
+	conns, ok := s.established[agentID]
+	if !ok {
+		return nil, false, fmt.Errorf("can't find agentID %s in the established", agentID)
+	}
+	frontend, ok := conns[connID]
+	if !ok {
+		return nil, false, fmt.Errorf("can't find connID %d in the established[%s]", connID, agentID)
+	}
+	if frontend.Mode == ModeHTTPConnect {
+		if frontend.closing {
+			return frontend, false, nil
+		}
+		frontend.closing = true
+	}
+	return frontend, true, nil
 }
 
 func (s *ProxyServer) removeEstablishedForBackendConn(agentID string, backend *Backend) ([]*ProxyClientConnection, error) {
@@ -535,15 +573,20 @@ func NewProxyServer(serverID string, proxyStrategies []proxystrategies.ProxyStra
 		BackendManagers:            bms,
 		AgentAuthenticationOptions: agentAuthenticationOptions,
 		// use the first backend-manager as the Readiness Manager
-		Readiness:          bms[0],
-		proxyStrategies:    proxyStrategies,
-		xfrChannelSize:     channelSize,
-		backendDialTimeout: defaultBackendDialTimeout,
+		Readiness:                bms[0],
+		proxyStrategies:          proxyStrategies,
+		xfrChannelSize:           channelSize,
+		frontendWriteChannelSize: defaultFrontendWriteChannelSize,
+		backendDialTimeout:       defaultBackendDialTimeout,
 	}
 }
 
 func (s *ProxyServer) SetBackendDialTimeout(timeout time.Duration) {
 	s.backendDialTimeout = timeout
+}
+
+func (s *ProxyServer) SetFrontendWriteChannelSize(size int) {
+	s.frontendWriteChannelSize = size
 }
 
 // Proxy handles incoming streams from gRPC frontend.
@@ -906,6 +949,9 @@ func (s *ProxyServer) Connect(stream agent.AgentService_ConnectServer) error {
 	klog.V(2).InfoS("Agent connected", "agentID", agentID, "serverID", s.serverID)
 	s.addBackend(backend)
 	defer s.removeBackend(backend)
+	// Publish backend termination to established frontend writers even when the
+	// agent stream exits without first being explicitly retired.
+	defer backend.Retire()
 
 	recvCh := make(chan *client.Packet, s.xfrChannelSize)
 
@@ -991,6 +1037,12 @@ func (s *ProxyServer) serveRecvBackend(backend *Backend, agentID string, recvCh 
 				},
 			}
 			pkt.GetCloseResponse().ConnectID = frontend.connectID
+			if frontend.Mode == ModeHTTPConnect {
+				// Backend shutdown is an abort, not an ordered data packet. Cancel
+				// queued writes and close the socket inline so a blocked Write is
+				// interrupted and cannot hold up teardown of other frontends.
+				frontend.stopFrontendWriter()
+			}
 			if err := frontend.send(pkt); err != nil {
 				klog.ErrorS(err, "CLOSE_RSP to frontend failed", "agentID", agentID)
 			}
@@ -1037,8 +1089,13 @@ func (s *ProxyServer) serveRecvBackend(backend *Backend, agentID string, recvCh 
 				}
 				frontend.connectID = resp.ConnectID
 				frontend.agentID = agentID
-				// TODO: this connection may be cleaned on serveRecvFrontend exit, make it independent.
+				// Track the connection before starting its writer. A writer whose
+				// stop signal is already closed can exit immediately and remove it.
 				s.addEstablished(agentID, resp.ConnectID, frontend)
+				frontend.startFrontendWriter(
+					s.frontendWriteChannelSize,
+					func() { s.removeEstablished(agentID, resp.ConnectID) },
+				)
 				close(frontend.connected)
 				metrics.Metrics.ObserveDialLatency(time.Since(frontend.start))
 				klog.V(3).InfoS("Proxy connection established",
@@ -1085,26 +1142,47 @@ func (s *ProxyServer) serveRecvBackend(backend *Backend, agentID string, recvCh 
 				s.sendBackendClose(backend, resp.ConnectID, 0, "missing frontend")
 				break
 			}
-			if err := frontend.send(pkt); err != nil {
+			if err := frontend.sendEstablished(pkt); err != nil {
 				klog.ErrorS(err, "send to client stream failure", "agentID", agentID, "connectionID", resp.ConnectID)
 			} else {
-				klog.V(5).InfoS("DATA sent to frontend")
+				klog.V(5).InfoS("DATA dispatched to frontend")
 			}
 
 		case client.PacketType_CLOSE_RSP:
 			resp := pkt.GetCloseResponse()
 			klog.V(5).InfoS("Received CLOSE_RSP", "agentID", agentID, "connectionID", resp.ConnectID)
-			frontend := s.removeEstablished(agentID, resp.ConnectID)
-			if frontend == nil {
+			frontend, firstClose, err := s.beginFrontendClose(agentID, resp.ConnectID)
+			if err != nil {
 				// assuming it is already closed, just log it
-				klog.V(2).InfoS("could not get frontend client for closing", "agentID", agentID, "connectionID", resp.ConnectID)
+				klog.V(2).InfoS("could not get frontend client for closing", "agentID", agentID, "connectionID", resp.ConnectID, "error", err)
 				break
 			}
-			if err := frontend.send(pkt); err != nil {
+			if !firstClose {
+				klog.V(5).InfoS("Ignoring duplicate CLOSE_RSP", "agentID", agentID, "connectionID", resp.ConnectID)
+				break
+			}
+			if frontend.Mode != ModeHTTPConnect {
+				s.removeEstablished(agentID, resp.ConnectID)
+			}
+			if err := frontend.sendEstablished(pkt); err != nil {
+				if frontend.Mode == ModeHTTPConnect {
+					// The queued close was not accepted. Keep backend teardown
+					// from losing track of a stalled HTTP connection, or close it
+					// directly if backend teardown is already in progress.
+					if errors.Is(err, errFrontendBackendStopped) {
+						frontend.stopFrontendWriter()
+						if closeErr := frontend.send(pkt); closeErr != nil {
+							klog.ErrorS(closeErr, "CLOSE_RSP direct send to client stream error", "agentID", agentID, "connectionID", resp.ConnectID)
+						}
+					}
+					// errFrontendWriterStopped means another teardown path owns
+					// socket closure. In either case, removal is idempotent.
+					s.removeEstablished(agentID, resp.ConnectID)
+				}
 				// Normal when frontend closes it.
 				klog.ErrorS(err, "CLOSE_RSP send to client stream error", "agentID", agentID, "connectionID", resp.ConnectID)
 			} else {
-				klog.V(5).InfoS("CLOSE_RSP sent to frontend", "connectionID", resp.ConnectID)
+				klog.V(5).InfoS("CLOSE_RSP dispatched to frontend", "connectionID", resp.ConnectID)
 			}
 
 		case client.PacketType_DRAIN:
