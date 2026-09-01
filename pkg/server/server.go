@@ -406,6 +406,7 @@ func (s *ProxyServer) removeEstablished(agentID string, connID int64) *ProxyClie
 	}
 	metrics.Metrics.SetEstablishedConnCount(s.getCount(s.established))
 	metrics.Metrics.ObserveConnectionDuration(time.Since(ret.establishedAt))
+	metrics.Metrics.ObserveConnectionClose(metrics.ConnectionCloseFrontend)
 	return ret
 }
 
@@ -439,6 +440,7 @@ func (s *ProxyServer) removeEstablishedForBackendConn(agentID string, backend *B
 			delete(established, connID)
 			ret = append(ret, frontend)
 			metrics.Metrics.ObserveConnectionDuration(time.Since(frontend.establishedAt))
+			metrics.Metrics.ObserveConnectionClose(metrics.ConnectionCloseBackend)
 		}
 	}
 	if len(established) == 0 {
@@ -477,6 +479,7 @@ func (s *ProxyServer) removeEstablishedForStream(streamUID string) []*ProxyClien
 				delete(established, connID)
 				ret = append(ret, frontend)
 				metrics.Metrics.ObserveConnectionDuration(time.Since(frontend.establishedAt))
+				metrics.Metrics.ObserveConnectionClose(metrics.ConnectionCloseStreamShutdown)
 			}
 		}
 		if len(established) == 0 {

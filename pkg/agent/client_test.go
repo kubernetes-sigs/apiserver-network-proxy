@@ -30,6 +30,8 @@ import (
 	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/klog/v2"
 	"sigs.k8s.io/apiserver-network-proxy/konnectivity-client/proto/client"
+	metrics "sigs.k8s.io/apiserver-network-proxy/pkg/agent/metrics"
+	metricstest "sigs.k8s.io/apiserver-network-proxy/pkg/testing/metrics"
 	"sigs.k8s.io/apiserver-network-proxy/proto/agent"
 )
 
@@ -219,6 +221,55 @@ func TestClose_Client(t *testing.T) {
 		t.Errorf("expect Unknown connectID; got %v", closeErr)
 	}
 
+}
+
+func TestConnectionCloseMetric_ServerClose(t *testing.T) {
+	metrics.Metrics.Reset()
+
+	var stream agent.AgentService_ConnectClient
+	stopCh := make(chan struct{})
+	cs := &ClientSet{
+		clients: make(map[string]*Client),
+		stopCh:  stopCh,
+	}
+	testClient := &Client{
+		connManager: newConnectionManager(),
+		stopCh:      stopCh,
+		cs:          cs,
+	}
+	testClient.stream, stream = pipe()
+
+	go testClient.Serve()
+	defer close(stopCh)
+
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		fmt.Fprint(w, "hello, world")
+	}))
+	defer ts.Close()
+
+	// Dial and wait for the connection to be established.
+	if err := stream.Send(newDialPacket("tcp", ts.URL[len("http://"):], 111)); err != nil {
+		t.Fatal(err)
+	}
+	pkt, _ := stream.Recv()
+	if pkt == nil || pkt.Type != client.PacketType_DIAL_RSP {
+		t.Fatalf("expected DIAL_RSP; got %+v", pkt)
+	}
+	connID := pkt.Payload.(*client.Packet_DialResponse).DialResponse.ConnectID
+
+	// Server-initiated close via CLOSE_REQ.
+	if err := stream.Send(newClosePacket(connID)); err != nil {
+		t.Fatal(err)
+	}
+	pkt, _ = stream.Recv()
+	if pkt == nil || pkt.Type != client.PacketType_CLOSE_RSP {
+		t.Fatalf("expected CLOSE_RSP; got %+v", pkt)
+	}
+	waitForConnectionDeletion(t, testClient, connID)
+
+	if err := metricstest.DefaultTester.ExpectAgentConnectionClose(metrics.ConnectionCloseServer, 1); err != nil {
+		t.Errorf("Expected %s metric: %v", "endpoint_connection_close_total", err)
+	}
 }
 
 func TestConnectionMismatch(t *testing.T) {

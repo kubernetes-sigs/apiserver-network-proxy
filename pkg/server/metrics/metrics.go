@@ -62,6 +62,7 @@ type ServerMetrics struct {
 	fullWriteQueues      *prometheus.GaugeVec
 	blockedWriteChannels *prometheus.GaugeVec
 	dialFailures         *prometheus.CounterVec
+	connectionCloses     *prometheus.CounterVec
 	streamPackets        *prometheus.CounterVec
 	streamErrors         *prometheus.CounterVec
 	culledLeases         prometheus.Counter
@@ -200,6 +201,17 @@ func newServerMetrics() *ServerMetrics {
 			"reason",
 		},
 	)
+	connectionCloses := prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Namespace: Namespace,
+			Subsystem: Subsystem,
+			Name:      "connection_close_total",
+			Help:      "Number of established end-to-end connections (post-dial) that were closed, by reason for the close.",
+		},
+		[]string{
+			"reason",
+		},
+	)
 	culledLeases := prometheus.NewCounter(prometheus.CounterOpts{
 		Namespace: Namespace,
 		Subsystem: Subsystem,
@@ -257,6 +269,7 @@ func newServerMetrics() *ServerMetrics {
 	prometheus.MustRegister(fullFrontendWriteQueues)
 	prometheus.MustRegister(blockedFrontendWriteChannels)
 	prometheus.MustRegister(dialFailures)
+	prometheus.MustRegister(connectionCloses)
 	prometheus.MustRegister(streamPackets)
 	prometheus.MustRegister(streamErrors)
 	prometheus.MustRegister(culledLeases)
@@ -278,6 +291,7 @@ func newServerMetrics() *ServerMetrics {
 		fullWriteQueues:      fullFrontendWriteQueues,
 		blockedWriteChannels: blockedFrontendWriteChannels,
 		dialFailures:         dialFailures,
+		connectionCloses:     connectionCloses,
 		streamPackets:        streamPackets,
 		streamErrors:         streamErrors,
 		culledLeases:         culledLeases,
@@ -302,6 +316,7 @@ func (s *ServerMetrics) Reset() {
 	s.fullWriteQueues.Reset()
 	s.blockedWriteChannels.Reset()
 	s.dialFailures.Reset()
+	s.connectionCloses.Reset()
 	s.streamPackets.Reset()
 	s.streamErrors.Reset()
 }
@@ -395,6 +410,27 @@ const (
 
 func (s *ServerMetrics) ObserveDialFailure(reason DialFailureReason) {
 	s.dialFailures.With(prometheus.Labels{"reason": string(reason)}).Inc()
+}
+
+// ConnectionCloseReason categorizes why an established end-to-end connection was closed.
+type ConnectionCloseReason string
+
+const (
+	// ConnectionCloseFrontend indicates the close originated from the frontend/client
+	// (a CLOSE_RSP was received from the backend after the frontend requested closure).
+	ConnectionCloseFrontend ConnectionCloseReason = "frontend_close"
+	// ConnectionCloseBackend indicates the backing agent connection was lost, so all
+	// connections established over it were closed.
+	ConnectionCloseBackend ConnectionCloseReason = "backend_close"
+	// ConnectionCloseStreamShutdown indicates the frontend gRPC stream was torn down,
+	// so its established connections were cleaned up.
+	ConnectionCloseStreamShutdown ConnectionCloseReason = "stream_shutdown"
+)
+
+// ObserveConnectionClose records the closure of an established end-to-end connection,
+// labeled by the reason for the close.
+func (s *ServerMetrics) ObserveConnectionClose(reason ConnectionCloseReason) {
+	s.connectionCloses.With(prometheus.Labels{"reason": string(reason)}).Inc()
 }
 
 func (s *ServerMetrics) ObservePacket(segment commonmetrics.Segment, packetType client.PacketType) {
