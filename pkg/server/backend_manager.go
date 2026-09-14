@@ -33,20 +33,32 @@ import (
 	client "sigs.k8s.io/apiserver-network-proxy/konnectivity-client/proto/client"
 	"sigs.k8s.io/apiserver-network-proxy/pkg/server/metrics"
 	"sigs.k8s.io/apiserver-network-proxy/pkg/server/proxystrategies"
-	"sigs.k8s.io/apiserver-network-proxy/proto/agent"
 	"sigs.k8s.io/apiserver-network-proxy/proto/header"
 )
 
+// AgentStream is the backend half of a proxy session: the bidirectional packet
+// stream between the proxy server and a connected Konnectivity agent.
+//
+// The generated gRPC agent.AgentService_ConnectServer satisfies it directly.
+// Keeping Backend on this interface rather than on the generated type lets
+// alternative agent transports be adapted the same way HTTP-CONNECT frontends
+// are adapted to ProxyStream.
+type AgentStream interface {
+	Send(*client.Packet) error
+	Recv() (*client.Packet, error)
+	Context() context.Context
+	SendHeader(metadata.MD) error
+}
+
 // Backend abstracts a connected Konnectivity agent.
 //
-// In the only currently supported case (gRPC), it wraps an
-// agent.AgentService_ConnectServer, provides synchronization and
-// emits common stream metrics.
+// It wraps an AgentStream, provides synchronization and emits common stream
+// metrics.
 type Backend struct {
 	sendLock   sync.Mutex
 	recvLock   sync.Mutex
 	retireOnce sync.Once
-	conn       agent.AgentService_ConnectServer
+	conn       AgentStream
 
 	// cached from conn.Context()
 	id     string
@@ -138,7 +150,7 @@ func (b *Backend) GetAgentIdentifiers() header.Identifiers {
 	return b.idents
 }
 
-func getAgentID(stream agent.AgentService_ConnectServer) (string, error) {
+func getAgentID(stream AgentStream) (string, error) {
 	md, ok := metadata.FromIncomingContext(stream.Context())
 	if !ok {
 		return "", fmt.Errorf("failed to get context")
@@ -150,7 +162,7 @@ func getAgentID(stream agent.AgentService_ConnectServer) (string, error) {
 	return agentIDs[0], nil
 }
 
-func getAgentIdentifiers(conn agent.AgentService_ConnectServer) (header.Identifiers, error) {
+func getAgentIdentifiers(conn AgentStream) (header.Identifiers, error) {
 	var agentIdentifiers header.Identifiers
 	md, ok := metadata.FromIncomingContext(conn.Context())
 	if !ok {
@@ -167,7 +179,7 @@ func getAgentIdentifiers(conn agent.AgentService_ConnectServer) (header.Identifi
 	return header.GenAgentIdentifiers(agentIdent[0])
 }
 
-func NewBackend(conn agent.AgentService_ConnectServer) (*Backend, error) {
+func NewBackend(conn AgentStream) (*Backend, error) {
 	agentID, err := getAgentID(conn)
 	if err != nil {
 		return nil, err

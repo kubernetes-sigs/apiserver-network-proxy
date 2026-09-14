@@ -357,7 +357,7 @@ func (p *Proxy) runUDSFrontendServer(ctx context.Context, o *options.ProxyRunOpt
 			grpc.KeepaliveParams(keepalive.ServerParameters{Time: o.FrontendKeepaliveTime}),
 		}
 		grpcServer := grpc.NewServer(frontendServerOptions...)
-		client.RegisterProxyServiceServer(grpcServer, s)
+		client.RegisterProxyServiceServer(grpcServer, s.GrpcProxyService())
 		lis, err := getUDSListener(ctx, o.UdsName)
 		if err != nil {
 			return nil, fmt.Errorf("failed to get uds listener: %v", err)
@@ -460,7 +460,7 @@ func (p *Proxy) runMTLSFrontendServer(_ context.Context, o *options.ProxyRunOpti
 			grpc.KeepaliveParams(keepalive.ServerParameters{Time: o.FrontendKeepaliveTime}),
 		}
 		grpcServer := grpc.NewServer(frontendServerOptions...)
-		client.RegisterProxyServiceServer(grpcServer, s)
+		client.RegisterProxyServiceServer(grpcServer, s.GrpcProxyService())
 		lis, err := net.Listen("tcp", addr)
 		if err != nil {
 			return nil, fmt.Errorf("failed to listen on %s: %v", addr, err)
@@ -520,7 +520,7 @@ func (p *Proxy) runAgentServer(o *options.ProxyRunOptions, server *server.ProxyS
 		}),
 	}
 	grpcServer := grpc.NewServer(agentServerOptions...)
-	agent.RegisterAgentServiceServer(grpcServer, server)
+	agent.RegisterAgentServiceServer(grpcServer, server.GrpcAgentService())
 	lis, err := net.Listen("tcp", addr)
 	if err != nil {
 		return fmt.Errorf("failed to listen on %s: %v", addr, err)
