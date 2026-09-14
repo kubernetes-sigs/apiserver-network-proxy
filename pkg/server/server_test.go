@@ -199,11 +199,11 @@ func TestAgentTokenAuthenticationErrorsToken(t *testing.T) {
 
 func TestRemovePendingDialForStream(t *testing.T) {
 	streamUID := "target-uuid"
-	pending1 := &ProxyClientConnection{frontend: &GrpcFrontend{streamUID: streamUID}}
+	pending1 := &ProxyClientConnection{frontend: &Frontend{streamUID: streamUID}}
 	pending2 := &ProxyClientConnection{}
-	pending3 := &ProxyClientConnection{frontend: &GrpcFrontend{streamUID: streamUID}}
-	pending4 := &ProxyClientConnection{frontend: &GrpcFrontend{streamUID: "different-uid"}}
-	pending5 := &ProxyClientConnection{frontend: &GrpcFrontend{streamUID: ""}}
+	pending3 := &ProxyClientConnection{frontend: &Frontend{streamUID: streamUID}}
+	pending4 := &ProxyClientConnection{frontend: &Frontend{streamUID: "different-uid"}}
+	pending5 := &ProxyClientConnection{frontend: &Frontend{streamUID: ""}}
 	p := NewProxyServer("", []proxystrategies.ProxyStrategy{proxystrategies.ProxyStrategyDefault}, 1, nil, xfrChannelSize)
 	p.PendingDial.Add(1, pending1)
 	p.PendingDial.Add(2, pending2)
@@ -730,11 +730,11 @@ func TestRemoveEstablishedForStream(t *testing.T) {
 	backend1 := &Backend{}
 	backend2 := &Backend{}
 	backend3 := &Backend{}
-	agent1ConnID1 := &ProxyClientConnection{backend: backend1, frontend: &GrpcFrontend{streamUID: streamUID}}
+	agent1ConnID1 := &ProxyClientConnection{backend: backend1, frontend: &Frontend{streamUID: streamUID}}
 	agent1ConnID2 := &ProxyClientConnection{backend: backend1}
-	agent2ConnID1 := &ProxyClientConnection{backend: backend2, frontend: &GrpcFrontend{streamUID: streamUID}}
+	agent2ConnID1 := &ProxyClientConnection{backend: backend2, frontend: &Frontend{streamUID: streamUID}}
 	agent2ConnID2 := &ProxyClientConnection{backend: backend2}
-	agent3ConnID1 := &ProxyClientConnection{backend: backend3, frontend: &GrpcFrontend{streamUID: streamUID}}
+	agent3ConnID1 := &ProxyClientConnection{backend: backend3, frontend: &Frontend{streamUID: streamUID}}
 	p := NewProxyServer("", []proxystrategies.ProxyStrategy{proxystrategies.ProxyStrategyDefault}, 1, nil, xfrChannelSize)
 	p.addEstablished("agent1", int64(1), agent1ConnID1)
 	p.addEstablished("agent1", int64(2), agent1ConnID2)

@@ -17,12 +17,10 @@ limitations under the License.
 package server
 
 import (
-	"bytes"
 	"context"
 	"errors"
 	"fmt"
 	"io"
-	"net/http"
 	runpprof "runtime/pprof"
 	"strconv"
 	"strings"
@@ -49,32 +47,46 @@ import (
 
 type key int
 
-type GrpcFrontend struct {
-	stream    client.ProxyService_ProxyServer
+// ProxyStream is the frontend half of a proxy session: the bidirectional
+// packet stream between the proxy server and whatever asked it to dial.
+//
+// The generated gRPC client.ProxyService_ProxyServer satisfies it directly.
+// HTTP-CONNECT frontends are adapted to it by httpConnectStream, so that both
+// frontend modes are served by the same packet handling.
+type ProxyStream interface {
+	Send(*client.Packet) error
+	Recv() (*client.Packet, error)
+	Context() context.Context
+}
+
+// Frontend serializes access to a frontend ProxyStream and records the packet
+// and stream error metrics common to every frontend mode.
+type Frontend struct {
+	stream    ProxyStream
 	streamUID string
 	sendLock  sync.Mutex
 	recvLock  sync.Mutex
 }
 
-func (g *GrpcFrontend) Send(pkt *client.Packet) error {
-	g.sendLock.Lock()
-	defer g.sendLock.Unlock()
+func (f *Frontend) Send(pkt *client.Packet) error {
+	f.sendLock.Lock()
+	defer f.sendLock.Unlock()
 
 	const segment = commonmetrics.SegmentToClient
 	metrics.Metrics.ObservePacket(segment, pkt.Type)
-	err := g.stream.Send(pkt)
+	err := f.stream.Send(pkt)
 	if err != nil {
 		metrics.Metrics.ObserveStreamError(segment, err, pkt.Type)
 	}
 	return err
 }
 
-func (g *GrpcFrontend) Recv() (*client.Packet, error) {
-	g.recvLock.Lock()
-	defer g.recvLock.Unlock()
+func (f *Frontend) Recv() (*client.Packet, error) {
+	f.recvLock.Lock()
+	defer f.recvLock.Unlock()
 
 	const segment = commonmetrics.SegmentFromClient
-	pkt, err := g.stream.Recv()
+	pkt, err := f.stream.Recv()
 	if err != nil {
 		if err != io.EOF {
 			metrics.Metrics.ObserveStreamErrorNoPacket(segment, err)
@@ -95,11 +107,7 @@ const defaultBackendDialTimeout = 0
 var errBackendDialTimeout = errors.New("timed out waiting for backend dial")
 
 type ProxyClientConnection struct {
-	Mode          string
-	HTTP          io.ReadWriter
-	frontend      *GrpcFrontend
-	CloseHTTP     func() error
-	connected     chan struct{}
+	frontend      *Frontend
 	dialID        int64
 	connectID     int64
 	agentID       string
@@ -113,93 +121,9 @@ const (
 	destHostKey key = iota
 )
 
-// mapDialErrorToHTTPStatus maps common TCP/network error strings to appropriate HTTP status codes
-func mapDialErrorToHTTPStatus(errStr string) int {
-	// Convert to lowercase for case-insensitive matching
-	errLower := strings.ToLower(errStr)
-
-	// Check each error pattern and return appropriate status code
-	switch {
-	// Timeouts - backend didn't respond in time -> 504 Gateway Timeout
-	case strings.Contains(errLower, "i/o timeout"),
-		strings.Contains(errLower, "deadline exceeded"),
-		strings.Contains(errLower, "context deadline exceeded"),
-		strings.Contains(errLower, "timeout"):
-		return 504
-
-	// Resource exhaustion errors -> 503 Service Unavailable
-	case strings.Contains(errLower, "too many open files"),
-		strings.Contains(errLower, "socket: too many open files"):
-		return 503
-
-	// Connection errors -> 502 Bad Gateway
-	case strings.Contains(errLower, "connection refused"),
-		strings.Contains(errLower, "connection reset by peer"),
-		strings.Contains(errLower, "broken pipe"),
-		strings.Contains(errLower, "network is unreachable"),
-		strings.Contains(errLower, "no route to host"),
-		strings.Contains(errLower, "host is unreachable"),
-		strings.Contains(errLower, "network is down"):
-		return 502
-
-	// DNS resolution failures -> 502 Bad Gateway
-	case strings.Contains(errLower, "no such host"),
-		strings.Contains(errLower, "name resolution"),
-		strings.Contains(errLower, "lookup") && strings.Contains(errLower, "no such host"):
-		return 502
-
-	// TLS/SSL errors -> 502 Bad Gateway
-	case strings.Contains(errLower, "tls"),
-		strings.Contains(errLower, "ssl"),
-		strings.Contains(errLower, "certificate"):
-		return 502
-
-	// Default to 502 Bad Gateway for unknown proxy errors
-	default:
-		return 502
-	}
-}
-
 func (c *ProxyClientConnection) send(pkt *client.Packet) error {
 	defer func(start time.Time) { metrics.Metrics.ObserveFrontendWriteLatency(time.Since(start)) }(time.Now())
-	if c.Mode == ModeGRPC {
-		return c.frontend.Send(pkt)
-	}
-	if c.Mode == ModeHTTPConnect {
-		if pkt.Type == client.PacketType_CLOSE_RSP {
-			return c.CloseHTTP()
-		} else if pkt.Type == client.PacketType_DIAL_CLS {
-			return c.CloseHTTP()
-		} else if pkt.Type == client.PacketType_DATA {
-			_, err := c.HTTP.Write(pkt.GetData().Data)
-			return err
-		} else if pkt.Type == client.PacketType_DIAL_RSP {
-			dialErr := pkt.GetDialResponse().Error
-			if dialErr != "" {
-				// // Map the error to appropriate HTTP status code
-				statusCode := mapDialErrorToHTTPStatus(dialErr)
-				statusText := http.StatusText(statusCode)
-				body := bytes.NewBufferString(dialErr)
-				t := http.Response{
-					StatusCode: statusCode,
-					Status:     fmt.Sprintf("%d %s", statusCode, statusText),
-					Body:       io.NopCloser(body),
-					Header: http.Header{
-						"Content-Type": []string{"text/plain; charset=utf-8"},
-					},
-					Proto:      "HTTP/1.1",
-					ProtoMinor: 1,
-					ProtoMajor: 1,
-				}
-
-				t.Write(c.HTTP)
-				return c.CloseHTTP()
-			}
-			return nil
-		}
-		return fmt.Errorf("attempt to send via unrecognized connection type %v", pkt.Type)
-	}
-	return fmt.Errorf("attempt to send via unrecognized connection mode %q", c.Mode)
+	return c.frontend.Send(pkt)
 }
 
 func NewPendingDialManager() *PendingDialManager {
@@ -292,9 +216,40 @@ type AgentTokenAuthenticationOptions struct {
 	KubernetesClient       kubernetes.Interface
 }
 
-var _ agent.AgentServiceServer = &ProxyServer{}
+// ProxyServer.Proxy and ProxyServer.Connect take transport independent stream
+// interfaces so that HTTP-CONNECT frontends share their packet handling. These
+// thin adapters bind them to the generated gRPC service interfaces.
+type grpcProxyService struct {
+	server *ProxyServer
+}
 
-var _ client.ProxyServiceServer = &ProxyServer{}
+func (g *grpcProxyService) Proxy(stream client.ProxyService_ProxyServer) error {
+	return g.server.Proxy(stream)
+}
+
+type grpcAgentService struct {
+	server *ProxyServer
+}
+
+func (g *grpcAgentService) Connect(stream agent.AgentService_ConnectServer) error {
+	return g.server.Connect(stream)
+}
+
+var _ client.ProxyServiceServer = &grpcProxyService{}
+
+var _ agent.AgentServiceServer = &grpcAgentService{}
+
+// GrpcProxyService returns the frontend ProxyService implementation to register
+// with a gRPC server.
+func (s *ProxyServer) GrpcProxyService() client.ProxyServiceServer {
+	return &grpcProxyService{server: s}
+}
+
+// GrpcAgentService returns the agent facing AgentService implementation to
+// register with a gRPC server.
+func (s *ProxyServer) GrpcAgentService() agent.AgentServiceServer {
+	return &grpcAgentService{server: s}
+}
 
 func genContext(proxyStrategies []proxystrategies.ProxyStrategy, reqHost string) context.Context {
 	ctx := context.Background()
@@ -350,7 +305,7 @@ func (s *ProxyServer) sendDialRequestToBackend(backend *Backend, pkt *client.Pac
 	}
 }
 
-func (s *ProxyServer) startPendingDialTimeout(random int64, backend *Backend, frontend *GrpcFrontend) {
+func (s *ProxyServer) startPendingDialTimeout(random int64, backend *Backend, frontend *Frontend) {
 	timeout := s.backendDialTimeout
 	if timeout <= 0 {
 		return
@@ -557,8 +512,9 @@ func (s *ProxyServer) SetBackendDialTimeout(timeout time.Duration) {
 	s.backendDialTimeout = timeout
 }
 
-// Proxy handles incoming streams from gRPC frontend.
-func (s *ProxyServer) Proxy(stream client.ProxyService_ProxyServer) error {
+// Proxy handles an incoming frontend stream, whether it arrived over gRPC or
+// over HTTP-CONNECT.
+func (s *ProxyServer) Proxy(stream ProxyStream) error {
 	metrics.Metrics.ConnectionInc(metrics.Proxy)
 	defer metrics.Metrics.ConnectionDec(metrics.Proxy)
 
@@ -573,7 +529,7 @@ func (s *ProxyServer) Proxy(stream client.ProxyService_ProxyServer) error {
 	recvCh := make(chan *client.Packet, s.xfrChannelSize)
 	stopCh := make(chan error, 1)
 
-	frontend := GrpcFrontend{
+	frontend := Frontend{
 		stream:    stream,
 		streamUID: streamUID,
 	}
@@ -605,7 +561,7 @@ func (s *ProxyServer) Proxy(stream client.ProxyService_ProxyServer) error {
 	return <-stopCh
 }
 
-func (s *ProxyServer) readFrontendToChannel(frontend *GrpcFrontend, userAgent []string, recvCh chan *client.Packet, stopCh chan error) {
+func (s *ProxyServer) readFrontendToChannel(frontend *Frontend, userAgent []string, recvCh chan *client.Packet, stopCh chan error) {
 	defer close(stopCh)
 	defer close(recvCh)
 
@@ -637,7 +593,7 @@ func (s *ProxyServer) readFrontendToChannel(frontend *GrpcFrontend, userAgent []
 	}
 }
 
-func (s *ProxyServer) serveRecvFrontend(frontend *GrpcFrontend, recvCh <-chan *client.Packet) {
+func (s *ProxyServer) serveRecvFrontend(frontend *Frontend, recvCh <-chan *client.Packet) {
 	klog.V(5).Infoln("start serving frontend stream")
 
 	var firstConnID int64
@@ -701,10 +657,8 @@ func (s *ProxyServer) serveRecvFrontend(frontend *GrpcFrontend, recvCh <-chan *c
 			s.PendingDial.Add(
 				random,
 				&ProxyClientConnection{
-					Mode:        ModeGRPC,
 					frontend:    frontend,
 					dialID:      random,
-					connected:   make(chan struct{}),
 					start:       time.Now(),
 					backend:     backend,
 					dialAddress: address,
@@ -882,7 +836,7 @@ func (s *ProxyServer) authenticateAgentViaToken(ctx context.Context) error {
 }
 
 // Connect is for agent to connect to ProxyServer as next hop
-func (s *ProxyServer) Connect(stream agent.AgentService_ConnectServer) error {
+func (s *ProxyServer) Connect(stream AgentStream) error {
 	metrics.Metrics.ConnectionInc(metrics.Connect)
 	defer metrics.Metrics.ConnectionDec(metrics.Connect)
 
@@ -1051,7 +1005,6 @@ func (s *ProxyServer) serveRecvBackend(backend *Backend, agentID string, recvCh 
 				frontend.agentID = agentID
 				// TODO: this connection may be cleaned on serveRecvFrontend exit, make it independent.
 				s.addEstablished(agentID, resp.ConnectID, frontend)
-				close(frontend.connected)
 				metrics.Metrics.ObserveDialLatency(time.Since(frontend.start))
 				klog.V(3).InfoS("Proxy connection established",
 					"dialID", resp.Random,
@@ -1160,7 +1113,7 @@ func (s *ProxyServer) sendBackendDialClose(backend *Backend, random int64, reaso
 	}
 }
 
-func (s *ProxyServer) sendFrontendClose(frontend *GrpcFrontend, connectID int64, reason string) {
+func (s *ProxyServer) sendFrontendClose(frontend *Frontend, connectID int64, reason string) {
 	pkt := &client.Packet{
 		Type: client.PacketType_CLOSE_RSP,
 		Payload: &client.Packet_CloseResponse{
