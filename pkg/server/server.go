@@ -134,6 +134,10 @@ type ProxyClientConnection struct {
 	establishedAt time.Time
 	backend       *Backend
 	dialAddress   string // cached for logging
+	// frontendClosed is set when the frontend initiated the close via CLOSE_REQ.
+	// It distinguishes a frontend-initiated close from an unsolicited CLOSE_RSP
+	// sent by the agent when the endpoint closes on its own. Guarded by fmu.
+	frontendClosed bool
 }
 
 const (
@@ -406,8 +410,31 @@ func (s *ProxyServer) removeEstablished(agentID string, connID int64) *ProxyClie
 	}
 	metrics.Metrics.SetEstablishedConnCount(s.getCount(s.established))
 	metrics.Metrics.ObserveConnectionDuration(time.Since(ret.establishedAt))
-	metrics.Metrics.ObserveConnectionClose(metrics.ConnectionCloseFrontend)
+	// A CLOSE_RSP is only attributed to the frontend when the frontend actually
+	// requested the close (CLOSE_REQ). Otherwise the agent sent an unsolicited
+	// CLOSE_RSP because the endpoint closed on its own.
+	closeReason := metrics.ConnectionCloseEndpoint
+	if ret.frontendClosed {
+		closeReason = metrics.ConnectionCloseFrontend
+	}
+	metrics.Metrics.ObserveConnectionClose(closeReason)
 	return ret
+}
+
+// markFrontendClosed records that the frontend initiated the close of the
+// established connection identified by (agentID, connID), so the subsequent
+// CLOSE_RSP from the agent is attributed to the frontend rather than the
+// endpoint. It is a no-op if the connection is not (or no longer) established.
+func (s *ProxyServer) markFrontendClosed(agentID string, connID int64) {
+	s.fmu.Lock()
+	defer s.fmu.Unlock()
+	conns, ok := s.established[agentID]
+	if !ok {
+		return
+	}
+	if conn, ok := conns[connID]; ok {
+		conn.frontendClosed = true
+	}
 }
 
 func (s *ProxyServer) getFrontend(agentID string, connID int64) (*ProxyClientConnection, error) {
@@ -724,6 +751,10 @@ func (s *ProxyServer) serveRecvFrontend(frontend *Frontend, recvCh <-chan *clien
 				s.sendFrontendClose(frontend, connID, "backend uninitialized")
 				continue
 			}
+			// Record that the frontend initiated this close, so the subsequent
+			// CLOSE_RSP from the agent is attributed to the frontend rather than
+			// treated as an unsolicited endpoint close.
+			s.markFrontendClosed(backend.GetAgentID(), connID)
 			if err := backend.Send(pkt); err != nil {
 				// TODO: retry with other backends connecting to this agent.
 				klog.ErrorS(err, "CLOSE_REQ to Backend failed", "connectionID", connID)

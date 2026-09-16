@@ -56,9 +56,11 @@ type endpointConn struct {
 
 	// closeReason records why the connection is being torn down. It is set by the
 	// initiator of the close before calling cleanup(), and consumed in cleanFunc
-	// when recording close metrics. Access is serialized by cleanReasonOnce.
-	closeReason     metrics.ConnectionCloseReason
-	cleanReasonOnce sync.Once
+	// when recording close metrics. Reads and writes are serialized by
+	// closeReasonMu, since the close can be initiated concurrently by the server
+	// (CLOSE_REQ), the endpoint (EOF/read error) or agent shutdown.
+	closeReasonMu sync.Mutex
+	closeReason   metrics.ConnectionCloseReason
 
 	// dataCh is a queue to decouple reads from the ANP Server
 	// to the corresponding writes to the data plane.
@@ -88,9 +90,22 @@ func (e *endpointConn) cleanup() {
 // reason set is kept, since the close is driven by whichever initiator wins the
 // race to tear the connection down.
 func (e *endpointConn) setCloseReason(reason metrics.ConnectionCloseReason) {
-	e.cleanReasonOnce.Do(func() {
+	e.closeReasonMu.Lock()
+	defer e.closeReasonMu.Unlock()
+	if e.closeReason == "" {
 		e.closeReason = reason
-	})
+	}
+}
+
+// getCloseReason returns the recorded close reason, or endpoint_close if no
+// initiator set one (e.g. the endpoint closed the connection on its own).
+func (e *endpointConn) getCloseReason() metrics.ConnectionCloseReason {
+	e.closeReasonMu.Lock()
+	defer e.closeReasonMu.Unlock()
+	if e.closeReason == "" {
+		return metrics.ConnectionCloseEndpoint
+	}
+	return e.closeReason
 }
 
 func (e *endpointConn) sendViaDataChannel(msg []byte) {
@@ -452,14 +467,10 @@ func (a *Client) Serve() {
 				close(eConn.dataCh)
 				a.connManager.Delete(eConn.connID)
 				// The connection was established (conn is non-nil), so record its
-				// lifespan and the reason it was closed. Default to endpoint_close
-				// if no initiator set a reason.
-				closeReason := eConn.closeReason
-				if closeReason == "" {
-					closeReason = metrics.ConnectionCloseEndpoint
-				}
+				// lifespan and the reason it was closed. getCloseReason defaults to
+				// endpoint_close when no initiator set a reason.
 				metrics.Metrics.ObserveConnectionDuration(time.Since(eConn.establishedAt))
-				metrics.Metrics.ObserveConnectionClose(closeReason)
+				metrics.Metrics.ObserveConnectionClose(eConn.getCloseReason())
 				if err := eConn.conn.Close(); err != nil {
 					klog.ErrorS(err, "failed to close connection to remote", "dialID", dialReq.Random, "connectionID", connID)
 				}

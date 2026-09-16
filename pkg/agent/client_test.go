@@ -22,6 +22,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -269,6 +270,42 @@ func TestConnectionCloseMetric_ServerClose(t *testing.T) {
 
 	if err := metricstest.DefaultTester.ExpectAgentConnectionClose(metrics.ConnectionCloseServer, 1); err != nil {
 		t.Errorf("Expected %s metric: %v", "endpoint_connection_close_total", err)
+	}
+}
+
+// TestCloseReasonRace exercises concurrent close-reason writes and reads on an
+// endpointConn, mirroring an endpoint EOF racing a server CLOSE_REQ. It is meant
+// to be run under `go test -race`.
+func TestCloseReasonRace(t *testing.T) {
+	const iterations = 1000
+	for i := 0; i < iterations; i++ {
+		eConn := &endpointConn{}
+		var wg sync.WaitGroup
+		wg.Add(3)
+		// Server-initiated close.
+		go func() {
+			defer wg.Done()
+			eConn.setCloseReason(metrics.ConnectionCloseServer)
+		}()
+		// Agent-shutdown close.
+		go func() {
+			defer wg.Done()
+			eConn.setCloseReason(metrics.ConnectionCloseAgentShutdown)
+		}()
+		// cleanFunc reading the reason to record the metric.
+		go func() {
+			defer wg.Done()
+			_ = eConn.getCloseReason()
+		}()
+		wg.Wait()
+
+		// First-writer-wins: exactly one of the two set reasons must stick, and it
+		// must never be empty (getCloseReason defaults to endpoint_close only when
+		// unset, but here a setter always ran).
+		got := eConn.getCloseReason()
+		if got != metrics.ConnectionCloseServer && got != metrics.ConnectionCloseAgentShutdown {
+			t.Fatalf("unexpected close reason %q", got)
+		}
 	}
 }
 

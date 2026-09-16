@@ -425,6 +425,10 @@ const (
 	// ConnectionCloseStreamShutdown indicates the frontend gRPC stream was torn down,
 	// so its established connections were cleaned up.
 	ConnectionCloseStreamShutdown ConnectionCloseReason = "stream_shutdown"
+	// ConnectionCloseEndpoint indicates the backend/endpoint closed the connection
+	// on its own (e.g. endpoint EOF or read error), reported to the server as an
+	// unsolicited CLOSE_RSP that the frontend never requested.
+	ConnectionCloseEndpoint ConnectionCloseReason = "endpoint_close"
 )
 
 // ObserveConnectionClose records the closure of an established end-to-end connection,
