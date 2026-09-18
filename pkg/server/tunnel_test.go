@@ -422,6 +422,7 @@ func TestHTTPConnectStreamRecvPreservesPreviouslyReturnedPayload(t *testing.T) {
 		&http.Request{Host: "127.0.0.1:8080"},
 		conn,
 		bufio.NewReadWriter(bufio.NewReader(conn), bufio.NewWriter(conn)),
+		defaultFrontendWriteChannelSize,
 	)
 	t.Cleanup(stream.release)
 	if err := conn.SetReadDeadline(time.Now().Add(5 * time.Second)); err != nil {
@@ -482,6 +483,7 @@ func TestHTTPConnectStreamContextEndsWithStream(t *testing.T) {
 		&http.Request{Host: "127.0.0.1:8080"},
 		conn,
 		bufio.NewReadWriter(bufio.NewReader(conn), bufio.NewWriter(conn)),
+		defaultFrontendWriteChannelSize,
 	)
 	if err := stream.Context().Err(); err != nil {
 		t.Fatalf("expected a live context for an open stream, got %v", err)

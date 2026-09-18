@@ -140,6 +140,7 @@ func (p *Proxy) Run(o *options.ProxyRunOptions, stopCh <-chan struct{}) error {
 	}
 	p.server = server.NewProxyServer(o.ServerID, ps, o.ServerCount, authOpt, o.XfrChannelSize)
 	p.server.SetBackendDialTimeout(o.BackendDialTimeout)
+	p.server.SetFrontendWriteChannelSize(o.FrontendWriteChannelSize)
 
 	frontendStop, err := p.runFrontendServer(ctx, o, p.server)
 	if err != nil {
