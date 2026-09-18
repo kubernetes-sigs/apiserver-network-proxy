@@ -18,7 +18,9 @@ package server
 
 import (
 	"net"
+	"sync"
 
+	"github.com/prometheus/client_golang/prometheus"
 	"k8s.io/klog/v2"
 
 	commonmetrics "sigs.k8s.io/apiserver-network-proxy/konnectivity-client/pkg/common/metrics"
@@ -27,6 +29,14 @@ import (
 )
 
 const defaultFrontendWriteChannelSize = 10
+
+type frontendWriteQueueMetrics struct {
+	mu   sync.Mutex
+	full bool // guarded by mu
+
+	fullGauge prometheus.Gauge // guarded by mu; keeps Inc and Dec on the same GaugeVec child
+	stopped   bool             // guarded by mu
+}
 
 // enqueueWrite gives each HTTP-CONNECT stream a bounded response buffer behind
 // the common Frontend.Send path. When it fills, Send blocks without dropping
@@ -41,6 +51,21 @@ func (h *httpConnectStream) enqueueWrite(pkt *client.Packet) error {
 
 	select {
 	case h.writeCh <- pkt:
+		h.updateFrontendWriteQueueMetric()
+		return nil
+	case <-h.closed:
+		return net.ErrClosed
+	default:
+	}
+
+	klog.V(2).InfoS("Frontend write channel is full", "host", h.host, "connectionID", h.connectID)
+	blocked := metrics.Metrics.BlockedFrontendWriteChannels()
+	blocked.Inc()
+	defer blocked.Dec()
+
+	select {
+	case h.writeCh <- pkt:
+		h.updateFrontendWriteQueueMetric()
 		return nil
 	case <-h.closed:
 		return net.ErrClosed
@@ -63,6 +88,7 @@ func (h *httpConnectStream) serveFrontendWrites() {
 
 		select {
 		case pkt := <-h.writeCh:
+			h.updateFrontendWriteQueueMetric()
 			if pkt.Type == client.PacketType_CLOSE_RSP {
 				return
 			}
@@ -77,5 +103,47 @@ func (h *httpConnectStream) serveFrontendWrites() {
 		case <-h.closed:
 			return
 		}
+	}
+}
+
+func (h *httpConnectStream) updateFrontendWriteQueueMetric() {
+	state := &h.writeMetrics
+	state.mu.Lock()
+	defer state.mu.Unlock()
+	if state.stopped {
+		return
+	}
+	// Check under the lock even when unchanged: skipping a concurrent update
+	// could otherwise let it publish stale occupancy after we return.
+	full := len(h.writeCh) == cap(h.writeCh)
+	if state.full == full {
+		return
+	}
+
+	state.full = full
+	if full {
+		state.fullGauge = metrics.Metrics.FullFrontendWriteQueues()
+		state.fullGauge.Inc()
+	} else {
+		state.fullGauge.Dec()
+		state.fullGauge = nil
+	}
+}
+
+// stopFrontendWriteQueueMetric releases the durable full-queue accounting.
+// Stream closure releases it even when the socket writer is still blocked.
+func (h *httpConnectStream) stopFrontendWriteQueueMetric() {
+	state := &h.writeMetrics
+	state.mu.Lock()
+	defer state.mu.Unlock()
+	if state.stopped {
+		return
+	}
+
+	state.stopped = true
+	if state.full {
+		state.full = false
+		state.fullGauge.Dec()
+		state.fullGauge = nil
 	}
 }
