@@ -680,6 +680,11 @@ func TestConnectionDurationMetric(t *testing.T) {
 	p.addEstablished("agent1", int64(1), new(ProxyClientConnection))
 	p.removeEstablished("agent1", int64(1))
 
+	assertConnectionDurationCount(t, 1)
+}
+
+func assertConnectionDurationCount(t *testing.T, want uint64) {
+	t.Helper()
 	metricFamilies, err := prometheus.DefaultGatherer.Gather()
 	if err != nil {
 		t.Fatalf("failed to gather metrics: %v", err)
@@ -688,12 +693,14 @@ func TestConnectionDurationMetric(t *testing.T) {
 		if metricFamily.GetName() != "konnectivity_network_proxy_server_connection_duration_seconds" {
 			continue
 		}
-		if got := metricFamily.GetMetric()[0].GetHistogram().GetSampleCount(); got != 1 {
-			t.Fatalf("expected 1 connection duration observation, got %d", got)
+		if got := metricFamily.GetMetric()[0].GetHistogram().GetSampleCount(); got != want {
+			t.Errorf("expected %d connection duration observations, got %d", want, got)
 		}
 		return
 	}
-	t.Fatal("connection duration metric not found")
+	if want != 0 {
+		t.Error("connection duration metric not found")
+	}
 }
 
 func TestRemoveEstablishedForBackendConn(t *testing.T) {
@@ -727,6 +734,8 @@ func TestRemoveEstablishedForBackendConn(t *testing.T) {
 }
 
 func TestRemoveEstablishedForStream(t *testing.T) {
+	metrics.Metrics.Reset()
+
 	streamUID := "target-uuid"
 	backend1 := &Backend{}
 	backend2 := &Backend{}
@@ -734,7 +743,7 @@ func TestRemoveEstablishedForStream(t *testing.T) {
 	agent1ConnID1 := &ProxyClientConnection{backend: backend1, frontend: &Frontend{streamUID: streamUID}}
 	agent1ConnID2 := &ProxyClientConnection{backend: backend1}
 	agent2ConnID1 := &ProxyClientConnection{backend: backend2, frontend: &Frontend{streamUID: streamUID}}
-	agent2ConnID2 := &ProxyClientConnection{backend: backend2}
+	agent2ConnID2 := &ProxyClientConnection{backend: backend2, frontend: &Frontend{streamUID: "other-uuid"}}
 	agent3ConnID1 := &ProxyClientConnection{backend: backend3, frontend: &Frontend{streamUID: streamUID}}
 	p := NewProxyServer("", []proxystrategies.ProxyStrategy{proxystrategies.ProxyStrategyDefault}, 1, nil, xfrChannelSize)
 	p.addEstablished("agent1", int64(1), agent1ConnID1)
@@ -742,7 +751,16 @@ func TestRemoveEstablishedForStream(t *testing.T) {
 	p.addEstablished("agent2", int64(1), agent2ConnID1)
 	p.addEstablished("agent2", int64(2), agent2ConnID2)
 	p.addEstablished("agent3", int64(1), agent3ConnID1)
-	p.removeEstablishedForStream(streamUID)
+	for _, uid := range []string{"", "unknown-uuid"} {
+		if got := p.removeEstablishedForStream(uid); len(got) != 0 {
+			t.Errorf("expected no connections removed for stream %q, got %d", uid, len(got))
+		}
+		assertEstablishedConnsMetric(t, 5)
+		assertConnectionDurationCount(t, 0)
+	}
+	if got := p.removeEstablishedForStream(streamUID); len(got) != 3 {
+		t.Errorf("expected 3 connections removed, got %d", len(got))
+	}
 	expectedFrontends := map[string]map[int64]*ProxyClientConnection{
 		"agent1": {
 			int64(2): agent1ConnID2,
@@ -754,6 +772,18 @@ func TestRemoveEstablishedForStream(t *testing.T) {
 	if e, a := expectedFrontends, p.established; !reflect.DeepEqual(e, a) {
 		t.Errorf("expected %v, got %v", e, a)
 	}
+	assertEstablishedConnsMetric(t, 2)
+	assertConnectionDurationCount(t, 3)
+
+	// Repeated cleanup and a late CLOSE_RSP must not count removals twice.
+	if got := p.removeEstablishedForStream(streamUID); len(got) != 0 {
+		t.Errorf("expected no connections removed on repeated cleanup, got %d", len(got))
+	}
+	if got := p.removeEstablished("agent1", int64(1)); got != nil {
+		t.Error("connection removed by stream cleanup was still established")
+	}
+	assertEstablishedConnsMetric(t, 2)
+	assertConnectionDurationCount(t, 3)
 }
 
 func prepareFrontendConn(ctrl *gomock.Controller) *agentmock.MockAgentService_ConnectServer {
@@ -892,6 +922,59 @@ func TestServerProxyNormalClose(t *testing.T) {
 		)
 	}
 	baseServerProxyTestWithBackend(t, validate)
+}
+
+func TestServerProxyFrontendCloseUpdatesEstablishedMetrics(t *testing.T) {
+	metrics.Metrics.Reset()
+	ctrl := gomock.NewController(t)
+	frontendConn := prepareFrontendConn(ctrl)
+	p := NewProxyServer("", []proxystrategies.ProxyStrategy{proxystrategies.ProxyStrategyDefault}, 1, nil, xfrChannelSize)
+	agentConn, backend := prepareAgentConnMD(t, ctrl, p, nil)
+
+	const dialID, connectID = 111, 77
+	dialReq, dialRsp := dialReqPkt(dialID), dialRspPkt(dialID, connectID)
+	recvCh := make(chan *client.Packet, 1)
+	backendDone := make(chan struct{})
+	go func() {
+		defer close(backendDone)
+		p.serveRecvBackend(backend, backend.GetAgentID(), recvCh)
+	}()
+	t.Cleanup(func() {
+		close(recvCh)
+		select {
+		case <-backendDone:
+		case <-time.After(5 * time.Second):
+			t.Error("timed out waiting for backend processing to stop")
+		}
+	})
+
+	established := make(chan struct{})
+	gomock.InOrder(
+		frontendConn.EXPECT().Recv().Return(dialReq, nil),
+		frontendConn.EXPECT().Recv().DoAndReturn(func() (*client.Packet, error) {
+			select {
+			case <-established:
+				return nil, io.EOF
+			case <-time.After(5 * time.Second):
+				return nil, fmt.Errorf("timed out waiting for dial response")
+			}
+		}),
+	)
+	agentConn.EXPECT().Send(dialReq).DoAndReturn(func(*client.Packet) error {
+		recvCh <- dialRsp
+		return nil
+	})
+	frontendConn.EXPECT().Send(dialRsp).DoAndReturn(func(*client.Packet) error {
+		close(established)
+		return nil
+	})
+	agentConn.EXPECT().Send(closeReqPkt(connectID)).Return(nil)
+
+	if err := p.Proxy(frontendConn); err != nil {
+		t.Fatalf("Proxy returned an error: %v", err)
+	}
+	assertEstablishedConnsMetric(t, 0)
+	assertConnectionDurationCount(t, 1)
 }
 
 func TestServerProxyRecvChanFull(t *testing.T) {

@@ -33,6 +33,7 @@ import (
 	"go.uber.org/mock/gomock"
 
 	"sigs.k8s.io/apiserver-network-proxy/konnectivity-client/proto/client"
+	"sigs.k8s.io/apiserver-network-proxy/pkg/server/metrics"
 	"sigs.k8s.io/apiserver-network-proxy/pkg/server/proxystrategies"
 	agentmock "sigs.k8s.io/apiserver-network-proxy/proto/agent/mocks"
 )
@@ -241,6 +242,7 @@ func TestHTTPConnectTunnelUsesGrpcPacketHandling(t *testing.T) {
 // TestHTTPConnectTunnelFrontendCloseClosesBackend verifies that a client
 // hanging up produces the CLOSE_REQ the gRPC path sends on frontend shutdown.
 func TestHTTPConnectTunnelFrontendCloseClosesBackend(t *testing.T) {
+	metrics.Metrics.Reset()
 	ctrl := gomock.NewController(t)
 	defer ctrl.Finish()
 
@@ -266,6 +268,8 @@ func TestHTTPConnectTunnelFrontendCloseClosesBackend(t *testing.T) {
 	}
 	resp.Body.Close()
 
+	assertEstablishedConnsMetric(t, 1)
+	assertConnectionDurationCount(t, 0)
 	f.conn.Close()
 
 	closeReq := f.nextAgentPacket(t)
@@ -275,6 +279,8 @@ func TestHTTPConnectTunnelFrontendCloseClosesBackend(t *testing.T) {
 	if got := closeReq.GetCloseRequest().ConnectID; got != connectID {
 		t.Errorf("expected CLOSE_REQ for connectID %d, got %d", connectID, got)
 	}
+	assertEstablishedConnsMetric(t, 0)
+	assertConnectionDurationCount(t, 1)
 }
 
 // TestHTTPConnectTunnelDialErrorBecomesHTTPResponse verifies that a failed dial
