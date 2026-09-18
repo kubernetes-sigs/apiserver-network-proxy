@@ -134,8 +134,9 @@ type httpConnectStream struct {
 	// The writer starts only after the HTTP 200 response has been written.
 	// Send queues established DATA and CLOSE_RSP in wire order. Neither channel
 	// is replaced, and writeCh is never closed, so Close can race with Send.
-	writeCh    chan *client.Packet
-	writerDone chan struct{}
+	writeCh      chan *client.Packet
+	writerDone   chan struct{}
+	writeMetrics frontendWriteQueueMetrics
 
 	// readBuf is scratch space for reading the hijacked connection. It is only
 	// touched by Recv, which Frontend serializes.
@@ -316,6 +317,7 @@ func (h *httpConnectStream) isClosed() bool {
 // It also interrupts a blocked socket write and any Send waiting for queue space.
 func (h *httpConnectStream) close() {
 	h.closeOnce.Do(func() {
+		h.stopFrontendWriteQueueMetric()
 		close(h.closed)
 		if err := h.conn.Close(); err != nil {
 			klog.V(4).ErrorS(err, "failed to close hijacked connection", "host", h.host, "dialID", h.dialID)

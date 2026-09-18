@@ -30,12 +30,14 @@ import (
 	"testing"
 	"time"
 
+	promtest "github.com/prometheus/client_golang/prometheus/testutil"
 	"go.uber.org/mock/gomock"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/grpc/metadata"
 
 	"sigs.k8s.io/apiserver-network-proxy/konnectivity-client/proto/client"
+	"sigs.k8s.io/apiserver-network-proxy/pkg/server/metrics"
 	"sigs.k8s.io/apiserver-network-proxy/pkg/server/proxystrategies"
 	"sigs.k8s.io/apiserver-network-proxy/proto/agent"
 	agentmock "sigs.k8s.io/apiserver-network-proxy/proto/agent/mocks"
@@ -464,5 +466,90 @@ func TestHTTPConnectStreamCloseIsIdempotent(t *testing.T) {
 	wg.Wait()
 	if got := f.conn.closes.Load(); got != 1 {
 		t.Fatalf("socket closed %d times, want once", got)
+	}
+}
+
+func waitWriterMetrics(t *testing.T, full, blocked float64) {
+	t.Helper()
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		if promtest.ToFloat64(metrics.Metrics.FullFrontendWriteQueues()) == full &&
+			promtest.ToFloat64(metrics.Metrics.BlockedFrontendWriteChannels()) == blocked {
+			return
+		}
+		time.Sleep(time.Millisecond)
+	}
+	t.Fatalf("full queues = %v, blocked dispatchers = %v; want %v, %v",
+		promtest.ToFloat64(metrics.Metrics.FullFrontendWriteQueues()),
+		promtest.ToFloat64(metrics.Metrics.BlockedFrontendWriteChannels()), full, blocked)
+}
+
+func TestHTTPConnectWriterFullQueueMetricCountsConnections(t *testing.T) {
+	metrics.Metrics.Reset()
+	s := newWriterTestServer(t)
+	first := s.establish(t, 1, 1)
+	second := s.establish(t, 2, 1)
+	for i, f := range []*writerTestFrontend{first, second} {
+		id := int64(i + 1)
+		s.send(t, dataPkt(id, []byte("blocked")))
+		f.waitWrite(t, "blocked")
+		s.send(t, dataPkt(id, []byte("queued")))
+	}
+	waitWriterMetrics(t, 2, 0)
+	first.stream.close()
+	waitWriterMetrics(t, 1, 0)
+	second.readData(t, "blockedqueued")
+	waitWriterMetrics(t, 0, 0)
+}
+
+func TestHTTPConnectWriterPressureMetricsClearOnDisconnect(t *testing.T) {
+	metrics.Metrics.Reset()
+	s := newWriterTestServer(t)
+	f := s.establish(t, 1, 1)
+	s.send(t, dataPkt(1, []byte("blocked")))
+	f.waitWrite(t, "blocked")
+	s.send(t, dataPkt(1, []byte("queued")))
+	s.send(t, dataPkt(1, []byte("overflow")))
+	waitWriterMetrics(t, 1, 1)
+	s.cancel()
+	waitWriterSignal(t, f.stream.writerDone, "writer cancellation")
+	waitWriterMetrics(t, 0, 0)
+}
+
+func TestHTTPConnectWriterFullQueueMetricAfterConcurrentUpdates(t *testing.T) {
+	metrics.Metrics.Reset()
+	h := &httpConnectStream{writeCh: make(chan *client.Packet, 1)}
+	pkt := dataPkt(1, []byte("data"))
+	h.writeCh <- pkt
+	h.updateFrontendWriteQueueMetric()
+	defer h.stopFrontendWriteQueueMetric()
+	consume, produce := make(chan struct{}), make(chan struct{})
+	done := make(chan struct{}, 2)
+	var wg sync.WaitGroup
+	wg.Go(func() {
+		for range consume {
+			<-h.writeCh
+			h.updateFrontendWriteQueueMetric()
+			done <- struct{}{}
+		}
+	})
+	wg.Go(func() {
+		for range produce {
+			h.writeCh <- pkt
+			h.updateFrontendWriteQueueMetric()
+			done <- struct{}{}
+		}
+	})
+	t.Cleanup(func() { close(consume); close(produce); wg.Wait() })
+	for i := range 100000 {
+		consume <- struct{}{}
+		produce <- struct{}{}
+		<-done
+		<-done
+		// Both updates have finished, so this is not a transient sample:
+		// the queue is full and must contribute one to the gauge.
+		if got := promtest.ToFloat64(metrics.Metrics.FullFrontendWriteQueues()); got != 1 {
+			t.Fatalf("iteration %d: full-queue gauge = %v, want 1", i, got)
+		}
 	}
 }
