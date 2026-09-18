@@ -24,6 +24,8 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -46,35 +48,40 @@ type httpConnectFixture struct {
 	toAgent chan *client.Packet
 	// fromAgent is the agent's send queue, consumed by the mocked Recv.
 	fromAgent chan *client.Packet
-	conn      net.Conn
+	// closeAgentOnce guards fromAgent, which a test may close early to make
+	// the agent hang up.
+	closeAgentOnce sync.Once
+	conn           net.Conn
 }
 
 func newHTTPConnectFixture(t *testing.T, ctrl *gomock.Controller, host string) *httpConnectFixture {
 	t.Helper()
 
 	proxyServer := NewProxyServer(uuid.New().String(), []proxystrategies.ProxyStrategy{proxystrategies.ProxyStrategyDefault}, 1, &AgentTokenAuthenticationOptions{}, xfrChannelSize)
-	agentConn, backend := prepareAgentConnMD(t, ctrl, proxyServer, nil)
 
 	f := &httpConnectFixture{
 		proxyServer: proxyServer,
-		agentConn:   agentConn,
-		backend:     backend,
-		toAgent:     make(chan *client.Packet, 16),
-		fromAgent:   make(chan *client.Packet, 16),
+		// Only mock the agent side here. Connect registers the backend, so that
+		// requests and disconnect cleanup use the same backend connection.
+		agentConn: prepareAgentConn(ctrl, nil),
+		toAgent:   make(chan *client.Packet, 16),
+		fromAgent: make(chan *client.Packet, 16),
 	}
 
-	agentConn.EXPECT().SendHeader(gomock.Any()).Return(nil).AnyTimes()
-	agentConn.EXPECT().Send(gomock.Any()).DoAndReturn(func(pkt *client.Packet) error {
+	f.agentConn.EXPECT().SendHeader(gomock.Any()).Return(nil).AnyTimes()
+	f.agentConn.EXPECT().Send(gomock.Any()).DoAndReturn(func(pkt *client.Packet) error {
 		f.toAgent <- pkt
 		return nil
 	}).AnyTimes()
-	agentConn.EXPECT().Recv().DoAndReturn(func() (*client.Packet, error) {
+	f.agentConn.EXPECT().Recv().DoAndReturn(func() (*client.Packet, error) {
 		pkt, ok := <-f.fromAgent
 		if !ok {
 			return nil, io.EOF
 		}
 		return pkt, nil
 	}).AnyTimes()
+
+	f.serveAgent(t)
 
 	front := httptest.NewServer(&Tunnel{Server: proxyServer})
 	t.Cleanup(front.Close)
@@ -96,7 +103,8 @@ func newHTTPConnectFixture(t *testing.T, ctrl *gomock.Controller, host string) *
 	return f
 }
 
-// serveAgent runs the agent side of the connection for the duration of the test.
+// serveAgent runs the agent side of the connection for the duration of the test
+// and waits for its backend to be registered.
 func (f *httpConnectFixture) serveAgent(t *testing.T) {
 	t.Helper()
 	done := make(chan struct{})
@@ -105,13 +113,34 @@ func (f *httpConnectFixture) serveAgent(t *testing.T) {
 		f.proxyServer.Connect(f.agentConn)
 	}()
 	t.Cleanup(func() {
-		close(f.fromAgent)
+		f.closeAgent()
 		select {
 		case <-done:
 		case <-time.After(5 * time.Second):
 			t.Error("timed out waiting for Connect to return")
 		}
 	})
+
+	// Connect registers the backend on its own goroutine, so wait for it before
+	// any request is allowed to look for a backend.
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		backend, err := f.proxyServer.getBackend("127.0.0.1:8080")
+		if err == nil {
+			f.backend = backend
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("timed out waiting for the agent backend to be registered: %v", err)
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+}
+
+// closeAgent makes the mocked agent hang up, which tears down the backend
+// connection the same way a lost agent does.
+func (f *httpConnectFixture) closeAgent() {
+	f.closeAgentOnce.Do(func() { close(f.fromAgent) })
 }
 
 func (f *httpConnectFixture) nextAgentPacket(t *testing.T) *client.Packet {
@@ -136,7 +165,6 @@ func TestHTTPConnectTunnelUsesGrpcPacketHandling(t *testing.T) {
 	const connectID = 4242
 
 	f := newHTTPConnectFixture(t, ctrl, host)
-	f.serveAgent(t)
 
 	// The CONNECT request is presented to the server as a DIAL_REQ.
 	dialReq := f.nextAgentPacket(t)
@@ -219,7 +247,6 @@ func TestHTTPConnectTunnelFrontendCloseClosesBackend(t *testing.T) {
 	const connectID = 77
 
 	f := newHTTPConnectFixture(t, ctrl, "127.0.0.1:8080")
-	f.serveAgent(t)
 
 	dialReq := f.nextAgentPacket(t)
 	if dialReq.Type != client.PacketType_DIAL_REQ {
@@ -257,7 +284,6 @@ func TestHTTPConnectTunnelDialErrorBecomesHTTPResponse(t *testing.T) {
 	defer ctrl.Finish()
 
 	f := newHTTPConnectFixture(t, ctrl, "127.0.0.1:8080")
-	f.serveAgent(t)
 
 	dialReq := f.nextAgentPacket(t)
 	if dialReq.Type != client.PacketType_DIAL_REQ {
@@ -340,5 +366,132 @@ func TestMapDialErrorToHTTPStatus(t *testing.T) {
 				t.Errorf("mapDialErrorToHTTPStatus(%q) = %d, want %d", tc.dialErr, got, tc.want)
 			}
 		})
+	}
+}
+
+// TestHTTPConnectTunnelAgentCloseWhilePendingDial verifies that losing the
+// agent while the dial is still pending fails the request instead of leaving
+// the pending dial, the hijacked connection and its goroutines behind.
+func TestHTTPConnectTunnelAgentCloseWhilePendingDial(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+
+	f := newHTTPConnectFixture(t, ctrl, "127.0.0.1:8080")
+
+	dialReq := f.nextAgentPacket(t)
+	if dialReq.Type != client.PacketType_DIAL_REQ {
+		t.Fatalf("expected DIAL_REQ to agent, got %v", dialReq.Type)
+	}
+	if got := pendingDialCount(f.proxyServer); got != 1 {
+		t.Fatalf("expected one pending dial while the agent has not answered, got %d", got)
+	}
+
+	// The agent hangs up without ever sending a DIAL_RSP.
+	f.closeAgent()
+
+	if err := f.conn.SetReadDeadline(time.Now().Add(5 * time.Second)); err != nil {
+		t.Fatalf("failed to set read deadline: %v", err)
+	}
+	resp, err := http.ReadResponse(bufio.NewReader(f.conn), nil)
+	if err != nil {
+		t.Fatalf("failed to read CONNECT response: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusBadGateway {
+		t.Fatalf("expected %d when the agent goes away mid-dial, got %s", http.StatusBadGateway, resp.Status)
+	}
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		t.Fatalf("failed to read error body: %v", err)
+	}
+	if got := string(body); !strings.Contains(got, errBackendClosedWhileDialing.Error()) {
+		t.Errorf("expected %q in the error body, got %q", errBackendClosedWhileDialing.Error(), got)
+	}
+	if got := pendingDialCount(f.proxyServer); got != 0 {
+		t.Errorf("expected the pending dial to be cleaned after the agent closed, got %d", got)
+	}
+}
+
+// TestHTTPConnectStreamRecvPreservesPreviouslyReturnedPayload verifies that a
+// packet retained by the transfer queue is not overwritten by the next read.
+func TestHTTPConnectStreamRecvPreservesPreviouslyReturnedPayload(t *testing.T) {
+	conn, frontend := net.Pipe()
+	t.Cleanup(func() { frontend.Close() })
+
+	stream := newHTTPConnectStream(
+		&http.Request{Host: "127.0.0.1:8080"},
+		conn,
+		bufio.NewReadWriter(bufio.NewReader(conn), bufio.NewWriter(conn)),
+	)
+	t.Cleanup(stream.release)
+	if err := conn.SetReadDeadline(time.Now().Add(5 * time.Second)); err != nil {
+		t.Fatal(err)
+	}
+	// Exercise established DATA reads independently of the dial handshake.
+	stream.dialRequested = true
+	stream.connectID = 42
+	close(stream.connected)
+
+	payloads := []string{"first!", "second"}
+	writeDone := make(chan error, 1)
+	go func() {
+		for _, payload := range payloads {
+			// net.Pipe keeps these writes separate, making buffer reuse deterministic.
+			if _, err := io.WriteString(frontend, payload); err != nil {
+				writeDone <- err
+				return
+			}
+		}
+		writeDone <- nil
+	}()
+	t.Cleanup(func() {
+		frontend.Close()
+		if err := <-writeDone; err != nil {
+			t.Errorf("writing frontend payloads: %v", err)
+		}
+	})
+
+	var first *client.Packet
+	for i, want := range payloads {
+		pkt, err := stream.Recv()
+		if err != nil {
+			t.Fatalf("Recv %d: %v", i, err)
+		}
+		if pkt.GetType() != client.PacketType_DATA {
+			t.Fatalf("Recv %d: expected DATA, got %v", i, pkt.GetType())
+		}
+		if got := string(pkt.GetData().Data); got != want {
+			t.Fatalf("Recv %d: expected %q, got %q", i, want, got)
+		}
+		if i == 0 {
+			first = pkt
+		}
+	}
+	if got := string(first.GetData().Data); got != payloads[0] {
+		t.Fatalf("first packet changed after second read: got %q, want %q", got, payloads[0])
+	}
+}
+
+// TestHTTPConnectStreamContextEndsWithStream verifies that the stream context
+// reports the end of the stream, the way a gRPC stream context does.
+func TestHTTPConnectStreamContextEndsWithStream(t *testing.T) {
+	conn, frontend := net.Pipe()
+	t.Cleanup(func() { frontend.Close() })
+
+	stream := newHTTPConnectStream(
+		&http.Request{Host: "127.0.0.1:8080"},
+		conn,
+		bufio.NewReadWriter(bufio.NewReader(conn), bufio.NewWriter(conn)),
+	)
+	if err := stream.Context().Err(); err != nil {
+		t.Fatalf("expected a live context for an open stream, got %v", err)
+	}
+
+	stream.release()
+
+	select {
+	case <-stream.Context().Done():
+	case <-time.After(5 * time.Second):
+		t.Fatal("timed out waiting for the stream context to be cancelled")
 	}
 }
