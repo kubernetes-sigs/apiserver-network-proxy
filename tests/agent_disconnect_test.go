@@ -48,6 +48,11 @@ func TestProxy_Agent_Disconnect_Persistent_Connection(t *testing.T) {
 			proxyServerFunction: runHTTPConnProxyServer,
 			clientFunction:      createHTTPConnectClient,
 		},
+		{
+			name:                "http-connect-without-write-queue",
+			proxyServerFunction: runHTTPConnProxyServerWithoutWriteQueue,
+			clientFunction:      createHTTPConnectClient,
+		},
 	}
 
 	for _, tc := range testcases {
@@ -104,6 +109,11 @@ func TestAgentRestartReconnect(t *testing.T) {
 		{
 			name:                "http-connect",
 			proxyServerFunction: runHTTPConnProxyServer,
+			clientFunction:      createHTTPConnectClient,
+		},
+		{
+			name:                "http-connect-without-write-queue",
+			proxyServerFunction: runHTTPConnProxyServerWithoutWriteQueue,
 			clientFunction:      createHTTPConnectClient,
 		},
 	}

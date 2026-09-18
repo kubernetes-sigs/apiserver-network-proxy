@@ -617,12 +617,21 @@ func TestProxy_LargeResponse(t *testing.T) {
 }
 
 func TestBasicProxy_HTTPCONN(t *testing.T) {
+	testBasicProxyHTTPConnect(t, runHTTPConnProxyServer)
+}
+
+func TestBasicProxy_HTTPCONNWithoutWriteQueue(t *testing.T) {
+	testBasicProxyHTTPConnect(t, runHTTPConnProxyServerWithoutWriteQueue)
+}
+
+func testBasicProxyHTTPConnect(t *testing.T, startProxy func(testing.TB) framework.ProxyServer) {
+	t.Helper()
 	expectCleanShutdown(t)
 
 	server := httptest.NewServer(newEchoServer("hello"))
 	defer server.Close()
 
-	ps := runHTTPConnProxyServer(t)
+	ps := startProxy(t)
 	defer ps.Stop()
 
 	a := runAgent(t, ps.AgentAddr())
@@ -855,9 +864,20 @@ func runGRPCProxyServerWithServerCount(t testing.TB, serverCount int) framework.
 }
 
 func runHTTPConnProxyServer(t testing.TB) framework.ProxyServer {
+	return runHTTPConnProxyServerWithWriteQueueSize(t, nil)
+}
+
+func runHTTPConnProxyServerWithoutWriteQueue(t testing.TB) framework.ProxyServer {
+	size := 0
+	return runHTTPConnProxyServerWithWriteQueueSize(t, &size)
+}
+
+func runHTTPConnProxyServerWithWriteQueueSize(t testing.TB, size *int) framework.ProxyServer {
+	t.Helper()
 	opts := framework.ProxyServerOpts{
-		Mode:        server.ModeHTTPConnect,
-		ServerCount: 1,
+		Mode:                     server.ModeHTTPConnect,
+		ServerCount:              1,
+		FrontendWriteChannelSize: size,
 	}
 	ps, err := Framework.ProxyServerRunner.Start(t, opts)
 	if err != nil {
