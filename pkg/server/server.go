@@ -54,6 +54,7 @@ type key int
 // HTTP-CONNECT frontends are adapted to it by httpConnectStream, so that both
 // frontend modes are served by the same packet handling.
 type ProxyStream interface {
+	// Send may buffer the packet; callers must not modify it after handing it off.
 	Send(*client.Packet) error
 	Recv() (*client.Packet, error)
 	Context() context.Context
@@ -95,6 +96,22 @@ func (f *Frontend) Recv() (*client.Packet, error) {
 	}
 	metrics.Metrics.ObservePacket(segment, pkt.Type)
 	return pkt, nil
+}
+
+// closeWithBackend interrupts transport-local I/O when the selected backend
+// fails, even if a full write queue has blocked packet dispatch or an
+// ordered CLOSE_RSP has already removed the connection from established.
+// A clean receive EOF lets the dispatcher and frontend writers drain instead.
+// Close must not acquire sendLock: Send may be the operation it must unblock.
+func (f *Frontend) closeWithBackend(backend *Backend) {
+	if closer, ok := f.stream.(io.Closer); ok {
+		stop := context.AfterFunc(backend.Context(), func() {
+			if !backend.receivedEOF.Load() {
+				_ = closer.Close()
+			}
+		})
+		context.AfterFunc(f.stream.Context(), func() { stop() })
+	}
 }
 
 const (
@@ -223,8 +240,9 @@ type ProxyServer struct {
 	AgentAuthenticationOptions *AgentTokenAuthenticationOptions
 
 	// TODO: move strategies into BackendStorage
-	proxyStrategies []proxystrategies.ProxyStrategy
-	xfrChannelSize  int
+	proxyStrategies          []proxystrategies.ProxyStrategy
+	xfrChannelSize           int
+	frontendWriteChannelSize int
 
 	backendDialTimeout time.Duration
 }
@@ -492,15 +510,20 @@ func NewProxyServer(serverID string, proxyStrategies []proxystrategies.ProxyStra
 		BackendManagers:            bms,
 		AgentAuthenticationOptions: agentAuthenticationOptions,
 		// use the first backend-manager as the Readiness Manager
-		Readiness:          bms[0],
-		proxyStrategies:    proxyStrategies,
-		xfrChannelSize:     channelSize,
-		backendDialTimeout: defaultBackendDialTimeout,
+		Readiness:                bms[0],
+		proxyStrategies:          proxyStrategies,
+		xfrChannelSize:           channelSize,
+		frontendWriteChannelSize: defaultFrontendWriteChannelSize,
+		backendDialTimeout:       defaultBackendDialTimeout,
 	}
 }
 
 func (s *ProxyServer) SetBackendDialTimeout(timeout time.Duration) {
 	s.backendDialTimeout = timeout
+}
+
+func (s *ProxyServer) SetFrontendWriteChannelSize(size int) {
+	s.frontendWriteChannelSize = size
 }
 
 // Proxy handles incoming streams from a gRPC frontend.
@@ -900,6 +923,9 @@ func (s *ProxyServer) readBackendToChannel(backend *Backend, recvCh chan *client
 		in, err := backend.Recv()
 		if err == io.EOF {
 			klog.V(2).InfoS("Receive stream from agent is closed", "agentID", agentID)
+			// Publish before waking connect: returning from the gRPC handler
+			// cancels its context, but buffered responses still need to drain.
+			backend.receivedEOF.Store(true)
 			close(stopCh)
 			return
 		}
@@ -1023,6 +1049,7 @@ func (s *ProxyServer) serveRecvBackend(backend *Backend, agentID string, recvCh 
 				// sending as soon as it learns the connection ID.
 				// TODO: this connection may be cleaned on serveRecvFrontend exit, make it independent.
 				s.addEstablished(agentID, resp.ConnectID, frontend)
+				frontend.frontend.closeWithBackend(backend)
 				if err := frontend.send(pkt); err != nil {
 					klog.ErrorS(err, "DIAL_RSP send to frontend stream failure",
 						"dialID", resp.Random, "agentID", agentID, "connectionID", resp.ConnectID)
