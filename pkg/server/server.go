@@ -441,9 +441,8 @@ func (s *ProxyServer) getCount(established map[string](map[int64]*ProxyClientCon
 	return count
 }
 
-// removeEstablishedForStream removes and returns all established ProxyClientConnection associated with a given
-// Proxy gRPC connection (expected to be at most 1 while konnectivity-client API gives single-use
-// tunnels).
+// removeEstablishedForStream removes and returns all established connections
+// associated with a gRPC or HTTP-CONNECT frontend stream.
 func (s *ProxyServer) removeEstablishedForStream(streamUID string) []*ProxyClientConnection {
 	var ret []*ProxyClientConnection
 	if streamUID == "" {
@@ -459,12 +458,14 @@ func (s *ProxyServer) removeEstablishedForStream(streamUID string) []*ProxyClien
 			if frontend.frontend.streamUID == streamUID {
 				delete(established, connID)
 				ret = append(ret, frontend)
+				metrics.Metrics.ObserveConnectionDuration(time.Since(frontend.establishedAt))
 			}
 		}
 		if len(established) == 0 {
 			delete(s.established, agentID)
 		}
 	}
+	metrics.Metrics.SetEstablishedConnCount(s.getCount(s.established))
 	return ret
 }
 
