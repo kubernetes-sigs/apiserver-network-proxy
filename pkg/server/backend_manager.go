@@ -72,6 +72,10 @@ type Backend struct {
 	// recvCh is assigned before the backend is published and is immutable
 	// afterward. It is observed only to measure receive-path pressure.
 	recvCh <-chan *client.Packet
+
+	// receivedEOF is set before a clean receive-loop exit ends the gRPC
+	// handler. Its context cancellation must not abort buffered responses.
+	receivedEOF atomic.Bool
 }
 
 // IsDraining returns true if the backend is draining

@@ -86,7 +86,7 @@ func newServerMetrics() *ServerMetrics {
 			Namespace: Namespace,
 			Subsystem: Subsystem,
 			Name:      "frontend_write_duration_seconds",
-			Help:      "Latency of write to the frontend in seconds",
+			Help:      "Frontend Send duration in seconds; established HTTP-CONNECT traffic measures queue admission, not the asynchronous socket write.",
 			Buckets:   latencyBuckets,
 		},
 		[]string{},
@@ -295,7 +295,9 @@ func (s *ServerMetrics) ObserveConnectionDuration(elapsed time.Duration) {
 	s.connectionDuration.WithLabelValues().Observe(elapsed.Seconds())
 }
 
-// ObserveFrontendWriteLatency records the latency of blocking on stream send to the client.
+// ObserveFrontendWriteLatency records how long the frontend Send call takes.
+// For established HTTP-CONNECT traffic, this includes waiting for queue space,
+// not the socket write performed later by the frontend writer.
 func (s *ServerMetrics) ObserveFrontendWriteLatency(elapsed time.Duration) {
 	s.frontendLatencies.WithLabelValues().Observe(elapsed.Seconds())
 }
