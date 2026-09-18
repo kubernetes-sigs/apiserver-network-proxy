@@ -91,7 +91,7 @@ func (t *Tunnel) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	defer stream.release()
 
 	// Hand the request to the same packet handling that serves gRPC frontends.
-	if err := t.Server.Proxy(stream); err != nil {
+	if err := t.Server.proxy(stream); err != nil {
 		klog.V(2).InfoS("HTTP-CONNECT frontend closed with error", "host", r.Host, "dialID", stream.dialID, "error", err)
 	}
 }
@@ -107,7 +107,11 @@ func (t *Tunnel) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 type httpConnectStream struct {
 	conn  net.Conn
 	bufrw *bufio.ReadWriter
-	ctx   context.Context
+	// ctx has the lifetime of the hijacked connection: cancel is called when
+	// the stream is closed, so that Context() reports the end of the stream the
+	// way a gRPC stream context does.
+	ctx    context.Context
+	cancel context.CancelFunc
 
 	host   string
 	dialID int64
@@ -139,13 +143,15 @@ func newHTTPConnectStream(r *http.Request, conn net.Conn, bufrw *bufio.ReadWrite
 	// it the client information the CONNECT request carried. The stream
 	// lifetime is bound to the hijacked connection rather than to the request,
 	// so it does not inherit the request context.
-	ctx := metadata.NewIncomingContext(context.Background(),
+	ctx, cancel := context.WithCancel(context.Background())
+	ctx = metadata.NewIncomingContext(ctx,
 		metadata.Pairs(header.UserAgent, r.UserAgent()))
 
 	return &httpConnectStream{
 		conn:      conn,
 		bufrw:     bufrw,
 		ctx:       ctx,
+		cancel:    cancel,
 		host:      r.Host,
 		dialID:    rand.Int63(), /* #nosec G404 */
 		connected: make(chan struct{}),
@@ -292,6 +298,7 @@ func (h *httpConnectStream) close() {
 		if err := h.conn.Close(); err != nil {
 			klog.V(4).ErrorS(err, "failed to close hijacked connection", "host", h.host, "dialID", h.dialID)
 		}
+		h.cancel()
 	})
 }
 

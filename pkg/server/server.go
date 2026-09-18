@@ -106,6 +106,8 @@ const defaultBackendDialTimeout = 0
 
 var errBackendDialTimeout = errors.New("timed out waiting for backend dial")
 
+var errBackendClosedWhileDialing = errors.New("backend connection closed while dialing")
+
 type ProxyClientConnection struct {
 	frontend      *Frontend
 	dialID        int64
@@ -151,6 +153,26 @@ func (pm *PendingDialManager) Remove(random int64) *ProxyClientConnection {
 	delete(pm.pendingDial, random)
 	metrics.Metrics.SetPendingDialCount(len(pm.pendingDial))
 	return pd
+}
+
+// removeForBackend removes and returns all pending ProxyClientConnection whose
+// DIAL_REQ was sent over the given backend connection. They can never complete
+// once that connection is gone.
+func (pm *PendingDialManager) removeForBackend(backend *Backend) []*ProxyClientConnection {
+	var ret []*ProxyClientConnection
+	if backend == nil {
+		return ret
+	}
+	pm.mu.Lock()
+	defer pm.mu.Unlock()
+	for dialID, frontend := range pm.pendingDial {
+		if frontend.backend == backend {
+			delete(pm.pendingDial, dialID)
+			ret = append(ret, frontend)
+		}
+	}
+	metrics.Metrics.SetPendingDialCount(len(pm.pendingDial))
+	return ret
 }
 
 // removeForStream removes and returns all pending ProxyClientConnection associated with a
@@ -216,40 +238,9 @@ type AgentTokenAuthenticationOptions struct {
 	KubernetesClient       kubernetes.Interface
 }
 
-// ProxyServer.Proxy and ProxyServer.Connect take transport independent stream
-// interfaces so that HTTP-CONNECT frontends share their packet handling. These
-// thin adapters bind them to the generated gRPC service interfaces.
-type grpcProxyService struct {
-	server *ProxyServer
-}
+var _ agent.AgentServiceServer = &ProxyServer{}
 
-func (g *grpcProxyService) Proxy(stream client.ProxyService_ProxyServer) error {
-	return g.server.Proxy(stream)
-}
-
-type grpcAgentService struct {
-	server *ProxyServer
-}
-
-func (g *grpcAgentService) Connect(stream agent.AgentService_ConnectServer) error {
-	return g.server.Connect(stream)
-}
-
-var _ client.ProxyServiceServer = &grpcProxyService{}
-
-var _ agent.AgentServiceServer = &grpcAgentService{}
-
-// GrpcProxyService returns the frontend ProxyService implementation to register
-// with a gRPC server.
-func (s *ProxyServer) GrpcProxyService() client.ProxyServiceServer {
-	return &grpcProxyService{server: s}
-}
-
-// GrpcAgentService returns the agent facing AgentService implementation to
-// register with a gRPC server.
-func (s *ProxyServer) GrpcAgentService() agent.AgentServiceServer {
-	return &grpcAgentService{server: s}
-}
+var _ client.ProxyServiceServer = &ProxyServer{}
 
 func genContext(proxyStrategies []proxystrategies.ProxyStrategy, reqHost string) context.Context {
 	ctx := context.Background()
@@ -512,12 +503,19 @@ func (s *ProxyServer) SetBackendDialTimeout(timeout time.Duration) {
 	s.backendDialTimeout = timeout
 }
 
-// Proxy handles an incoming frontend stream, whether it arrived over gRPC or
-// over HTTP-CONNECT.
-func (s *ProxyServer) Proxy(stream ProxyStream) error {
+// Proxy handles incoming streams from a gRPC frontend.
+func (s *ProxyServer) Proxy(stream client.ProxyService_ProxyServer) error {
+	// Only gRPC frontends belong in the gRPC connection gauge. HTTP-CONNECT
+	// frontends are counted by Tunnel.ServeHTTP instead.
 	metrics.Metrics.ConnectionInc(metrics.Proxy)
 	defer metrics.Metrics.ConnectionDec(metrics.Proxy)
 
+	return s.proxy(stream)
+}
+
+// proxy serves a frontend stream, whether it arrived over gRPC or over
+// HTTP-CONNECT.
+func (s *ProxyServer) proxy(stream ProxyStream) error {
 	md, ok := metadata.FromIncomingContext(stream.Context())
 	if !ok {
 		return fmt.Errorf("failed to get context")
@@ -836,10 +834,15 @@ func (s *ProxyServer) authenticateAgentViaToken(ctx context.Context) error {
 }
 
 // Connect is for agent to connect to ProxyServer as next hop
-func (s *ProxyServer) Connect(stream AgentStream) error {
+func (s *ProxyServer) Connect(stream agent.AgentService_ConnectServer) error {
 	metrics.Metrics.ConnectionInc(metrics.Connect)
 	defer metrics.Metrics.ConnectionDec(metrics.Connect)
 
+	return s.connect(stream)
+}
+
+// connect serves an agent stream, independent of the transport it arrived on.
+func (s *ProxyServer) connect(stream AgentStream) error {
 	backend, err := NewBackend(stream)
 	if err != nil {
 		klog.ErrorS(err, "Invalid backend")
@@ -938,8 +941,30 @@ func (s *ProxyServer) serveRecvBackend(backend *Backend, agentID string, recvCh 
 	}()
 
 	defer func() {
+		// Fail the dials which were still in flight over this backend
+		// connection. The agent will never answer them, so without this they
+		// stay pending forever and the frontend waiting on the dial is never
+		// woken up.
+		for _, frontend := range s.PendingDial.removeForBackend(backend) {
+			klog.V(2).InfoS("Agent connection closed, failing pending dial",
+				"agentID", agentID, "dialID", frontend.dialID, "dialAddress", frontend.dialAddress)
+			metrics.Metrics.ObserveDialFailure(metrics.DialFailureBackendClose)
+			pkt := &client.Packet{
+				Type: client.PacketType_DIAL_RSP,
+				Payload: &client.Packet_DialResponse{
+					DialResponse: &client.DialResponse{
+						Random: frontend.dialID,
+						Error:  errBackendClosedWhileDialing.Error(),
+					},
+				},
+			}
+			if err := frontend.send(pkt); err != nil {
+				klog.V(2).ErrorS(err, "DIAL_RSP for closed agent connection failed",
+					"agentID", agentID, "dialID", frontend.dialID)
+			}
+		}
+
 		// Close all established connections when the agent connection is closed
-		// TODO(#126): connections in PendingDial state should also be closed.
 		established, err := s.removeEstablishedForBackendConn(agentID, backend)
 		if err != nil {
 			return
@@ -977,34 +1002,38 @@ func (s *ProxyServer) serveRecvBackend(backend *Backend, agentID string, recvCh 
 					s.sendBackendClose(backend, resp.ConnectID, resp.Random, "unknown dial id")
 				}
 			} else {
-				dialErr := false
 				if resp.Error != "" {
-					// Dial response with error should not contain a valid ConnID.
+					// Dial response with error should not contain a valid ConnID,
+					// so there is no connection to establish. Just pass the
+					// failure on to the frontend.
 					klog.ErrorS(errors.New(resp.Error), "DIAL_RSP contains failure", "dialID", resp.Random, "agentID", agentID)
 					metrics.Metrics.ObserveDialFailure(metrics.DialFailureErrorResponse)
-					dialErr = true
-				}
-				err := frontend.send(pkt)
-				if err != nil {
-					klog.ErrorS(err, "DIAL_RSP send to frontend stream failure",
-						"dialID", resp.Random, "agentID", agentID, "connectionID", resp.ConnectID)
-					if !dialErr { // Avoid double-counting.
-						metrics.Metrics.ObserveDialFailure(metrics.DialFailureSendResponse)
+					if err := frontend.send(pkt); err != nil {
+						klog.ErrorS(err, "DIAL_RSP send to frontend stream failure",
+							"dialID", resp.Random, "agentID", agentID, "connectionID", resp.ConnectID)
 					}
-					// If we never finish setting up the tunnel for ConnectID, then the connection is dead.
-					// Currently, the agent will no resend DIAL_RSP, so connection is dead.
-					// We already attempted to tell the frontend that. We should ensure we tell the backend.
-					s.sendBackendClose(backend, resp.ConnectID, resp.Random, "dial error")
-					dialErr = true
-				}
-				// Avoid adding the frontend if there was an error dialing the destination
-				if dialErr {
 					break
 				}
 				frontend.connectID = resp.ConnectID
 				frontend.agentID = agentID
+				// Establish before handing the DIAL_RSP to the frontend. The
+				// dial is no longer pending, so until the connection is in
+				// established a frontend shutdown would find it in neither map
+				// and leak the backend connection. A frontend can also start
+				// sending as soon as it learns the connection ID.
 				// TODO: this connection may be cleaned on serveRecvFrontend exit, make it independent.
 				s.addEstablished(agentID, resp.ConnectID, frontend)
+				if err := frontend.send(pkt); err != nil {
+					klog.ErrorS(err, "DIAL_RSP send to frontend stream failure",
+						"dialID", resp.Random, "agentID", agentID, "connectionID", resp.ConnectID)
+					metrics.Metrics.ObserveDialFailure(metrics.DialFailureSendResponse)
+					// If we never finish setting up the tunnel for ConnectID, then the connection is dead.
+					// Currently, the agent will no resend DIAL_RSP, so connection is dead.
+					// We already attempted to tell the frontend that. We should ensure we tell the backend.
+					s.removeEstablished(agentID, resp.ConnectID)
+					s.sendBackendClose(backend, resp.ConnectID, resp.Random, "dial error")
+					break
+				}
 				metrics.Metrics.ObserveDialLatency(time.Since(frontend.start))
 				klog.V(3).InfoS("Proxy connection established",
 					"dialID", resp.Random,
