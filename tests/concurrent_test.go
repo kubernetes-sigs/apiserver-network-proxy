@@ -85,13 +85,22 @@ func TestProxy_ConcurrencyGRPC(t *testing.T) {
 }
 
 func TestProxy_ConcurrencyHTTP(t *testing.T) {
+	testProxyConcurrencyHTTP(t, runHTTPConnProxyServer)
+}
+
+func TestProxy_ConcurrencyHTTPWithoutWriteQueue(t *testing.T) {
+	testProxyConcurrencyHTTP(t, runHTTPConnProxyServerWithoutWriteQueue)
+}
+
+func testProxyConcurrencyHTTP(t *testing.T, startProxy func(testing.TB) framework.ProxyServer) {
+	t.Helper()
 	ctx := context.Background()
 	length := 1 << 20
 	chunks := 10
 	server := httptest.NewServer(newSizedServer(length, chunks))
 	defer server.Close()
 
-	ps := runHTTPConnProxyServer(t)
+	ps := startProxy(t)
 	defer ps.Stop()
 
 	a := runAgent(t, ps.AgentAddr())
@@ -140,6 +149,11 @@ func TestAgent_MultipleConn(t *testing.T) {
 		{
 			name:                "http-connect",
 			proxyServerFunction: runHTTPConnProxyServer,
+			clientFunction:      createHTTPConnectClient,
+		},
+		{
+			name:                "http-connect-without-write-queue",
+			proxyServerFunction: runHTTPConnProxyServerWithoutWriteQueue,
 			clientFunction:      createHTTPConnectClient,
 		},
 	}

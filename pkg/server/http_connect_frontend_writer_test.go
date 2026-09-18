@@ -189,7 +189,9 @@ func (s *writerTestServer) establish(t *testing.T, id int64, queueSize int) *wri
 	f.readHandshake(t)
 	t.Cleanup(func() {
 		f.stream.close()
-		waitWriterSignal(t, f.stream.writerDone, "frontend writer shutdown")
+		if f.stream.writerDone != nil {
+			waitWriterSignal(t, f.stream.writerDone, "frontend writer shutdown")
+		}
 	})
 	return f
 }
@@ -305,8 +307,16 @@ func TestHTTPConnectWriterBackendDisconnectInterruptsWrites(t *testing.T) {
 }
 
 func TestHTTPConnectWriterDrainsAfterBackendEOF(t *testing.T) {
-	for _, closeResponse := range []bool{false, true} {
-		t.Run(fmt.Sprintf("close-response=%t", closeResponse), func(t *testing.T) {
+	for _, tc := range []struct {
+		queueSize     int
+		closeResponse bool
+	}{
+		{queueSize: 1, closeResponse: false},
+		{queueSize: 3, closeResponse: true},
+		{queueSize: 0, closeResponse: false},
+		{queueSize: 0, closeResponse: true},
+	} {
+		t.Run(fmt.Sprintf("queue=%d/close-response=%t", tc.queueSize, tc.closeResponse), func(t *testing.T) {
 			s := NewProxyServer("test", []proxystrategies.ProxyStrategy{proxystrategies.ProxyStrategyDefault}, 1, &AgentTokenAuthenticationOptions{}, 10)
 			listener, err := net.Listen("tcp", "127.0.0.1:0")
 			if err != nil {
@@ -338,11 +348,7 @@ func TestHTTPConnectWriterDrainsAfterBackendEOF(t *testing.T) {
 				time.Sleep(time.Millisecond)
 			}
 
-			queueSize := 1
-			if closeResponse {
-				queueSize = 3 // Leave room for DATA followed by the ordered close.
-			}
-			f := newWriterTestFrontend(t, queueSize)
+			f := newWriterTestFrontend(t, tc.queueSize)
 			proxyDone := make(chan struct{})
 			go func() {
 				defer close(proxyDone)
@@ -362,23 +368,29 @@ func TestHTTPConnectWriterDrainsAfterBackendEOF(t *testing.T) {
 			f.readHandshake(t)
 			t.Cleanup(func() {
 				f.stream.close()
-				waitWriterSignal(t, f.stream.writerDone, "frontend writer shutdown")
+				if f.stream.writerDone != nil {
+					waitWriterSignal(t, f.stream.writerDone, "frontend writer shutdown")
+				}
 			})
 			if err := stream.Send(dataPkt(1, []byte("first"))); err != nil {
 				t.Fatal(err)
 			}
 			f.waitWrite(t, "first")
-			// A small queue leaves DATA in the shared receive path; a larger
-			// queue also admits CLOSE_RSP. EOF must preserve both cases.
+			// A small or disabled queue leaves DATA in the shared receive path;
+			// a larger queue also admits CLOSE_RSP. EOF must preserve both cases.
 			for _, payload := range []string{"second", "third"} {
 				if err := stream.Send(dataPkt(1, []byte(payload))); err != nil {
 					t.Fatal(err)
 				}
 			}
-			if closeResponse {
+			if tc.closeResponse {
 				if err := stream.Send(closeRspPkt(1, "")); err != nil {
 					t.Fatal(err)
 				}
+			}
+			// Only the buffered writer can accept CLOSE_RSP before the peer
+			// resumes reading. The synchronous dispatcher is still in Write.
+			if tc.closeResponse && tc.queueSize > 0 {
 				deadline = time.Now().Add(time.Second)
 				for {
 					if _, err := s.getFrontend("agent", 1); err != nil {
@@ -400,14 +412,16 @@ func TestHTTPConnectWriterDrainsAfterBackendEOF(t *testing.T) {
 			// callbacks run while the frontend is still temporarily slow.
 			select {
 			case <-f.stream.closed:
-				t.Fatal("clean backend EOF aborted queued frontend writes")
+				t.Fatal("clean backend EOF aborted frontend writes")
 			case <-time.After(50 * time.Millisecond):
 			}
 			got, err := io.ReadAll(f.reader)
 			if err != nil || string(got) != "firstsecondthird" {
 				t.Fatalf("received %q, %v; want all DATA before EOF", got, err)
 			}
-			waitWriterSignal(t, f.stream.writerDone, "writer drain")
+			if f.stream.writerDone != nil {
+				waitWriterSignal(t, f.stream.writerDone, "writer drain")
+			}
 			waitWriterSignal(t, proxyDone, "frontend handler shutdown")
 		})
 	}
@@ -446,14 +460,76 @@ func TestHTTPConnectWriterSocketErrorClosesStream(t *testing.T) {
 	}
 }
 
-func TestHTTPConnectWriterDefaultsNonPositiveQueueSize(t *testing.T) {
-	for _, size := range []int{0, -1} {
-		t.Run(fmt.Sprintf("size=%d", size), func(t *testing.T) {
-			f := newWriterTestFrontend(t, size)
-			if got := cap(f.stream.writeCh); got != defaultFrontendWriteChannelSize {
-				t.Fatalf("capacity = %d, want %d", got, defaultFrontendWriteChannelSize)
+func TestHTTPConnectWriterDefaultsNegativeQueueSize(t *testing.T) {
+	f := newWriterTestFrontend(t, -1)
+	if got := cap(f.stream.writeCh); got != defaultFrontendWriteChannelSize {
+		t.Fatalf("capacity = %d, want %d", got, defaultFrontendWriteChannelSize)
+	}
+}
+
+func TestHTTPConnectZeroWriteQueueUsesSynchronousWrites(t *testing.T) {
+	metrics.Metrics.Reset()
+	s := newWriterTestServer(t)
+	f := s.establish(t, 1, 0)
+	if f.stream.writeCh != nil || f.stream.writerDone != nil {
+		t.Fatal("zero queue size allocated writer channels")
+	}
+
+	sent := make(chan error, 1)
+	go func() { sent <- f.stream.Send(dataPkt(1, []byte("inline"))) }()
+	f.waitWrite(t, "inline")
+	select {
+	case err := <-sent:
+		t.Fatalf("Send returned before the socket write completed: %v", err)
+	default:
+	}
+	waitWriterMetrics(t, 0, 0)
+	f.readData(t, "inline")
+	select {
+	case err := <-sent:
+		if err != nil {
+			t.Fatal(err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("Send did not return after the socket write completed")
+	}
+
+	s.send(t, closeRspPkt(1, ""))
+	s.send(t, &client.Packet{Type: client.PacketType_DRAIN}) // Wait for close dispatch.
+	if !f.stream.isClosed() || f.conn.closes.Load() != 1 {
+		t.Fatal("CLOSE_RSP did not close the synchronous stream exactly once")
+	}
+	waitWriterMetrics(t, 0, 0)
+}
+
+func TestHTTPConnectZeroWriteQueueCloseInterruptsWrite(t *testing.T) {
+	for _, backendClose := range []bool{false, true} {
+		t.Run(fmt.Sprintf("backend-close=%t", backendClose), func(t *testing.T) {
+			metrics.Metrics.Reset()
+			s := newWriterTestServer(t)
+			f := s.establish(t, 1, 0)
+			s.send(t, dataPkt(1, []byte("blocked")))
+			f.waitWrite(t, "blocked")
+			if backendClose {
+				s.cancel()
+			} else {
+				f.stream.close()
 			}
+			s.send(t, &client.Packet{Type: client.PacketType_DRAIN}) // The dispatcher must be unblocked.
+			if !f.stream.isClosed() || f.conn.closes.Load() != 1 {
+				t.Fatal("stream was not closed exactly once")
+			}
+			waitWriterMetrics(t, 0, 0)
 		})
+	}
+}
+
+func TestHTTPConnectZeroWriteQueueReturnsSocketError(t *testing.T) {
+	s := newWriterTestServer(t)
+	f := s.establish(t, 1, 0)
+	f.peer.Close()
+	if err := f.stream.Send(dataPkt(1, []byte("write-fails"))); !errors.Is(err, io.ErrClosedPipe) {
+		t.Fatalf("Send returned %v, want socket write error", err)
 	}
 }
 

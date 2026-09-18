@@ -163,7 +163,7 @@ func (o *ProxyRunOptions) Flags() *pflag.FlagSet {
 	flags.StringSliceVar(&o.CipherSuites, "cipher-suites", o.CipherSuites, "The comma separated list of allowed cipher suites. Has no effect on TLS1.3. Empty means allow default list.")
 	flags.StringVar(&o.TLSMinVersion, "tls-min-version", o.TLSMinVersion, "Minimum TLS version for server connections. Accepted values: VersionTLS10, VersionTLS11, VersionTLS12, VersionTLS13. Empty defaults to VersionTLS12.")
 	flags.IntVar(&o.XfrChannelSize, "xfr-channel-size", o.XfrChannelSize, "The size of the two KNP server channels used in server for transferring data. One channel is for data coming from the Kubernetes API Server, and the other one is for data coming from the KNP agent.")
-	flags.IntVar(&o.FrontendWriteChannelSize, "frontend-write-channel-size", o.FrontendWriteChannelSize, "The number of packets buffered for each HTTP CONNECT frontend before backend receive processing blocks.")
+	flags.IntVar(&o.FrontendWriteChannelSize, "frontend-write-channel-size", o.FrontendWriteChannelSize, "The number of packets buffered for each HTTP CONNECT frontend before backend receive processing blocks. Set to 0 to disable the queue and write synchronously.")
 	flags.BoolVar(&o.EnableLeaseController, "enable-lease-controller", o.EnableLeaseController, "Enable lease controller to publish and garbage collect proxy server leases.")
 	flags.StringVar(&o.LeaseNamespace, "lease-namespace", o.LeaseNamespace, "The namespace where lease objects are managed by the controller.")
 	flags.StringVar(&o.LeaseLabel, "lease-label", o.LeaseLabel, "The labels on which the lease objects are managed.")
@@ -343,8 +343,8 @@ func (o *ProxyRunOptions) Validate() error {
 	if o.XfrChannelSize <= 0 {
 		return fmt.Errorf("channel size %d must be greater than 0", o.XfrChannelSize)
 	}
-	if o.FrontendWriteChannelSize <= 0 {
-		return fmt.Errorf("frontend write channel size %d must be greater than 0", o.FrontendWriteChannelSize)
+	if o.FrontendWriteChannelSize < 0 {
+		return fmt.Errorf("frontend write channel size %d must be non-negative", o.FrontendWriteChannelSize)
 	}
 	// validate the TLS min version
 	if o.TLSMinVersion != "" {

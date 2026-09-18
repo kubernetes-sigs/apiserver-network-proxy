@@ -134,6 +134,7 @@ type httpConnectStream struct {
 	// The writer starts only after the HTTP 200 response has been written.
 	// Send queues established DATA and CLOSE_RSP in wire order. Neither channel
 	// is replaced, and writeCh is never closed, so Close can race with Send.
+	// Both channels are nil when queueing is disabled; Send writes synchronously.
 	writeCh      chan *client.Packet
 	writerDone   chan struct{}
 	writeMetrics frontendWriteQueueMetrics
@@ -155,8 +156,14 @@ func newHTTPConnectStream(r *http.Request, conn net.Conn, bufrw *bufio.ReadWrite
 	ctx, cancel := context.WithCancel(context.Background()) // #nosec G118 -- close owns and calls cancel.
 	ctx = metadata.NewIncomingContext(ctx,
 		metadata.Pairs(header.UserAgent, r.UserAgent()))
-	if queueSize <= 0 {
+	if queueSize < 0 {
 		queueSize = defaultFrontendWriteChannelSize
+	}
+	var writeCh chan *client.Packet
+	var writerDone chan struct{}
+	if queueSize > 0 {
+		writeCh = make(chan *client.Packet, queueSize)
+		writerDone = make(chan struct{})
 	}
 
 	return &httpConnectStream{
@@ -168,8 +175,8 @@ func newHTTPConnectStream(r *http.Request, conn net.Conn, bufrw *bufio.ReadWrite
 		dialID:     rand.Int63(), /* #nosec G404 */
 		connected:  make(chan struct{}),
 		closed:     make(chan struct{}),
-		writeCh:    make(chan *client.Packet, queueSize),
-		writerDone: make(chan struct{}),
+		writeCh:    writeCh,
+		writerDone: writerDone,
 		readBuf:    bufferPool.Get().(*[]byte),
 	}
 }
@@ -240,15 +247,21 @@ func (h *httpConnectStream) Send(pkt *client.Packet) error {
 	case client.PacketType_DIAL_RSP:
 		return h.sendDialResponse(pkt.GetDialResponse())
 	case client.PacketType_DATA:
+		if h.writeCh == nil {
+			_, err := h.conn.Write(pkt.GetData().Data)
+			return err
+		}
 		return h.enqueueWrite(pkt)
 	case client.PacketType_CLOSE_RSP:
-		select {
-		case <-h.connected:
-			return h.enqueueWrite(pkt)
-		default:
-			h.close()
-			return nil
+		if h.writeCh != nil {
+			select {
+			case <-h.connected:
+				return h.enqueueWrite(pkt)
+			default:
+			}
 		}
+		h.close()
+		return nil
 	case client.PacketType_DIAL_CLS:
 		h.close()
 		return nil
@@ -275,7 +288,9 @@ func (h *httpConnectStream) sendDialResponse(resp *client.DialResponse) error {
 	}
 	klog.V(3).InfoS("Connection established, sent 200 OK", "host", h.host,
 		"dialID", h.dialID, "connectionID", resp.ConnectID)
-	go h.serveFrontendWrites()
+	if h.writeCh != nil {
+		go h.serveFrontendWrites()
+	}
 	close(h.connected)
 	return nil
 }

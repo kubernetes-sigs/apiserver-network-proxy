@@ -39,6 +39,8 @@ type ProxyServerOpts struct {
 	ServerCount int
 	Mode        string
 	AgentPort   int // Defaults to random port.
+	// Nil keeps the server default; a pointer to zero disables the writer queue.
+	FrontendWriteChannelSize *int
 }
 
 type ProxyServerRunner interface {
@@ -143,6 +145,9 @@ func serverOptions(t testing.TB, opts ProxyServerOpts) (*serveropts.ProxyRunOpti
 
 	o.ServerCount = opts.ServerCount
 	o.Mode = opts.Mode
+	if opts.FrontendWriteChannelSize != nil {
+		o.FrontendWriteChannelSize = *opts.FrontendWriteChannelSize
+	}
 
 	uid := uuid.New().String()
 	o.UdsName = filepath.Join(CertsDir, fmt.Sprintf("server-%s.sock", uid))

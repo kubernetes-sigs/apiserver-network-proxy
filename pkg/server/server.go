@@ -523,6 +523,8 @@ func (s *ProxyServer) SetBackendDialTimeout(timeout time.Duration) {
 	s.backendDialTimeout = timeout
 }
 
+// SetFrontendWriteChannelSize configures HTTP-CONNECT response buffering.
+// A size of zero disables the queue and uses synchronous socket writes.
 func (s *ProxyServer) SetFrontendWriteChannelSize(size int) {
 	s.frontendWriteChannelSize = size
 }

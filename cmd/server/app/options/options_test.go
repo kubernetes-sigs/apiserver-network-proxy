@@ -210,12 +210,12 @@ func TestValidate(t *testing.T) {
 		"ZeroFrontendWriteChannelSize": {
 			field:    "FrontendWriteChannelSize",
 			value:    0,
-			expected: fmt.Errorf("frontend write channel size 0 must be greater than 0"),
+			expected: nil,
 		},
 		"NegativeFrontendWriteChannelSize": {
 			field:    "FrontendWriteChannelSize",
 			value:    -10,
-			expected: fmt.Errorf("frontend write channel size -10 must be greater than 0"),
+			expected: fmt.Errorf("frontend write channel size -10 must be non-negative"),
 		},
 		"NegativeGracefulShutdownTimeout": {
 			field:    "GracefulShutdownTimeout",
