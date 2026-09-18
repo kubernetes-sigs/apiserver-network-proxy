@@ -17,23 +17,31 @@ limitations under the License.
 package server
 
 import (
-	"errors"
+	"bufio"
+	"bytes"
+	"context"
 	"fmt"
 	"io"
 	"math/rand"
+	"net"
 	"net/http"
+	"strings"
 	"sync"
-	"time"
 
+	"google.golang.org/grpc/metadata"
 	"k8s.io/klog/v2"
+
 	"sigs.k8s.io/apiserver-network-proxy/konnectivity-client/proto/client"
 	"sigs.k8s.io/apiserver-network-proxy/pkg/server/metrics"
+	"sigs.k8s.io/apiserver-network-proxy/proto/header"
 )
 
 const (
 	// bufferSize is the size of the buffer used for reading from the hijacked connection.
 	// It matches the gRPC window size for optimal performance.
 	bufferSize = 1 << 15 // 32KB
+
+	connectEstablished = "HTTP/1.1 200 Connection Established\r\n\r\n"
 )
 
 // bufferPool is a pool of byte slices used for reading data from hijacked connections.
@@ -77,190 +85,276 @@ func (t *Tunnel) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var closeOnce sync.Once
-	defer closeOnce.Do(func() { conn.Close() })
+	stream := newHTTPConnectStream(r, conn, bufrw)
+	// Proxy has returned, so no goroutine is reading the hijacked connection
+	// any more and the read buffer can be recycled.
+	defer stream.release()
 
-	random := rand.Int63() /* #nosec G404 */
-	dialRequest := &client.Packet{
-		Type: client.PacketType_DIAL_REQ,
-		Payload: &client.Packet_DialRequest{
-			DialRequest: &client.DialRequest{
-				Protocol: "tcp",
-				Address:  r.Host,
-				Random:   random,
+	// Hand the request to the same packet handling that serves gRPC frontends.
+	if err := t.Server.proxy(stream); err != nil {
+		klog.V(2).InfoS("HTTP-CONNECT frontend closed with error", "host", r.Host, "dialID", stream.dialID, "error", err)
+	}
+}
+
+// httpConnectStream adapts a hijacked HTTP CONNECT connection to the frontend
+// ProxyStream interface.
+//
+// The CONNECT request itself is presented as the DIAL_REQ packet, bytes read
+// from the client become DATA packets, and packets sent back to the frontend
+// are turned into the CONNECT response or into raw tunnel bytes. This lets
+// ProxyServer.Proxy handle an HTTP-CONNECT frontend with exactly the packet
+// handling it uses for a gRPC frontend.
+type httpConnectStream struct {
+	conn  net.Conn
+	bufrw *bufio.ReadWriter
+	// ctx has the lifetime of the hijacked connection: cancel is called when
+	// the stream is closed, so that Context() reports the end of the stream the
+	// way a gRPC stream context does.
+	ctx    context.Context
+	cancel context.CancelFunc
+
+	host   string
+	dialID int64
+
+	// dialRequested records that the synthetic DIAL_REQ has been handed to the
+	// caller. Every later Recv reads tunnel bytes.
+	dialRequested bool
+
+	// connected is closed by Send once a successful DIAL_RSP has assigned
+	// connectID. Recv must not build a DATA packet before that, because tunnel
+	// bytes carry no connection ID of their own.
+	connected chan struct{}
+	connectID int64
+
+	// closed is closed once the hijacked connection has been closed. It
+	// unblocks a Recv that is waiting for a dial which will never complete.
+	closed    chan struct{}
+	closeOnce sync.Once
+
+	// readBuf is scratch space for reading the hijacked connection. It is only
+	// touched by Recv, which Frontend serializes.
+	readBuf *[]byte
+}
+
+var _ ProxyStream = &httpConnectStream{}
+
+func newHTTPConnectStream(r *http.Request, conn net.Conn, bufrw *bufio.ReadWriter) *httpConnectStream {
+	// The frontend packet handling expects gRPC style incoming metadata. Give
+	// it the client information the CONNECT request carried. The stream
+	// lifetime is bound to the hijacked connection rather than to the request,
+	// so it does not inherit the request context.
+	ctx, cancel := context.WithCancel(context.Background())
+	ctx = metadata.NewIncomingContext(ctx,
+		metadata.Pairs(header.UserAgent, r.UserAgent()))
+
+	return &httpConnectStream{
+		conn:      conn,
+		bufrw:     bufrw,
+		ctx:       ctx,
+		cancel:    cancel,
+		host:      r.Host,
+		dialID:    rand.Int63(), /* #nosec G404 */
+		connected: make(chan struct{}),
+		closed:    make(chan struct{}),
+		readBuf:   bufferPool.Get().(*[]byte),
+	}
+}
+
+func (h *httpConnectStream) Context() context.Context {
+	return h.ctx
+}
+
+// Recv returns the CONNECT request as a DIAL_REQ, then the bytes the client
+// writes into the tunnel as DATA packets.
+func (h *httpConnectStream) Recv() (*client.Packet, error) {
+	if !h.dialRequested {
+		h.dialRequested = true
+		return &client.Packet{
+			Type: client.PacketType_DIAL_REQ,
+			Payload: &client.Packet_DialRequest{
+				DialRequest: &client.DialRequest{
+					Protocol: "tcp",
+					Address:  h.host,
+					Random:   h.dialID,
+				},
 			},
-		},
-	}
-
-	klog.V(4).Infof("Set pending(rand=%d) to %v", random, w)
-	backend, err := t.Server.getBackend(r.Host)
-	if err != nil {
-		klog.ErrorS(err, "no tunnels available")
-		conn.Write([]byte(fmt.Sprintf("HTTP/1.1 500 Internal Server Error\r\nContent-Type: text/plain\r\n\r\ncurrently no tunnels available: %v", err)))
-		// The hijacked connection will be closed by the closeOnce defer.
-		return
-	}
-	closed := make(chan struct{})
-	connected := make(chan struct{})
-	connection := &ProxyClientConnection{
-		Mode: ModeHTTPConnect,
-		HTTP: io.ReadWriter(conn), // pass as ReadWriter so the caller must close with CloseHTTP
-		CloseHTTP: func() error {
-			closeOnce.Do(func() {
-				defer close(closed)
-				conn.Close()
-			})
-			return nil
-		},
-		connected: connected,
-		start:     time.Now(),
-		backend:   backend,
-		dialID:    random,
-		agentID:   backend.GetAgentID(),
-	}
-	t.Server.PendingDial.Add(random, connection)
-
-	// This defer acts as a safeguard to ensure we clean up the pending dial
-	// if the connection is never successfully established.
-	established := false
-	dialFailureObserved := false
-	defer func() {
-		if !established {
-			if t.Server.PendingDial.Remove(random) != nil {
-				if !dialFailureObserved {
-					metrics.Metrics.ObserveDialFailure(metrics.DialFailureFrontendClose)
-				}
-			}
-		}
-	}()
-
-	if err := t.Server.sendDialRequestToBackend(backend, dialRequest); err != nil {
-		klog.ErrorS(err, "failed to tunnel dial request", "host", r.Host, "dialID", connection.dialID, "agentID", connection.agentID)
-		dialFailureObserved = true
-		statusCode := http.StatusBadGateway
-		reason := metrics.DialFailureBackendClose
-		if errors.Is(err, errBackendDialTimeout) {
-			statusCode = http.StatusGatewayTimeout
-			reason = metrics.DialFailureBackendDialTimeout
-		}
-		metrics.Metrics.ObserveDialFailure(reason)
-		statusText := http.StatusText(statusCode)
-		conn.Write([]byte(fmt.Sprintf("HTTP/1.1 %d %s\r\nContent-Type: text/plain; charset=utf-8\r\n\r\nFailed to tunnel dial request: %v\r\n", statusCode, statusText, err)))
-		// The deferred cleanup will run when we return here.
-		return
-	}
-
-	ctxt := backend.Context()
-	var timeoutCh <-chan time.Time
-	var dialTimer *time.Timer
-	if t.Server.backendDialTimeout > 0 {
-		dialTimer = time.NewTimer(t.Server.backendDialTimeout)
-		defer dialTimer.Stop()
-		timeoutCh = dialTimer.C
+		}, nil
 	}
 
 	select {
-	case <-connection.connected: // Waiting for response before we begin full communication.
-		// The connection is successful. Mark it as established so the deferred
-		// cleanup function knows not to remove it from PendingDial.
-		established = true
-
-		// Now that connection is established, send 200 OK to switch to tunnel mode
-		_, err = conn.Write([]byte("HTTP/1.1 200 Connection Established\r\n\r\n"))
-		if err != nil {
-			klog.ErrorS(err, "failed to send 200 connection established", "host", r.Host, "agentID", connection.agentID)
-			// We return here, but since `established` is true, the deferred
-			// function will not remove the pending dial. The agent-side goroutine
-			// is responsible for the established connection now.
-			return
-		}
-		klog.V(3).InfoS("Connection established, sent 200 OK", "host", r.Host, "agentID", connection.agentID, "connectionID", connection.connectID)
-
-	case <-closed: // Connection was closed by the client before being established
-		klog.V(2).InfoS("Frontend connection closed before being established", "host", r.Host, "dialID", connection.dialID, "agentID", connection.agentID)
-		// The deferred cleanup will run when we return here.
-		return
-
-	case <-ctxt.Done(): // Backend connection died before being established
-		klog.ErrorS(ctxt.Err(), "backend context closed before connection was established", "host", r.Host, "dialID", connection.dialID, "agentID", connection.agentID)
-		metrics.Metrics.ObserveDialFailure(metrics.DialFailureBackendClose)
-		dialFailureObserved = true
-		// Send proper HTTP error response
-		conn.Write([]byte(fmt.Sprintf("HTTP/1.1 502 Bad Gateway\r\nContent-Type: text/plain; charset=utf-8\r\n\r\nBackend context error: %v\r\n", ctxt.Err())))
-		// The deferred cleanup will run when we return here.
-		return
-
-	case <-timeoutCh:
-		klog.ErrorS(errBackendDialTimeout, "backend dial timed out before connection was established", "host", r.Host, "dialID", connection.dialID, "agentID", connection.agentID)
-		metrics.Metrics.ObserveDialFailure(metrics.DialFailureBackendDialTimeout)
-		dialFailureObserved = true
-		conn.Write([]byte(fmt.Sprintf("HTTP/1.1 504 Gateway Timeout\r\nContent-Type: text/plain; charset=utf-8\r\n\r\nBackend dial timeout: %v\r\n", errBackendDialTimeout)))
-		// The deferred cleanup will run when we return here.
-		return
+	case <-h.connected:
+	case <-h.closed:
+		return nil, io.EOF
 	}
 
-	defer func() {
-		packet := &client.Packet{
-			Type: client.PacketType_CLOSE_REQ,
-			Payload: &client.Packet_CloseRequest{
-				CloseRequest: &client.CloseRequest{
-					ConnectID: connection.connectID,
-				},
-			},
-		}
-
-		if err = backend.Send(packet); err != nil {
-			klog.V(2).InfoS("failed to send close request packet", "host", r.Host, "agentID", connection.agentID, "connectionID", connection.connectID)
-		}
-		// The top-level defer handles conn.Close()
-	}()
-
-	connID := connection.connectID
-	agentID := connection.agentID
-	klog.V(3).InfoS("Starting proxy to host", "host", r.Host, "agentID", agentID, "connectionID", connID)
-
-	// Get a buffer from the pool
-	bufPtr := bufferPool.Get().(*[]byte)
-	pkt := *bufPtr
-	defer func() {
-		// Return the buffer to the pool when done
-		bufferPool.Put(bufPtr)
-	}()
-
-	var acc int
-
+	buf := *h.readBuf
 	for {
-		n, err := bufrw.Read(pkt[:])
-		acc += n
-		if err == io.EOF {
-			klog.V(1).InfoS("EOF from host", "host", r.Host, "agentID", agentID, "connectionID", connID)
-			break
-		}
-		if err != nil {
-			klog.ErrorS(err, "Received failure on connection", "host", r.Host, "agentID", agentID, "connectionID", connID)
-			break
-		}
-
-		packet := &client.Packet{
-			Type: client.PacketType_DATA,
-			Payload: &client.Packet_Data{
-				Data: &client.Data{
-					ConnectID: connID,
-					Data:      pkt[:n],
+		n, err := h.bufrw.Read(buf)
+		if n > 0 {
+			// The packet is queued for the backend and outlives this call, so
+			// it cannot reference the reusable read buffer. A read error that
+			// accompanied the data is reported by the next Recv; bufio retains
+			// it.
+			data := make([]byte, n)
+			copy(data, buf[:n])
+			return &client.Packet{
+				Type: client.PacketType_DATA,
+				Payload: &client.Packet_Data{
+					Data: &client.Data{
+						ConnectID: h.connectID,
+						Data:      data,
+					},
 				},
-			},
+			}, nil
 		}
-		err = backend.Send(packet)
-		if err != nil {
-			klog.ErrorS(err, "error sending packet", "host", r.Host, "agentID", agentID, "connectionID", connID)
-			break
+		if err == nil {
+			continue
 		}
-		klog.V(5).InfoS("Forwarding data on tunnel to agent",
-			"bytes", n,
-			"totalBytes", acc,
-			"agentID", connection.agentID,
-			"connectionID", connection.connectID)
+		if err == io.EOF || h.isClosed() {
+			// A read that fails because we closed the connection ourselves is
+			// an ordinary end of stream, not a stream failure.
+			return nil, io.EOF
+		}
+		return nil, err
+	}
+}
+
+// Send turns a frontend packet into the CONNECT response, tunnel bytes, or a
+// close of the hijacked connection.
+func (h *httpConnectStream) Send(pkt *client.Packet) error {
+	switch pkt.Type {
+	case client.PacketType_DIAL_RSP:
+		return h.sendDialResponse(pkt.GetDialResponse())
+	case client.PacketType_DATA:
+		_, err := h.conn.Write(pkt.GetData().Data)
+		return err
+	case client.PacketType_CLOSE_RSP, client.PacketType_DIAL_CLS:
+		h.close()
+		return nil
+	default:
+		return fmt.Errorf("attempt to send unsupported packet type %v to an HTTP-CONNECT frontend", pkt.Type)
+	}
+}
+
+func (h *httpConnectStream) sendDialResponse(resp *client.DialResponse) error {
+	if resp.Error != "" {
+		h.writeDialError(resp.Error)
+		h.close()
+		return nil
 	}
 
-	klog.V(5).InfoS("Stopping transfer to host", "host", r.Host, "agentID", agentID, "connectionID", connID)
+	// Ordered before the response so that a Recv released by close(connected)
+	// always observes the connection ID.
+	h.connectID = resp.ConnectID
+	if _, err := h.conn.Write([]byte(connectEstablished)); err != nil {
+		klog.ErrorS(err, "failed to send 200 connection established", "host", h.host,
+			"dialID", h.dialID, "connectionID", resp.ConnectID)
+		h.close()
+		return err
+	}
+	klog.V(3).InfoS("Connection established, sent 200 OK", "host", h.host,
+		"dialID", h.dialID, "connectionID", resp.ConnectID)
+	close(h.connected)
+	return nil
+}
+
+// writeDialError reports a failed dial to the client as an HTTP error response,
+// since the tunnel was never established.
+func (h *httpConnectStream) writeDialError(dialErr string) {
+	statusCode := mapDialErrorToHTTPStatus(dialErr)
+	body := bytes.NewBufferString(dialErr)
+	resp := http.Response{
+		StatusCode: statusCode,
+		Status:     fmt.Sprintf("%d %s", statusCode, http.StatusText(statusCode)),
+		Body:       io.NopCloser(body),
+		Header: http.Header{
+			"Content-Type": []string{"text/plain; charset=utf-8"},
+		},
+		ContentLength: int64(body.Len()),
+		Proto:         "HTTP/1.1",
+		ProtoMinor:    1,
+		ProtoMajor:    1,
+	}
+	if err := resp.Write(h.conn); err != nil {
+		klog.V(2).ErrorS(err, "failed to write dial error to HTTP-CONNECT frontend",
+			"host", h.host, "dialID", h.dialID, "dialError", dialErr)
+	}
+}
+
+func (h *httpConnectStream) isClosed() bool {
+	select {
+	case <-h.closed:
+		return true
+	default:
+		return false
+	}
+}
+
+// close closes the hijacked connection, which also unblocks a Recv that is
+// either waiting for the dial to complete or reading tunnel bytes.
+func (h *httpConnectStream) close() {
+	h.closeOnce.Do(func() {
+		close(h.closed)
+		if err := h.conn.Close(); err != nil {
+			klog.V(4).ErrorS(err, "failed to close hijacked connection", "host", h.host, "dialID", h.dialID)
+		}
+		h.cancel()
+	})
+}
+
+// release closes the stream and recycles its read buffer. It must only be
+// called once no one is reading the stream any more.
+func (h *httpConnectStream) release() {
+	h.close()
+	bufferPool.Put(h.readBuf)
+}
+
+// mapDialErrorToHTTPStatus maps common TCP/network error strings to appropriate HTTP status codes
+func mapDialErrorToHTTPStatus(errStr string) int {
+	// Convert to lowercase for case-insensitive matching
+	errLower := strings.ToLower(errStr)
+
+	// Check each error pattern and return appropriate status code
+	switch {
+	// Timeouts - backend didn't respond in time -> 504 Gateway Timeout
+	case strings.Contains(errLower, "i/o timeout"),
+		strings.Contains(errLower, "deadline exceeded"),
+		strings.Contains(errLower, "context deadline exceeded"),
+		strings.Contains(errLower, "timeout"),
+		strings.Contains(errLower, "timed out"):
+		return 504
+
+	// No tunnel to serve the request, and resource exhaustion. Both are
+	// retryable proxy side conditions -> 503 Service Unavailable
+	case strings.Contains(errLower, "no agent available"),
+		strings.Contains(errLower, "too many open files"),
+		strings.Contains(errLower, "socket: too many open files"):
+		return 503
+
+	// Connection errors -> 502 Bad Gateway
+	case strings.Contains(errLower, "connection refused"),
+		strings.Contains(errLower, "connection reset by peer"),
+		strings.Contains(errLower, "broken pipe"),
+		strings.Contains(errLower, "network is unreachable"),
+		strings.Contains(errLower, "no route to host"),
+		strings.Contains(errLower, "host is unreachable"),
+		strings.Contains(errLower, "network is down"):
+		return 502
+
+	// DNS resolution failures -> 502 Bad Gateway
+	case strings.Contains(errLower, "no such host"),
+		strings.Contains(errLower, "name resolution"),
+		strings.Contains(errLower, "lookup") && strings.Contains(errLower, "no such host"):
+		return 502
+
+	// TLS/SSL errors -> 502 Bad Gateway
+	case strings.Contains(errLower, "tls"),
+		strings.Contains(errLower, "ssl"),
+		strings.Contains(errLower, "certificate"):
+		return 502
+
+	// Default to 502 Bad Gateway for unknown proxy errors
+	default:
+		return 502
+	}
 }

@@ -199,11 +199,11 @@ func TestAgentTokenAuthenticationErrorsToken(t *testing.T) {
 
 func TestRemovePendingDialForStream(t *testing.T) {
 	streamUID := "target-uuid"
-	pending1 := &ProxyClientConnection{frontend: &GrpcFrontend{streamUID: streamUID}}
+	pending1 := &ProxyClientConnection{frontend: &Frontend{streamUID: streamUID}}
 	pending2 := &ProxyClientConnection{}
-	pending3 := &ProxyClientConnection{frontend: &GrpcFrontend{streamUID: streamUID}}
-	pending4 := &ProxyClientConnection{frontend: &GrpcFrontend{streamUID: "different-uid"}}
-	pending5 := &ProxyClientConnection{frontend: &GrpcFrontend{streamUID: ""}}
+	pending3 := &ProxyClientConnection{frontend: &Frontend{streamUID: streamUID}}
+	pending4 := &ProxyClientConnection{frontend: &Frontend{streamUID: "different-uid"}}
+	pending5 := &ProxyClientConnection{frontend: &Frontend{streamUID: ""}}
 	p := NewProxyServer("", []proxystrategies.ProxyStrategy{proxystrategies.ProxyStrategyDefault}, 1, nil, xfrChannelSize)
 	p.PendingDial.Add(1, pending1)
 	p.PendingDial.Add(2, pending2)
@@ -338,6 +338,7 @@ func TestBackendDrainPacketReclassifiesAgent(t *testing.T) {
 	proxyServer := &ProxyServer{
 		BackendManagers: []BackendManager{manager},
 		established:     map[string]map[int64]*ProxyClientConnection{"agent1": {}},
+		PendingDial:     NewPendingDialManager(),
 	}
 	recvCh := make(chan *client.Packet, 1)
 	recvCh <- &client.Packet{Type: client.PacketType_DRAIN}
@@ -730,11 +731,11 @@ func TestRemoveEstablishedForStream(t *testing.T) {
 	backend1 := &Backend{}
 	backend2 := &Backend{}
 	backend3 := &Backend{}
-	agent1ConnID1 := &ProxyClientConnection{backend: backend1, frontend: &GrpcFrontend{streamUID: streamUID}}
+	agent1ConnID1 := &ProxyClientConnection{backend: backend1, frontend: &Frontend{streamUID: streamUID}}
 	agent1ConnID2 := &ProxyClientConnection{backend: backend1}
-	agent2ConnID1 := &ProxyClientConnection{backend: backend2, frontend: &GrpcFrontend{streamUID: streamUID}}
+	agent2ConnID1 := &ProxyClientConnection{backend: backend2, frontend: &Frontend{streamUID: streamUID}}
 	agent2ConnID2 := &ProxyClientConnection{backend: backend2}
-	agent3ConnID1 := &ProxyClientConnection{backend: backend3, frontend: &GrpcFrontend{streamUID: streamUID}}
+	agent3ConnID1 := &ProxyClientConnection{backend: backend3, frontend: &Frontend{streamUID: streamUID}}
 	p := NewProxyServer("", []proxystrategies.ProxyStrategy{proxystrategies.ProxyStrategyDefault}, 1, nil, xfrChannelSize)
 	p.addEstablished("agent1", int64(1), agent1ConnID1)
 	p.addEstablished("agent1", int64(2), agent1ConnID2)
@@ -769,8 +770,10 @@ func prepareFrontendConn(ctrl *gomock.Controller) *agentmock.MockAgentService_Co
 	return frontendConn
 }
 
-func prepareAgentConnMD(t testing.TB, ctrl *gomock.Controller, proxyServer *ProxyServer, agentidentifiers []string) (*agentmock.MockAgentService_ConnectServer, *Backend) {
-	t.Helper()
+// prepareAgentConn builds the mocked agent side of a connection, without
+// registering a backend for it. Use it when the test lets ProxyServer.Connect
+// register the backend itself.
+func prepareAgentConn(ctrl *gomock.Controller, agentidentifiers []string) *agentmock.MockAgentService_ConnectServer {
 	if agentidentifiers == nil {
 		agentidentifiers = []string{}
 	}
@@ -785,6 +788,12 @@ func prepareAgentConnMD(t testing.TB, ctrl *gomock.Controller, proxyServer *Prox
 	}
 	agentConnCtx := metadata.NewIncomingContext(context.Background(), agentConnMD)
 	agentConn.EXPECT().Context().Return(agentConnCtx).AnyTimes()
+	return agentConn
+}
+
+func prepareAgentConnMD(t testing.TB, ctrl *gomock.Controller, proxyServer *ProxyServer, agentidentifiers []string) (*agentmock.MockAgentService_ConnectServer, *Backend) {
+	t.Helper()
+	agentConn := prepareAgentConn(ctrl, agentidentifiers)
 	backend, err := NewBackend(agentConn)
 	if err != nil {
 		t.Fatalf("Unexpected NewBackend error: %v", err)
@@ -1123,6 +1132,18 @@ func assertTotalReadyBackendsMetric(t testing.TB, expect map[string]int) {
 	}
 }
 
+func dialRspPkt(dialID, connectID int64) *client.Packet {
+	return &client.Packet{
+		Type: client.PacketType_DIAL_RSP,
+		Payload: &client.Packet_DialResponse{
+			DialResponse: &client.DialResponse{
+				Random:    dialID,
+				ConnectID: connectID,
+			},
+		},
+	}
+}
+
 func dialClosePkt(dialID int64) *client.Packet {
 	return &client.Packet{
 		Type: client.PacketType_DIAL_CLS,
@@ -1157,5 +1178,109 @@ func TestRemoveEstablishedForBackendConnPreservesOtherBackends(t *testing.T) {
 	}
 	if got, err := p.getFrontend("agent1", int64(1)); err == nil && got != nil {
 		t.Errorf("conn1 on backend1 should have been removed, got %v", got)
+	}
+}
+
+// probeProxyStream is a frontend ProxyStream which lets a test observe server
+// state at the moment a packet is handed to the frontend.
+type probeProxyStream struct {
+	onSend func(*client.Packet) error
+}
+
+func (p *probeProxyStream) Send(pkt *client.Packet) error { return p.onSend(pkt) }
+func (p *probeProxyStream) Recv() (*client.Packet, error) { return nil, io.EOF }
+func (p *probeProxyStream) Context() context.Context      { return context.Background() }
+
+// TestDialResponseEstablishesBeforeReachingFrontend verifies that the
+// connection is recorded in established before the frontend learns the dial
+// succeeded. The dial has already been removed from pendingDial by then, so a
+// frontend which acts on the DIAL_RSP (by sending, or by shutting down) must
+// not find the connection in neither map.
+func TestDialResponseEstablishesBeforeReachingFrontend(t *testing.T) {
+	const dialID = 111
+	const connectID = 123456
+	const agentID = "agent1"
+
+	p := NewProxyServer("", []proxystrategies.ProxyStrategy{proxystrategies.ProxyStrategyDefault}, 1, nil, xfrChannelSize)
+	backend := &Backend{}
+
+	var establishedDuringSend, pendingDuringSend bool
+	stream := &probeProxyStream{onSend: func(pkt *client.Packet) error {
+		if pkt.Type == client.PacketType_DIAL_RSP {
+			_, err := p.getFrontend(agentID, connectID)
+			establishedDuringSend = err == nil
+			pendingDuringSend = pendingDialCount(p) > 0
+		}
+		return nil
+	}}
+	p.PendingDial.Add(dialID, &ProxyClientConnection{
+		frontend: &Frontend{stream: stream, streamUID: "stream-uid"},
+		dialID:   dialID,
+		backend:  backend,
+		start:    time.Now(),
+	})
+
+	recvCh := make(chan *client.Packet, 1)
+	recvCh <- dialRspPkt(dialID, connectID)
+	close(recvCh)
+	p.serveRecvBackend(backend, agentID, recvCh)
+
+	if !establishedDuringSend && !pendingDuringSend {
+		t.Error("connection was in neither pendingDial nor established while the DIAL_RSP reached the frontend")
+	}
+	if !establishedDuringSend {
+		t.Error("expected the connection to be established before the DIAL_RSP reached the frontend")
+	}
+}
+
+// TestBackendCloseFailsPendingDials verifies that dials still in flight over a
+// backend connection are failed when that connection goes away, rather than
+// left pending forever.
+func TestBackendCloseFailsPendingDials(t *testing.T) {
+	const dialID = 222
+	const agentID = "agent1"
+
+	p := NewProxyServer("", []proxystrategies.ProxyStrategy{proxystrategies.ProxyStrategyDefault}, 1, nil, xfrChannelSize)
+	backend := &Backend{}
+	otherBackend := &Backend{}
+
+	sent := make(chan *client.Packet, 1)
+	stream := &probeProxyStream{onSend: func(pkt *client.Packet) error {
+		sent <- pkt
+		return nil
+	}}
+	p.PendingDial.Add(dialID, &ProxyClientConnection{
+		frontend: &Frontend{stream: stream, streamUID: "stream-uid"},
+		dialID:   dialID,
+		backend:  backend,
+		start:    time.Now(),
+	})
+	// A dial over an unrelated backend connection must be left alone.
+	p.PendingDial.Add(dialID+1, &ProxyClientConnection{
+		dialID:  dialID + 1,
+		backend: otherBackend,
+		start:   time.Now(),
+	})
+
+	recvCh := make(chan *client.Packet)
+	close(recvCh)
+	p.serveRecvBackend(backend, agentID, recvCh)
+
+	select {
+	case pkt := <-sent:
+		if pkt.Type != client.PacketType_DIAL_RSP {
+			t.Fatalf("expected DIAL_RSP to the frontend, got %v", pkt.Type)
+		}
+		if got := pkt.GetDialResponse().Random; got != dialID {
+			t.Errorf("expected DIAL_RSP for dialID %d, got %d", dialID, got)
+		}
+		if got := pkt.GetDialResponse().Error; got != errBackendClosedWhileDialing.Error() {
+			t.Errorf("expected error %q, got %q", errBackendClosedWhileDialing.Error(), got)
+		}
+	default:
+		t.Fatal("expected the pending dial to be failed when the backend connection closed")
+	}
+	if got := pendingDialCount(p); got != 1 {
+		t.Errorf("expected only the dial over the closed backend to be removed, got %d remaining", got)
 	}
 }
