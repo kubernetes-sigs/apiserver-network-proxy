@@ -52,6 +52,11 @@ const (
 # TYPE konnectivity_network_proxy_server_established_connections gauge`
 	serverEstablishedConnsSample = `konnectivity_network_proxy_server_established_connections{} %d`
 
+	serverConnectionCloseHeader = `
+# HELP konnectivity_network_proxy_server_connection_close_total Number of established end-to-end connections (post-dial) that were closed, by reason for the close.
+# TYPE konnectivity_network_proxy_server_connection_close_total counter`
+	serverConnectionCloseSample = `konnectivity_network_proxy_server_connection_close_total{reason="%s"} %d`
+
 	agentDialFailureHeader = `
 # HELP konnectivity_network_proxy_agent_endpoint_dial_failure_total Number of failures dialing the remote endpoint, by reason (example: timeout).
 # TYPE konnectivity_network_proxy_agent_endpoint_dial_failure_total counter`
@@ -61,6 +66,11 @@ const (
 # HELP konnectivity_network_proxy_agent_open_endpoint_connections Current number of open endpoint connections.
 # TYPE konnectivity_network_proxy_agent_open_endpoint_connections gauge
 konnectivity_network_proxy_agent_open_endpoint_connections %d`
+
+	agentConnectionCloseHeader = `
+# HELP konnectivity_network_proxy_agent_endpoint_connection_close_total Number of established endpoint connections (post-dial) that were closed, by reason for the close.
+# TYPE konnectivity_network_proxy_agent_endpoint_connection_close_total counter`
+	agentConnectionCloseSample = `konnectivity_network_proxy_agent_endpoint_connection_close_total{reason="%s"} %d`
 )
 
 var DefaultTester = &Tester{}
@@ -79,12 +89,16 @@ type ServerTester interface {
 	ExpectServerPendingDials(int) error
 	ExpectServerReadyBackends(int) error
 	ExpectServerEstablishedConns(int) error
+	ExpectServerConnectionCloses(map[server.ConnectionCloseReason]int) error
+	ExpectServerConnectionClose(server.ConnectionCloseReason, int) error
 }
 
 type AgentTester interface {
 	ExpectAgentDialFailures(map[agent.DialFailureReason]int) error
 	ExpectAgentDialFailure(agent.DialFailureReason, int) error
 	ExpectAgentEndpointConnections(int) error
+	ExpectAgentConnectionCloses(map[agent.ConnectionCloseReason]int) error
+	ExpectAgentConnectionClose(agent.ConnectionCloseReason, int) error
 }
 
 func (t *Tester) ExpectServerDialFailures(expected map[server.DialFailureReason]int) error {
@@ -125,6 +139,18 @@ func (t *Tester) ExpectServerEstablishedConns(v int) error {
 	return t.ExpectMetric(server.Namespace, server.Subsystem, "established_connections", expect)
 }
 
+func (t *Tester) ExpectServerConnectionCloses(expected map[server.ConnectionCloseReason]int) error {
+	expect := serverConnectionCloseHeader + "\n"
+	for r, v := range expected {
+		expect += fmt.Sprintf(serverConnectionCloseSample+"\n", r, v)
+	}
+	return t.ExpectMetric(server.Namespace, server.Subsystem, "connection_close_total", expect)
+}
+
+func (t *Tester) ExpectServerConnectionClose(reason server.ConnectionCloseReason, count int) error {
+	return t.ExpectServerConnectionCloses(map[server.ConnectionCloseReason]int{reason: count})
+}
+
 func (t *Tester) ExpectAgentDialFailures(expected map[agent.DialFailureReason]int) error {
 	expect := agentDialFailureHeader + "\n"
 	for r, v := range expected {
@@ -140,6 +166,18 @@ func (t *Tester) ExpectAgentDialFailure(reason agent.DialFailureReason, count in
 func (t *Tester) ExpectAgentEndpointConnections(count int) error {
 	expect := fmt.Sprintf(agentEndpointConnections+"\n", count)
 	return t.ExpectMetric(agent.Namespace, agent.Subsystem, "open_endpoint_connections", expect)
+}
+
+func (t *Tester) ExpectAgentConnectionCloses(expected map[agent.ConnectionCloseReason]int) error {
+	expect := agentConnectionCloseHeader + "\n"
+	for r, v := range expected {
+		expect += fmt.Sprintf(agentConnectionCloseSample+"\n", r, v)
+	}
+	return t.ExpectMetric(agent.Namespace, agent.Subsystem, "endpoint_connection_close_total", expect)
+}
+
+func (t *Tester) ExpectAgentConnectionClose(reason agent.ConnectionCloseReason, count int) error {
+	return t.ExpectAgentConnectionCloses(map[agent.ConnectionCloseReason]int{reason: count})
 }
 
 func (t *Tester) ExpectMetric(namespace, subsystem, name, expected string) error {
