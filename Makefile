@@ -66,13 +66,16 @@ CONNECTION_MODE ?= grpc
 MOCKGEN_VERSION := $(shell mockgen -version)
 DESIRED_MOCKGEN := "v0.6.0"
 
+PROTOC_VERSION := $(shell protoc --version)
+DESIRED_PROTOC := "libprotoc 36.2"
+
 ## --------------------------------------
 ## Testing
 ## --------------------------------------
 .PHONY: mock_gen
 mock_gen:
 	echo "Mock gen is set to $(MOCKGEN_VERSION)"
-	if [ "$(MOCKGEN_VERSION)" != $(DESIRED_MOCKGEN) ]; then echo "Error need mockgen version $(DESIRED_VERSION)"; exit 1; fi
+	if [ "$(MOCKGEN_VERSION)" != $(DESIRED_MOCKGEN) ]; then echo "Error need mockgen version $(DESIRED_MOCKGEN)"; exit 1; fi
 	mkdir -p proto/agent/mocks
 	mockgen --build_flags=--mod=mod sigs.k8s.io/apiserver-network-proxy/proto/agent AgentService_ConnectServer > proto/agent/mocks/agent_mock.go
 	cat hack/go-license-header.txt proto/agent/mocks/agent_mock.go > proto/agent/mocks/agent_mock.licensed.go
@@ -158,6 +161,8 @@ gen: mod-download gen-proto mock_gen
 
 .PHONY: gen-proto
 gen-proto:
+	echo "Protoc is set to $(PROTOC_VERSION)"
+	if [ "$(PROTOC_VERSION)" != $(DESIRED_PROTOC) ]; then echo "Error need protoc version $(DESIRED_PROTOC)"; exit 1; fi
 	protoc -I . konnectivity-client/proto/client/client.proto --go_out=. --go_opt=paths=source_relative --go-grpc_out=require_unimplemented_servers=false:. --go-grpc_opt=paths=source_relative
 	cat hack/go-license-header.txt konnectivity-client/proto/client/client_grpc.pb.go > konnectivity-client/proto/client/client_grpc.licensed.go
 	mv konnectivity-client/proto/client/client_grpc.licensed.go konnectivity-client/proto/client/client_grpc.pb.go
