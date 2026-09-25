@@ -1,0 +1,164 @@
+
+
+
+
+
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  
+  
+  <script async src="https://www.googletagmanager.com/gtag/js?id=UA-82843984-5"></script>
+  <script>
+    window.dataLayer = window.dataLayer || [];
+    function gtag(){dataLayer.push(arguments);}
+    gtag('js', new Date());
+
+    gtag('config', "UA-82843984-5");
+  </script>
+  
+  
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+  
+  <title>PR Status</title>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/material-design-lite/1.3.0/material.indigo-pink.min.css">
+  <link rel="stylesheet" type="text/css" href="/static/style.css?v=v20260918-cd1c1dbd2">
+  <link rel="stylesheet" type="text/css" href="/static/extensions/style.css?v=v20260918-cd1c1dbd2">
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Roboto:400,700">
+  <link rel="stylesheet" href="https://fonts.googleapis.com/icon?family=Material+Icons">
+  <script type="text/javascript" src="/static/extensions/script.js?v=v20260918-cd1c1dbd2"></script>
+  <script defer src="https://cdnjs.cloudflare.com/ajax/libs/material-design-lite/1.3.0/material.min.js"></script>
+  
+    <link rel="stylesheet" href="/static/labels.css?v=v20260918-cd1c1dbd2">
+    <link rel="stylesheet" href="/static/dialog-polyfill.css?v=v20260918-cd1c1dbd2">
+    <script type="text/javascript" src="/static/pr_bundle.min.js?v=v20260918-cd1c1dbd2"></script>
+    <script type="text/javascript" src="prowjobs.js?var=allBuilds&omit=annotations,labels,decoration_config,pod_spec"></script>
+    <script type="text/javascript" src="tide.js?var=tideData"></script>
+
+  
+</head>
+<body id="pr">
+<div id="alert-container"></div>
+<div class="mdl-layout mdl-js-layout mdl-layout--fixed-header">
+  <header class="mdl-layout__header">
+    <div id="header-title" class="mdl-layout__header-row">
+      <a href="/"
+         class="logo"><img id="header-logo" data-custom-logo="false" src="/static/logo-light.png?v=v20260918-cd1c1dbd2" alt="kubernetes logo" class="logo"/></a>
+      <span class="mdl-layout-title header-title">PR Status</span>
+      
+    </div>
+  </header>
+  <div class="mdl-layout__drawer">
+    <span class="mdl-layout-title">Prow Dashboard</span>
+    <nav class="mdl-navigation">
+      <a class="mdl-navigation__link" href="/">Prow Status</a>
+      
+        <a class="mdl-navigation__link mdl-navigation__link--current" href="/pr">PR Status</a>
+      
+      <a class="mdl-navigation__link" href="/command-help">Command Help</a>
+      
+        <a class="mdl-navigation__link" href="/tide">Tide Status</a>
+        <a class="mdl-navigation__link" href="/tide-history">Tide History</a>
+      
+      <a class="mdl-navigation__link" href="/plugins">Plugins</a>
+      <a class="mdl-navigation__link" href="/configured-jobs">Configured Jobs</a>
+      <a class="mdl-navigation__link" href="https://docs.prow.k8s.io/docs/" target="_blank">Documentation <span class="material-icons">open_in_new</span></a>
+    </nav>
+    <footer>
+      v20260918-cd1c1dbd2
+    </footer>
+  </div>
+  <div id="loading-progress" class="mdl-progress mdl-js-progress mdl-progress__indeterminate hidden"></div>
+  <main class="mdl-layout__content">
+    
+<div id="pr-container">
+
+</div>
+
+  </main>
+</div>
+
+<dialog id="search-dialog" class="pr-status-dialog mdl-dialog">
+  <h4 class="mdl-dialog__title">GitHub search query</h4>
+  <div class="mdl-dialog__content">
+    <p>You can query for <strong>pull requests</strong> using GitHub search syntax.</p>
+    <p>Notice:</p>
+    <ol>
+      <li>
+        <p>The search feature is used to search <strong>pull requests</strong>. We enforce this by dropping any <code>is:issue</code> or <code>type:issue</code> token in the query and will append <code>is:pr</code> to the query if <code>is:pr</code> does not exist.</p>
+      </li>
+      <li>
+        <p>If you do not mention any organization or repository in the query, we will search for pull requests in repositories that use either <strong>Prow</strong> or <strong>Tide</strong>.</p>
+      </li>
+      <li>
+        <p>By default, PR Status will display all of your open pull requests that are configured with either <strong>Prow</strong> or <strong>Tide</strong>.</p>
+      </li>
+    </ol>
+  </div>
+  <div class="mdl-dialog__actions">
+    <button type="button" class="mdl-button close">Close</button>
+  </div>
+</dialog>
+<dialog id="status-help-dialog" class="pr-status-dialog mdl-dialog">
+  <h4 class="mdl-dialog__title"></h4>
+  <div class="mdl-dialog__content">
+  </div>
+  <div class="mdl-dialog__actions">
+    <button type="button" class="mdl-button close">Close</button>
+  </div>
+</dialog>
+<dialog id="query-dialog" class="pr-status-dialog mdl-dialog">
+  <h4 class="mdl-dialog__title">Query Details</h4>
+  <div class="mdl-dialog__content">
+    <div id="query-detail-author" class="hidden">
+      <p class="detail-title">Author</p>
+      <p class="detail-data"></p>
+    </div>
+    <div id="query-detail-milestone" class="hidden">
+      <p class="detail-title">Milestone</p>
+      <p class="detail-data"></p>
+    </div>
+    <div id="query-detail-exclude" class="hidden">
+      <p class="detail-title">Excluded branches</p>
+      <p class="detail-data"></p>
+    </div>
+    <div id="query-detail-include" class="hidden">
+      <p class="detail-title">Included branches</p>
+      <p class="detail-data"></p>
+    </div>
+    <p class="detail-title">All required labels</p>
+    <p id="query-all-required"></p>
+    <p class="detail-title">All forbidden labels</p>
+    <p id="query-all-forbidden"></p>
+  </div>
+  <div class="mdl-dialog__actions">
+    <button type="button" class="mdl-button close">Close</button>
+  </div>
+</dialog>
+<dialog id="merge-help-dialog" class="pr-status-dialog mdl-dialog">
+  <h4 class="mdl-dialog__title">How to meet merge requirements?</h4>
+  <div class="mdl-dialog__content">
+    <p>To meet merge requirements, all PR's labels need to satisfy at least one of queries configured for the repo that the PR belongs to.</p>
+    <p>The table below shows all queries for the PR's repo. Each row of the table below shows 2 parts of a query: <strong>required</strong> labels <strong>missing</strong> from the PR and <strong>forbidden</strong> labels that the PR <strong>has</strong>.</p>
+    <p>The PR would be considered as meeting merge requirements once it <strong>obtains all required labels</strong> and <strong>removes all forbidden labels</strong> for at least one row.</p>
+    <p>For more information, see: <a href="https://github.com/kubernetes/community/tree/master/contributors/guide">Kubernetes Contributor Guide</a> & <a href="/command-help">Command Help Page</a></p>
+  </div>
+  <div class="mdl-dialog__actions">
+    <button type="button" class="mdl-button close">Close</button>
+  </div>
+</dialog>
+
+<div id="toast" class="mdl-js-snackbar mdl-snackbar">
+  <div class="mdl-snackbar__text"></div>
+  <button class="mdl-snackbar__action" type="button"></button>
+</div>
+<div id="toastAlert" class="mdl-js-snackbar mdl-snackbar">
+  <div class="mdl-snackbar__text"></div>
+  <button class="mdl-snackbar__action" type="button"></button>
+</div>
+
+</body>
+</html>
+
