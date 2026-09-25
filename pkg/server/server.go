@@ -294,23 +294,25 @@ func (s *ProxyServer) sendDialRequestToBackend(backend *Backend, pkt *client.Pac
 		return backend.Send(pkt)
 	}
 
+	ctx, cancel := context.WithTimeout(backend.Context(), timeout)
+	defer cancel()
+
 	errCh := make(chan error, 1)
 	go func() {
-		errCh <- backend.Send(pkt)
+		errCh <- backend.SendContext(ctx, pkt)
 	}()
 
-	timer := time.NewTimer(timeout)
-	defer timer.Stop()
-
-	ctx := backend.Context()
 	select {
 	case err := <-errCh:
+		if errors.Is(err, context.DeadlineExceeded) {
+			return errBackendDialTimeout
+		}
 		return err
 	case <-ctx.Done():
+		if errors.Is(ctx.Err(), context.DeadlineExceeded) {
+			return errBackendDialTimeout
+		}
 		return ctx.Err()
-	case <-timer.C:
-		s.retireBackend(backend, "backend dial request send timed out")
-		return errBackendDialTimeout
 	}
 }
 
@@ -369,12 +371,6 @@ func (s *ProxyServer) removeBackend(backend *Backend) {
 	for _, bm := range s.BackendManagers {
 		bm.RemoveBackend(backend)
 	}
-}
-
-func (s *ProxyServer) retireBackend(backend *Backend, reason string) {
-	backend.Retire()
-	klog.V(2).InfoS("Retire backend connection", "agentID", backend.GetAgentID(), "reason", reason)
-	s.removeBackend(backend)
 }
 
 func (s *ProxyServer) addEstablished(agentID string, connID int64, p *ProxyClientConnection) {
