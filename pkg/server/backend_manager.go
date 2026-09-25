@@ -112,9 +112,16 @@ func (b *Backend) Done() <-chan struct{} {
 	return b.done
 }
 
-func (b *Backend) Send(p *client.Packet) error {
+func (b *Backend) SendContext(ctx context.Context, p *client.Packet) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	b.sendLock.Lock()
 	defer b.sendLock.Unlock()
+
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 
 	const segment = commonmetrics.SegmentToAgent
 	metrics.Metrics.ObservePacket(segment, p.Type)
@@ -123,6 +130,10 @@ func (b *Backend) Send(p *client.Packet) error {
 		metrics.Metrics.ObserveStreamError(segment, err, p.Type)
 	}
 	return err
+}
+
+func (b *Backend) Send(p *client.Packet) error {
+	return b.SendContext(b.Context(), p)
 }
 
 func (b *Backend) Recv() (*client.Packet, error) {
