@@ -685,13 +685,16 @@ func (s *ProxyServer) serveRecvFrontend(frontend *Frontend, recvCh <-chan *clien
 				})
 			if err := s.sendDialRequestToBackend(backend, pkt); err != nil {
 				klog.ErrorS(err, "DIAL_REQ to Backend failed", "dialID", random)
-				if s.PendingDial.Remove(random) != nil {
-					reason := metrics.DialFailureBackendClose
-					if errors.Is(err, errBackendDialTimeout) {
-						reason = metrics.DialFailureBackendDialTimeout
-					}
-					metrics.Metrics.ObserveDialFailure(reason)
+				if s.PendingDial.Remove(random) == nil {
+					// The dial was already claimed by a DIAL_RSP or cancelled.
+					// Do not send a failure DIAL_RSP or abort frontend processing.
+					continue
 				}
+				reason := metrics.DialFailureBackendClose
+				if errors.Is(err, errBackendDialTimeout) {
+					reason = metrics.DialFailureBackendDialTimeout
+				}
+				metrics.Metrics.ObserveDialFailure(reason)
 				resp := &client.Packet{
 					Type: client.PacketType_DIAL_RSP,
 					Payload: &client.Packet_DialResponse{
