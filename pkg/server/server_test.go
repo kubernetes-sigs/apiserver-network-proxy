@@ -28,6 +28,7 @@ import (
 	"net/url"
 	"reflect"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -239,6 +240,16 @@ func TestBackendSendContextCancelled(t *testing.T) {
 	}
 	agentConnCtx := metadata.NewIncomingContext(context.Background(), agentConnMD)
 	agentConn.EXPECT().Context().Return(agentConnCtx).AnyTimes()
+
+	var mu sync.Mutex
+	var sentPackets []*client.Packet
+	agentConn.EXPECT().Send(gomock.Any()).DoAndReturn(func(pkt *client.Packet) error {
+		mu.Lock()
+		sentPackets = append(sentPackets, pkt)
+		mu.Unlock()
+		return nil
+	}).AnyTimes()
+
 	backend, err := NewBackend(agentConn)
 	if err != nil {
 		t.Fatalf("Unexpected NewBackend error: %v", err)
@@ -255,25 +266,71 @@ func TestBackendSendContextCancelled(t *testing.T) {
 		t.Fatalf("expected context.Canceled, got %v", err)
 	}
 
-	// 2. Context cancelled while waiting for sendLock
-	backend.sendLock.Lock()
-	errCh := make(chan error, 1)
-	ctx2, cancel2 := context.WithCancel(context.Background())
+	// 2. Lock is held; multiple SendContext workers wait and time out without leaking workers
+	if err := backend.lockSend(context.Background()); err != nil {
+		t.Fatalf("failed to lock send: %v", err)
+	}
+
+	const numWorkers = 5
+	var wg sync.WaitGroup
+	for i := 0; i < numWorkers; i++ {
+		wg.Add(1)
+		go func(id int) {
+			defer wg.Done()
+			ctxWait, cancelWait := context.WithTimeout(context.Background(), 50*time.Millisecond)
+			defer cancelWait()
+			workerPkt := &client.Packet{
+				Type: client.PacketType_DIAL_REQ,
+				Payload: &client.Packet_DialRequest{
+					DialRequest: &client.DialRequest{
+						Random: int64(1000 + id),
+					},
+				},
+			}
+			err := backend.SendContext(ctxWait, workerPkt)
+			if !errors.Is(err, context.DeadlineExceeded) {
+				t.Errorf("worker %d: expected context.DeadlineExceeded, got %v", id, err)
+			}
+		}(i)
+	}
+
+	// All waiting workers must unblock on timeout and exit
+	doneCh := make(chan struct{})
 	go func() {
-		errCh <- backend.SendContext(ctx2, pkt)
+		wg.Wait()
+		close(doneCh)
 	}()
 
-	// Cancel ctx2 while sendLock is locked
-	cancel2()
-	backend.sendLock.Unlock()
-
 	select {
-	case err := <-errCh:
-		if !errors.Is(err, context.Canceled) {
-			t.Fatalf("expected context.Canceled when waiting for lock, got %v", err)
-		}
-	case <-time.After(time.Second):
-		t.Fatal("timed out waiting for SendContext to return")
+	case <-doneCh:
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for SendContext workers to unblock and exit on context timeout")
+	}
+
+	// 3. Unlock backend and send a new valid packet (recovery)
+	backend.unlockSend()
+
+	validPkt := &client.Packet{
+		Type: client.PacketType_DATA,
+		Payload: &client.Packet_Data{
+			Data: &client.Data{
+				ConnectID: 999,
+				Data:      []byte("valid payload"),
+			},
+		},
+	}
+	if err := backend.SendContext(context.Background(), validPkt); err != nil {
+		t.Fatalf("unexpected SendContext error after recovery: %v", err)
+	}
+
+	// Verify only validPkt was transmitted and none of the expired dial packets
+	mu.Lock()
+	defer mu.Unlock()
+	if len(sentPackets) != 1 {
+		t.Fatalf("expected exactly 1 packet sent to agentConn after recovery, got %d", len(sentPackets))
+	}
+	if sentPackets[0] != validPkt {
+		t.Fatalf("expected validPkt to be sent, got %v", sentPackets[0])
 	}
 }
 
@@ -411,27 +468,62 @@ func TestHTTPConnectTunnelBlockedBackendDialSendPreservesBackendAndEstablished(t
 	proxyServer := NewProxyServer(uuid.New().String(), []proxystrategies.ProxyStrategy{proxystrategies.ProxyStrategyDefault}, 1, &AgentTokenAuthenticationOptions{}, xfrChannelSize)
 	proxyServer.SetBackendDialTimeout(200 * time.Millisecond)
 
-	agentConn, backend := prepareAgentConnMD(t, ctrl, proxyServer, nil)
+	toAgent := make(chan *client.Packet, 16)
+	fromAgent := make(chan *client.Packet, 16)
 
-	// Add an established connection A on this backend.
-	establishedConnA := &ProxyClientConnection{
-		backend:   backend,
-		connectID: 100,
-		agentID:   backend.GetAgentID(),
-	}
-	proxyServer.addEstablished(backend.GetAgentID(), 100, establishedConnA)
-
-	sendStarted := make(chan *client.Packet, 1)
+	var blockSend atomic.Bool
 	releaseSend := make(chan struct{})
-	sendReleased := make(chan struct{})
+	sendStarted := make(chan struct{}, 1)
 
-	// agentConn.Send will block on connection B's DIAL_REQ
-	agentConn.EXPECT().Send(gomock.AssignableToTypeOf(&client.Packet{})).DoAndReturn(func(pkt *client.Packet) error {
-		sendStarted <- pkt
-		<-releaseSend
-		close(sendReleased)
+	agentConn := prepareAgentConn(ctrl, nil)
+	agentConn.EXPECT().SendHeader(gomock.Any()).Return(nil).AnyTimes()
+	agentConn.EXPECT().Send(gomock.Any()).DoAndReturn(func(pkt *client.Packet) error {
+		if blockSend.Load() {
+			select {
+			case sendStarted <- struct{}{}:
+			default:
+			}
+			<-releaseSend
+		}
+		toAgent <- pkt
 		return nil
-	}).Times(1)
+	}).AnyTimes()
+	agentConn.EXPECT().Recv().DoAndReturn(func() (*client.Packet, error) {
+		pkt, ok := <-fromAgent
+		if !ok {
+			return nil, io.EOF
+		}
+		return pkt, nil
+	}).AnyTimes()
+
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		proxyServer.Connect(agentConn)
+	}()
+	defer func() {
+		close(fromAgent)
+		select {
+		case <-done:
+		case <-time.After(5 * time.Second):
+			t.Error("timed out waiting for Connect to return")
+		}
+	}()
+
+	// Wait for backend to be registered
+	var backend *Backend
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		be, err := proxyServer.getBackend("127.0.0.1:8080")
+		if err == nil {
+			backend = be
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("timed out waiting for the agent backend to be registered: %v", err)
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
 
 	front := httptest.NewServer(&Tunnel{Server: proxyServer})
 	defer front.Close()
@@ -440,30 +532,75 @@ func TestHTTPConnectTunnelBlockedBackendDialSendPreservesBackendAndEstablished(t
 	if err != nil {
 		t.Fatalf("failed to parse front URL: %v", err)
 	}
-	conn, err := net.Dial("tcp", frontURL.Host)
-	if err != nil {
-		t.Fatalf("failed to connect to HTTP CONNECT front: %v", err)
-	}
-	defer conn.Close()
 
-	if _, err := fmt.Fprintf(conn, "CONNECT 127.0.0.1:443 HTTP/1.1\r\nHost: 127.0.0.1:443\r\n\r\n"); err != nil {
-		t.Fatalf("failed to write CONNECT request: %v", err)
+	// 1. Establish Connection A on this backend
+	connA, err := net.Dial("tcp", frontURL.Host)
+	if err != nil {
+		t.Fatalf("failed to connect connA to HTTP CONNECT front: %v", err)
+	}
+	defer connA.Close()
+
+	if _, err := fmt.Fprintf(connA, "CONNECT 127.0.0.1:8080 HTTP/1.1\r\nHost: 127.0.0.1:8080\r\n\r\n"); err != nil {
+		t.Fatalf("failed to write CONNECT request for connA: %v", err)
+	}
+
+	var dialReqA *client.Packet
+	select {
+	case dialReqA = <-toAgent:
+	case <-time.After(5 * time.Second):
+		t.Fatal("timed out waiting for connA DIAL_REQ to agent")
+	}
+	if dialReqA.Type != client.PacketType_DIAL_REQ {
+		t.Fatalf("expected DIAL_REQ for connA, got %v", dialReqA.Type)
+	}
+	const connectIDA = int64(100)
+	fromAgent <- &client.Packet{
+		Type: client.PacketType_DIAL_RSP,
+		Payload: &client.Packet_DialResponse{
+			DialResponse: &client.DialResponse{
+				Random:    dialReqA.GetDialRequest().Random,
+				ConnectID: connectIDA,
+			},
+		},
+	}
+
+	brA := bufio.NewReader(connA)
+	respA, err := http.ReadResponse(brA, nil)
+	if err != nil {
+		t.Fatalf("failed to read CONNECT response for connA: %v", err)
+	}
+	respA.Body.Close()
+	if respA.StatusCode != http.StatusOK {
+		t.Fatalf("expected 200 for connA established tunnel, got %s", respA.Status)
+	}
+
+	// 2. Initiate Connection B and block its DIAL_REQ send to trigger dial timeout
+	blockSend.Store(true)
+
+	connB, err := net.Dial("tcp", frontURL.Host)
+	if err != nil {
+		t.Fatalf("failed to connect connB to HTTP CONNECT front: %v", err)
+	}
+	defer connB.Close()
+
+	if _, err := fmt.Fprintf(connB, "CONNECT 127.0.0.1:8080 HTTP/1.1\r\nHost: 127.0.0.1:8080\r\n\r\n"); err != nil {
+		t.Fatalf("failed to write CONNECT request for connB: %v", err)
 	}
 
 	select {
 	case <-sendStarted:
-	case <-time.After(time.Second):
-		t.Fatal("timed out waiting for backend DIAL_REQ send to start")
+	case <-time.After(5 * time.Second):
+		t.Fatal("timed out waiting for connB backend Send to start")
 	}
 
-	resp, err := http.ReadResponse(bufio.NewReader(conn), nil)
+	respB, err := http.ReadResponse(bufio.NewReader(connB), nil)
 	if err != nil {
-		t.Fatalf("failed to read CONNECT response: %v", err)
+		t.Fatalf("failed to read CONNECT response for connB: %v", err)
 	}
-	defer resp.Body.Close()
+	defer respB.Body.Close()
 
-	if resp.StatusCode != http.StatusGatewayTimeout {
-		t.Fatalf("expected %d for blocked backend dial send, got %s", http.StatusGatewayTimeout, resp.Status)
+	if respB.StatusCode != http.StatusGatewayTimeout {
+		t.Fatalf("expected %d for blocked backend dial send, got %s", http.StatusGatewayTimeout, respB.Status)
 	}
 
 	// Backend must remain healthy and active
@@ -476,19 +613,185 @@ func TestHTTPConnectTunnelBlockedBackendDialSendPreservesBackendAndEstablished(t
 	default:
 	}
 
-	// Established connection A must still be present
-	proxyServer.fmu.Lock()
-	conns, ok := proxyServer.established[backend.GetAgentID()]
-	proxyServer.fmu.Unlock()
-	if !ok || conns[100] == nil {
-		t.Fatal("expected established connection A to still exist")
+	// 3. Unblock backend send and verify Connection A can transfer data in both directions
+	blockSend.Store(false)
+	close(releaseSend)
+
+	// (a) Verify Connection A receives data from the agent
+	fromAgent <- dataPkt(connectIDA, []byte("agent-to-client-100"))
+	readBuf := make([]byte, len("agent-to-client-100"))
+	if err := connA.SetReadDeadline(time.Now().Add(5 * time.Second)); err != nil {
+		t.Fatalf("failed to set read deadline on connA: %v", err)
+	}
+	if _, err := io.ReadFull(brA, readBuf); err != nil {
+		t.Fatalf("failed to read tunnel bytes from agent on connA: %v", err)
+	}
+	if got := string(readBuf); got != "agent-to-client-100" {
+		t.Errorf("expected %q back from agent on connA, got %q", "agent-to-client-100", got)
 	}
 
-	close(releaseSend)
+	// (b) Verify Connection A can send data to the agent once agent is reading
+	if _, err := connA.Write([]byte("client-to-agent-100")); err != nil {
+		t.Fatalf("failed to write tunnel bytes on connA: %v", err)
+	}
+
+	// Drain any DIAL_REQ for connB that was released, and look for connA's DATA packet
+	var dataPktA *client.Packet
+	deadlineData := time.Now().Add(5 * time.Second)
+	for {
+		select {
+		case pkt := <-toAgent:
+			if pkt.Type == client.PacketType_DATA && pkt.GetData().ConnectID == connectIDA {
+				dataPktA = pkt
+				break
+			}
+		case <-time.After(5 * time.Second):
+			t.Fatal("timed out waiting for DATA packet on connA")
+		}
+		if dataPktA != nil || time.Now().After(deadlineData) {
+			break
+		}
+	}
+	if dataPktA == nil {
+		t.Fatal("expected DATA packet from connA to reach agent")
+	}
+	if got := string(dataPktA.GetData().Data); got != "client-to-agent-100" {
+		t.Errorf("expected tunnel data %q, got %q", "client-to-agent-100", got)
+	}
+}
+
+func TestDialResponseRaceWithSendTimeoutPreservesConnection(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+
+	metrics.Metrics.Reset()
+
+	frontendConn := prepareFrontendConn(ctrl)
+	proxyServer := NewProxyServer(uuid.New().String(), []proxystrategies.ProxyStrategy{proxystrategies.ProxyStrategyDefault}, 1, &AgentTokenAuthenticationOptions{}, xfrChannelSize)
+	proxyServer.SetBackendDialTimeout(100 * time.Millisecond)
+
+	toAgent := make(chan *client.Packet, 16)
+	fromAgent := make(chan *client.Packet, 16)
+
+	agentConn := prepareAgentConn(ctrl, nil)
+	agentConn.EXPECT().SendHeader(gomock.Any()).Return(nil).AnyTimes()
+	agentConn.EXPECT().Send(gomock.Any()).DoAndReturn(func(pkt *client.Packet) error {
+		toAgent <- pkt
+		if pkt.Type == client.PacketType_DIAL_REQ {
+			// Simulate the agent returning DIAL_RSP immediately while the Send worker blocks past timeout
+			fromAgent <- &client.Packet{
+				Type: client.PacketType_DIAL_RSP,
+				Payload: &client.Packet_DialResponse{
+					DialResponse: &client.DialResponse{
+						Random:    pkt.GetDialRequest().Random,
+						ConnectID: 555,
+					},
+				},
+			}
+			time.Sleep(200 * time.Millisecond)
+		}
+		return nil
+	}).AnyTimes()
+	agentConn.EXPECT().Recv().DoAndReturn(func() (*client.Packet, error) {
+		pkt, ok := <-fromAgent
+		if !ok {
+			return nil, io.EOF
+		}
+		return pkt, nil
+	}).AnyTimes()
+
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		proxyServer.Connect(agentConn)
+	}()
+	defer func() {
+		close(fromAgent)
+		select {
+		case <-done:
+		case <-time.After(5 * time.Second):
+			t.Error("timed out waiting for Connect to return")
+		}
+	}()
+
+	// Wait for backend to be registered
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		_, err := proxyServer.getBackend("127.0.0.1:8080")
+		if err == nil {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("timed out waiting for the agent backend to be registered: %v", err)
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+
+	const dialID = int64(999)
+	dialReq := dialReqPkt(dialID)
+	dataFromFrontend := dataPkt(555, []byte("data-from-frontend"))
+
+	var frontendSentPackets []*client.Packet
+	var mu sync.Mutex
+	frontendConn.EXPECT().Send(gomock.Any()).DoAndReturn(func(pkt *client.Packet) error {
+		mu.Lock()
+		frontendSentPackets = append(frontendSentPackets, pkt)
+		mu.Unlock()
+		return nil
+	}).AnyTimes()
+
+	gomock.InOrder(
+		frontendConn.EXPECT().Recv().Return(dialReq, nil).Times(1),
+		frontendConn.EXPECT().Recv().Return(dataFromFrontend, nil).Times(1),
+		frontendConn.EXPECT().Recv().Return(nil, io.EOF).Times(1),
+	)
+
+	proxyDone := make(chan struct{})
+	go func() {
+		proxyServer.Proxy(frontendConn)
+		close(proxyDone)
+	}()
+
 	select {
-	case <-sendReleased:
-	case <-time.After(time.Second):
-		t.Fatal("timed out waiting for blocked backend Send goroutine to exit")
+	case <-proxyDone:
+	case <-time.After(5 * time.Second):
+		t.Fatal("timed out waiting for Proxy to complete")
+	}
+
+	// Verify frontend received the successful DIAL_RSP and NO timeout error DIAL_RSP
+	mu.Lock()
+	defer mu.Unlock()
+	if len(frontendSentPackets) != 1 {
+		t.Fatalf("expected exactly 1 packet sent to frontend, got %d: %v", len(frontendSentPackets), frontendSentPackets)
+	}
+	if frontendSentPackets[0].Type != client.PacketType_DIAL_RSP ||
+		frontendSentPackets[0].GetDialResponse().Error != "" ||
+		frontendSentPackets[0].GetDialResponse().ConnectID != 555 {
+		t.Fatalf("expected successful DIAL_RSP with ConnectID 555, got %v", frontendSentPackets[0])
+	}
+
+	// Verify the DATA packet from frontend reached toAgent
+	var receivedDataPkt *client.Packet
+	deadlineData := time.Now().Add(5 * time.Second)
+	for {
+		select {
+		case pkt := <-toAgent:
+			if pkt.Type == client.PacketType_DATA && pkt.GetData().ConnectID == 555 {
+				receivedDataPkt = pkt
+				break
+			}
+		case <-time.After(5 * time.Second):
+			t.Fatal("timed out waiting for DATA packet to reach agent")
+		}
+		if receivedDataPkt != nil || time.Now().After(deadlineData) {
+			break
+		}
+	}
+	if receivedDataPkt == nil {
+		t.Fatal("expected DATA packet to reach agent after dial was claimed")
+	}
+	if got := string(receivedDataPkt.GetData().Data); got != "data-from-frontend" {
+		t.Errorf("expected %q, got %q", "data-from-frontend", got)
 	}
 }
 
