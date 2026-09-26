@@ -294,24 +294,40 @@ func (s *ProxyServer) sendDialRequestToBackend(backend *Backend, pkt *client.Pac
 		return backend.Send(pkt)
 	}
 
+	ctx, cancel := context.WithTimeout(backend.Context(), timeout)
+	defer cancel()
+
 	errCh := make(chan error, 1)
 	go func() {
-		errCh <- backend.Send(pkt)
+		errCh <- backend.SendContext(ctx, pkt)
 	}()
 
-	timer := time.NewTimer(timeout)
-	defer timer.Stop()
-
-	ctx := backend.Context()
+	// The background goroutine and outer select allow the caller to time out
+	// while an active transport send remains blocked.
 	select {
 	case err := <-errCh:
+		if errors.Is(err, context.DeadlineExceeded) {
+			return errBackendDialTimeout
+		}
 		return err
 	case <-ctx.Done():
-		return ctx.Err()
-	case <-timer.C:
-		s.retireBackend(backend, "backend dial request send timed out")
+		return resolveDialSendOnContextDone(ctx, errCh)
+	}
+}
+
+func resolveDialSendOnContextDone(ctx context.Context, errCh <-chan error) error {
+	select {
+	case err := <-errCh:
+		if errors.Is(err, context.DeadlineExceeded) {
+			return errBackendDialTimeout
+		}
+		return err
+	default:
+	}
+	if errors.Is(ctx.Err(), context.DeadlineExceeded) {
 		return errBackendDialTimeout
 	}
+	return ctx.Err()
 }
 
 func (s *ProxyServer) startPendingDialTimeout(random int64, backend *Backend, frontend *Frontend) {
@@ -369,12 +385,6 @@ func (s *ProxyServer) removeBackend(backend *Backend) {
 	for _, bm := range s.BackendManagers {
 		bm.RemoveBackend(backend)
 	}
-}
-
-func (s *ProxyServer) retireBackend(backend *Backend, reason string) {
-	backend.Retire()
-	klog.V(2).InfoS("Retire backend connection", "agentID", backend.GetAgentID(), "reason", reason)
-	s.removeBackend(backend)
 }
 
 func (s *ProxyServer) addEstablished(agentID string, connID int64, p *ProxyClientConnection) {
@@ -689,13 +699,16 @@ func (s *ProxyServer) serveRecvFrontend(frontend *Frontend, recvCh <-chan *clien
 				})
 			if err := s.sendDialRequestToBackend(backend, pkt); err != nil {
 				klog.ErrorS(err, "DIAL_REQ to Backend failed", "dialID", random)
-				if s.PendingDial.Remove(random) != nil {
-					reason := metrics.DialFailureBackendClose
-					if errors.Is(err, errBackendDialTimeout) {
-						reason = metrics.DialFailureBackendDialTimeout
-					}
-					metrics.Metrics.ObserveDialFailure(reason)
+				if s.PendingDial.Remove(random) == nil {
+					// The dial was already claimed by a DIAL_RSP or cancelled.
+					// Do not send a failure DIAL_RSP or abort frontend processing.
+					continue
 				}
+				reason := metrics.DialFailureBackendClose
+				if errors.Is(err, errBackendDialTimeout) {
+					reason = metrics.DialFailureBackendDialTimeout
+				}
+				metrics.Metrics.ObserveDialFailure(reason)
 				resp := &client.Packet{
 					Type: client.PacketType_DIAL_RSP,
 					Payload: &client.Packet_DialResponse{
@@ -1028,6 +1041,10 @@ func (s *ProxyServer) serveRecvBackend(backend *Backend, agentID string, recvCh 
 				klog.V(2).InfoS("DIAL_RSP not recognized; dropped", "dialID", resp.Random, "agentID", agentID, "connectionID", resp.ConnectID)
 				metrics.Metrics.ObserveDialFailure(metrics.DialFailureUnrecognizedResponse)
 				if resp.ConnectID != 0 {
+					// Note: synchronous cleanup sends (e.g. unknown-dial cleanup, response dispatch,
+					// frontend processing, and frontend shutdown) can block if backend packet sending
+					// is stalled. Follow-up work may decouple cleanup sending to prevent cleanup-related
+					// head-of-line blocking across these paths.
 					s.sendBackendClose(backend, resp.ConnectID, resp.Random, "unknown dial id")
 				}
 			} else {

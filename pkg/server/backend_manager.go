@@ -55,7 +55,7 @@ type AgentStream interface {
 // It wraps an AgentStream, provides synchronization and emits common stream
 // metrics.
 type Backend struct {
-	sendLock   sync.Mutex
+	sendLock   chan struct{}
 	recvLock   sync.Mutex
 	retireOnce sync.Once
 	conn       AgentStream
@@ -112,9 +112,31 @@ func (b *Backend) Done() <-chan struct{} {
 	return b.done
 }
 
-func (b *Backend) Send(p *client.Packet) error {
-	b.sendLock.Lock()
-	defer b.sendLock.Unlock()
+func (b *Backend) lockSend(ctx context.Context) error {
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case b.sendLock <- struct{}{}:
+		return nil
+	}
+}
+
+func (b *Backend) unlockSend() {
+	<-b.sendLock
+}
+
+func (b *Backend) SendContext(ctx context.Context, p *client.Packet) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if err := b.lockSend(ctx); err != nil {
+		return err
+	}
+	defer b.unlockSend()
+
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 
 	const segment = commonmetrics.SegmentToAgent
 	metrics.Metrics.ObservePacket(segment, p.Type)
@@ -123,6 +145,10 @@ func (b *Backend) Send(p *client.Packet) error {
 		metrics.Metrics.ObserveStreamError(segment, err, p.Type)
 	}
 	return err
+}
+
+func (b *Backend) Send(p *client.Packet) error {
+	return b.SendContext(b.Context(), p)
 }
 
 func (b *Backend) Recv() (*client.Packet, error) {
@@ -192,7 +218,13 @@ func NewBackend(conn AgentStream) (*Backend, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &Backend{conn: conn, id: agentID, idents: agentIdentifiers, done: make(chan struct{})}, nil
+	return &Backend{
+		conn:     conn,
+		id:       agentID,
+		idents:   agentIdentifiers,
+		done:     make(chan struct{}),
+		sendLock: make(chan struct{}, 1),
+	}, nil
 }
 
 // BackendStorage is an interface to manage the storage of the backend
