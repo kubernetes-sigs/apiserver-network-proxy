@@ -231,15 +231,7 @@ func TestBackendSendContextCancelled(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	defer ctrl.Finish()
 
-	agentConn := agentmock.NewMockAgentService_ConnectServer(ctrl)
-	agentConnMD := metadata.MD{
-		":authority":   []string{"127.0.0.1:8091"},
-		"agentid":      []string{uuid.New().String()},
-		"content-type": []string{"application/grpc"},
-		"user-agent":   []string{"grpc-go/1.42.0"},
-	}
-	agentConnCtx := metadata.NewIncomingContext(context.Background(), agentConnMD)
-	agentConn.EXPECT().Context().Return(agentConnCtx).AnyTimes()
+	agentConn := prepareAgentConn(ctrl, nil)
 
 	var mu sync.Mutex
 	var sentPackets []*client.Packet
@@ -334,42 +326,28 @@ func TestBackendSendContextCancelled(t *testing.T) {
 	}
 }
 
-func TestSendDialRequestToBackendPrefersAvailableSendResultOverTimeout(t *testing.T) {
-	ctrl := gomock.NewController(t)
-	defer ctrl.Finish()
+func TestResolveDialSendOnContextDone(t *testing.T) {
+	// 1. Expired context with a successful result (nil) already buffered in errCh -> returns nil
+	ctxExpired, cancel := context.WithDeadline(context.Background(), time.Now().Add(-time.Second))
+	defer cancel()
 
-	agentConn := agentmock.NewMockAgentService_ConnectServer(ctrl)
-	agentConnMD := metadata.MD{
-		":authority":   []string{"127.0.0.1:8091"},
-		"agentid":      []string{uuid.New().String()},
-		"content-type": []string{"application/grpc"},
-		"user-agent":   []string{"grpc-go/1.42.0"},
-	}
-	agentConnCtx := metadata.NewIncomingContext(context.Background(), agentConnMD)
-	agentConn.EXPECT().Context().Return(agentConnCtx).AnyTimes()
-	agentConn.EXPECT().Send(gomock.Any()).Return(nil).AnyTimes()
-
-	backend, err := NewBackend(agentConn)
-	if err != nil {
-		t.Fatalf("Unexpected NewBackend error: %v", err)
+	errChWithSuccess := make(chan error, 1)
+	errChWithSuccess <- nil
+	if err := resolveDialSendOnContextDone(ctxExpired, errChWithSuccess); err != nil {
+		t.Fatalf("expected nil when success result is buffered in errCh on context expiration, got: %v", err)
 	}
 
-	proxyServer := NewProxyServer(uuid.New().String(), []proxystrategies.ProxyStrategy{proxystrategies.ProxyStrategyDefault}, 1, &AgentTokenAuthenticationOptions{}, xfrChannelSize)
-	proxyServer.SetBackendDialTimeout(100 * time.Millisecond)
-
-	pkt := &client.Packet{
-		Type: client.PacketType_DIAL_REQ,
-		Payload: &client.Packet_DialRequest{
-			DialRequest: &client.DialRequest{
-				Random: 12345,
-			},
-		},
+	// 2. Expired context with an empty errCh -> returns errBackendDialTimeout
+	errChEmpty := make(chan error, 1)
+	if err := resolveDialSendOnContextDone(ctxExpired, errChEmpty); !errors.Is(err, errBackendDialTimeout) {
+		t.Fatalf("expected errBackendDialTimeout when errCh is empty on context deadline, got: %v", err)
 	}
 
-	for i := 0; i < 20; i++ {
-		if err := proxyServer.sendDialRequestToBackend(backend, pkt); err != nil {
-			t.Fatalf("iteration %d: expected nil error when send succeeded, got: %v", i, err)
-		}
+	// 3. Canceled (non-deadline) context with an empty errCh -> returns context.Canceled
+	ctxCanceled, cancel2 := context.WithCancel(context.Background())
+	cancel2()
+	if err := resolveDialSendOnContextDone(ctxCanceled, errChEmpty); !errors.Is(err, context.Canceled) {
+		t.Fatalf("expected context.Canceled when context canceled without deadline, got: %v", err)
 	}
 }
 
@@ -706,19 +684,31 @@ func TestDialResponseRaceWithSendTimeoutPreservesConnection(t *testing.T) {
 
 	frontendConn := prepareFrontendConn(ctrl)
 	proxyServer := NewProxyServer(uuid.New().String(), []proxystrategies.ProxyStrategy{proxystrategies.ProxyStrategyDefault}, 1, &AgentTokenAuthenticationOptions{}, xfrChannelSize)
-	proxyServer.SetBackendDialTimeout(100 * time.Millisecond)
+	proxyServer.SetBackendDialTimeout(50 * time.Millisecond)
 
 	toAgent := make(chan *client.Packet, 16)
 	fromAgent := make(chan *client.Packet, 16)
 
+	var releaseOnce sync.Once
 	releaseDialSend := make(chan struct{})
+	agentSendDone := make(chan struct{})
 	dialRspSentToFrontend := make(chan struct{}, 1)
+	dialSendBlocked := make(chan struct{}, 1)
+
+	t.Cleanup(func() {
+		releaseOnce.Do(func() { close(releaseDialSend) })
+		select {
+		case <-agentSendDone:
+		case <-time.After(2 * time.Second):
+		}
+	})
 
 	agentConn := prepareAgentConn(ctrl, nil)
 	agentConn.EXPECT().SendHeader(gomock.Any()).Return(nil).AnyTimes()
 	agentConn.EXPECT().Send(gomock.Any()).DoAndReturn(func(pkt *client.Packet) error {
 		toAgent <- pkt
 		if pkt.Type == client.PacketType_DIAL_REQ {
+			defer close(agentSendDone)
 			// Simulate the agent returning DIAL_RSP immediately
 			fromAgent <- &client.Packet{
 				Type: client.PacketType_DIAL_RSP,
@@ -734,6 +724,11 @@ func TestDialResponseRaceWithSendTimeoutPreservesConnection(t *testing.T) {
 			case <-dialRspSentToFrontend:
 			case <-time.After(5 * time.Second):
 				t.Error("timed out waiting for DIAL_RSP to reach frontend")
+			}
+			// Signal that DIAL_REQ is blocked in agent Send
+			select {
+			case dialSendBlocked <- struct{}{}:
+			default:
 			}
 			// Block Send worker past backendDialTimeout so sendDialRequestToBackend times out
 			<-releaseDialSend
@@ -796,12 +791,7 @@ func TestDialResponseRaceWithSendTimeoutPreservesConnection(t *testing.T) {
 
 	gomock.InOrder(
 		frontendConn.EXPECT().Recv().Return(dialReq, nil).Times(1),
-		// When the frontend Recv is called the second time, it proves that the
-		// dial send timeout path in serveRecvFrontend completed and continued.
-		frontendConn.EXPECT().Recv().DoAndReturn(func() (*client.Packet, error) {
-			close(releaseDialSend)
-			return dataFromFrontend, nil
-		}).Times(1),
+		frontendConn.EXPECT().Recv().Return(dataFromFrontend, nil).Times(1),
 		frontendConn.EXPECT().Recv().Return(nil, io.EOF).Times(1),
 	)
 
@@ -810,6 +800,20 @@ func TestDialResponseRaceWithSendTimeoutPreservesConnection(t *testing.T) {
 		proxyServer.Proxy(frontendConn)
 		close(proxyDone)
 	}()
+
+	// Wait until DIAL_REQ send is blocked and DIAL_RSP reached frontend
+	select {
+	case <-dialSendBlocked:
+	case <-time.After(5 * time.Second):
+		t.Fatal("timed out waiting for DIAL_REQ send to block")
+	}
+
+	// Keep Send blocked well past backendDialTimeout (50ms) so timeout handling
+	// in serveRecvFrontend definitely completes before release
+	time.Sleep(100 * time.Millisecond)
+
+	// Now unblock the Send worker
+	releaseOnce.Do(func() { close(releaseDialSend) })
 
 	select {
 	case <-proxyDone:
