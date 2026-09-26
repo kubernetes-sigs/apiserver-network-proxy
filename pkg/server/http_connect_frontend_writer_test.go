@@ -152,7 +152,7 @@ func newWriterTestServer(t *testing.T) *writerTestServer {
 	conn.EXPECT().Send(gomock.Any()).Return(nil).AnyTimes()
 	f := &writerTestServer{
 		proxy:   NewProxyServer("test", []proxystrategies.ProxyStrategy{proxystrategies.ProxyStrategyDefault}, 1, nil, 10),
-		backend: &Backend{id: "agent", conn: conn},
+		backend: &Backend{id: "agent", conn: conn, sendLock: make(chan struct{}, 1)},
 		packets: make(chan *client.Packet),
 		done:    make(chan struct{}),
 		cancel:  cancel,
