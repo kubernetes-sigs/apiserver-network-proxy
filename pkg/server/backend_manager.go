@@ -55,11 +55,10 @@ type AgentStream interface {
 // It wraps an AgentStream, provides synchronization and emits common stream
 // metrics.
 type Backend struct {
-	sendLock     chan struct{}
-	sendLockInit sync.Once
-	recvLock     sync.Mutex
-	retireOnce   sync.Once
-	conn         AgentStream
+	sendLock   chan struct{}
+	recvLock   sync.Mutex
+	retireOnce sync.Once
+	conn       AgentStream
 
 	// cached from conn.Context()
 	id     string
@@ -113,16 +112,7 @@ func (b *Backend) Done() <-chan struct{} {
 	return b.done
 }
 
-func (b *Backend) initSendLock() {
-	b.sendLockInit.Do(func() {
-		if b.sendLock == nil {
-			b.sendLock = make(chan struct{}, 1)
-		}
-	})
-}
-
 func (b *Backend) lockSend(ctx context.Context) error {
-	b.initSendLock()
 	select {
 	case <-ctx.Done():
 		return ctx.Err()
