@@ -43,6 +43,8 @@ const (
 var (
 	// Use buckets ranging from 5 ms to 30 seconds.
 	latencyBuckets = []float64{0.005, 0.025, 0.1, 0.5, 2.5, 10, 30}
+	// Use buckets ranging from 1 second to 24 hours.
+	connectionDurationBuckets = []float64{1, 5, 15, 30, 60, 300, 900, 1800, 3600, 14400, 43200, 86400}
 
 	// Metrics provides access to all dial metrics.
 	Metrics = newAgentMetrics()
@@ -53,6 +55,8 @@ type AgentMetrics struct {
 	dialLatencies       *prometheus.HistogramVec
 	serverFailures      *prometheus.CounterVec
 	dialFailures        *prometheus.CounterVec
+	connectionDuration  *prometheus.HistogramVec
+	connectionCloses    *prometheus.CounterVec
 	serverConnections   *prometheus.GaugeVec
 	serverCount         prometheus.Gauge
 	endpointConnections *prometheus.GaugeVec
@@ -90,6 +94,25 @@ func newAgentMetrics() *AgentMetrics {
 			Subsystem: Subsystem,
 			Name:      "endpoint_dial_failure_total",
 			Help:      "Number of failures dialing the remote endpoint, by reason (example: timeout).",
+		},
+		[]string{"reason"},
+	)
+	connectionDuration := prometheus.NewHistogramVec(
+		prometheus.HistogramOpts{
+			Namespace: Namespace,
+			Subsystem: Subsystem,
+			Name:      "endpoint_connection_duration_seconds",
+			Help:      "Duration in seconds an endpoint connection was established (post-dial) before being closed.",
+			Buckets:   connectionDurationBuckets,
+		},
+		[]string{},
+	)
+	connectionCloses := prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Namespace: Namespace,
+			Subsystem: Subsystem,
+			Name:      "endpoint_connection_close_total",
+			Help:      "Number of established endpoint connections (post-dial) that were closed, by reason for the close.",
 		},
 		[]string{"reason"},
 	)
@@ -152,6 +175,8 @@ func newAgentMetrics() *AgentMetrics {
 	prometheus.MustRegister(dialLatencies)
 	prometheus.MustRegister(serverFailures)
 	prometheus.MustRegister(dialFailures)
+	prometheus.MustRegister(connectionDuration)
+	prometheus.MustRegister(connectionCloses)
 	prometheus.MustRegister(serverConnections)
 	prometheus.MustRegister(endpointConnections)
 	prometheus.MustRegister(streamPackets)
@@ -164,6 +189,8 @@ func newAgentMetrics() *AgentMetrics {
 		dialLatencies:       dialLatencies,
 		serverFailures:      serverFailures,
 		dialFailures:        dialFailures,
+		connectionDuration:  connectionDuration,
+		connectionCloses:    connectionCloses,
 		serverConnections:   serverConnections,
 		endpointConnections: endpointConnections,
 		streamPackets:       streamPackets,
@@ -181,6 +208,8 @@ func (a *AgentMetrics) Reset() {
 	a.dialLatencies.Reset()
 	a.serverFailures.Reset()
 	a.dialFailures.Reset()
+	a.connectionDuration.Reset()
+	a.connectionCloses.Reset()
 	a.serverConnections.Reset()
 	a.endpointConnections.Reset()
 	a.streamPackets.Reset()
@@ -209,6 +238,32 @@ func (a *AgentMetrics) ObserveDialLatency(elapsed time.Duration) {
 // ObserveDialFailure records a remote endpoint dial failure.
 func (a *AgentMetrics) ObserveDialFailure(reason DialFailureReason) {
 	a.dialFailures.WithLabelValues(string(reason)).Inc()
+}
+
+// ConnectionCloseReason categorizes why an established endpoint connection was closed.
+type ConnectionCloseReason string
+
+const (
+	// ConnectionCloseServer indicates the close was requested by the proxy server
+	// (a CLOSE_REQ was received, typically originating from the frontend/client).
+	ConnectionCloseServer ConnectionCloseReason = "server_close"
+	// ConnectionCloseEndpoint indicates the remote endpoint closed the connection
+	// (EOF or a read/write error on the endpoint connection).
+	ConnectionCloseEndpoint ConnectionCloseReason = "endpoint_close"
+	// ConnectionCloseAgentShutdown indicates the connection was torn down because the
+	// agent client is shutting down.
+	ConnectionCloseAgentShutdown ConnectionCloseReason = "agent_shutdown"
+)
+
+// ObserveConnectionDuration records how long an established endpoint connection remained open.
+func (a *AgentMetrics) ObserveConnectionDuration(elapsed time.Duration) {
+	a.connectionDuration.WithLabelValues().Observe(elapsed.Seconds())
+}
+
+// ObserveConnectionClose records the closure of an established endpoint connection,
+// labeled by the reason for the close.
+func (a *AgentMetrics) ObserveConnectionClose(reason ConnectionCloseReason) {
+	a.connectionCloses.WithLabelValues(string(reason)).Inc()
 }
 
 func (a *AgentMetrics) SetServerConnectionsCount(count int) {
