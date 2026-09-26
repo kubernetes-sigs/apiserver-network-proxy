@@ -309,10 +309,26 @@ func (s *ProxyServer) sendDialRequestToBackend(backend *Backend, pkt *client.Pac
 		}
 		return err
 	case <-ctx.Done():
-		if errors.Is(ctx.Err(), context.DeadlineExceeded) {
-			return errBackendDialTimeout
+		select {
+		case err := <-errCh:
+			if errors.Is(err, context.DeadlineExceeded) {
+				return errBackendDialTimeout
+			}
+			return err
+		case <-ctx.Done():
+			select {
+			case err := <-errCh:
+				if errors.Is(err, context.DeadlineExceeded) {
+					return errBackendDialTimeout
+				}
+				return err
+			default:
+			}
+			if errors.Is(ctx.Err(), context.DeadlineExceeded) {
+				return errBackendDialTimeout
+			}
+			return ctx.Err()
 		}
-		return ctx.Err()
 	}
 }
 
@@ -1027,6 +1043,9 @@ func (s *ProxyServer) serveRecvBackend(backend *Backend, agentID string, recvCh 
 				klog.V(2).InfoS("DIAL_RSP not recognized; dropped", "dialID", resp.Random, "agentID", agentID, "connectionID", resp.ConnectID)
 				metrics.Metrics.ObserveDialFailure(metrics.DialFailureUnrecognizedResponse)
 				if resp.ConnectID != 0 {
+					// Note: late-response cleanup currently sends CLOSE_REQ synchronously, which can block
+					// response dispatch if backend packet sending is stalled. Follow-up work may decouple
+					// cleanup sending to prevent cleanup-related head-of-line blocking.
 					s.sendBackendClose(backend, resp.ConnectID, resp.Random, "unknown dial id")
 				}
 			} else {

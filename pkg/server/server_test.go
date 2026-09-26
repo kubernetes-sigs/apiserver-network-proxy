@@ -334,6 +334,45 @@ func TestBackendSendContextCancelled(t *testing.T) {
 	}
 }
 
+func TestSendDialRequestToBackendPrefersAvailableSendResultOverTimeout(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+
+	agentConn := agentmock.NewMockAgentService_ConnectServer(ctrl)
+	agentConnMD := metadata.MD{
+		":authority":   []string{"127.0.0.1:8091"},
+		"agentid":      []string{uuid.New().String()},
+		"content-type": []string{"application/grpc"},
+		"user-agent":   []string{"grpc-go/1.42.0"},
+	}
+	agentConnCtx := metadata.NewIncomingContext(context.Background(), agentConnMD)
+	agentConn.EXPECT().Context().Return(agentConnCtx).AnyTimes()
+	agentConn.EXPECT().Send(gomock.Any()).Return(nil).AnyTimes()
+
+	backend, err := NewBackend(agentConn)
+	if err != nil {
+		t.Fatalf("Unexpected NewBackend error: %v", err)
+	}
+
+	proxyServer := NewProxyServer(uuid.New().String(), []proxystrategies.ProxyStrategy{proxystrategies.ProxyStrategyDefault}, 1, &AgentTokenAuthenticationOptions{}, xfrChannelSize)
+	proxyServer.SetBackendDialTimeout(100 * time.Millisecond)
+
+	pkt := &client.Packet{
+		Type: client.PacketType_DIAL_REQ,
+		Payload: &client.Packet_DialRequest{
+			DialRequest: &client.DialRequest{
+				Random: 12345,
+			},
+		},
+	}
+
+	for i := 0; i < 20; i++ {
+		if err := proxyServer.sendDialRequestToBackend(backend, pkt); err != nil {
+			t.Fatalf("iteration %d: expected nil error when send succeeded, got: %v", i, err)
+		}
+	}
+}
+
 func TestHTTPConnectTunnelBlockedBackendDialSendPreservesBackend(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	defer ctrl.Finish()
@@ -613,11 +652,7 @@ func TestHTTPConnectTunnelBlockedBackendDialSendPreservesBackendAndEstablished(t
 	default:
 	}
 
-	// 3. Unblock backend send and verify Connection A can transfer data in both directions
-	blockSend.Store(false)
-	close(releaseSend)
-
-	// (a) Verify Connection A receives data from the agent
+	// 3. Verify Connection A receives data from the agent while backend send is still blocked
 	fromAgent <- dataPkt(connectIDA, []byte("agent-to-client-100"))
 	readBuf := make([]byte, len("agent-to-client-100"))
 	if err := connA.SetReadDeadline(time.Now().Add(5 * time.Second)); err != nil {
@@ -630,7 +665,10 @@ func TestHTTPConnectTunnelBlockedBackendDialSendPreservesBackendAndEstablished(t
 		t.Errorf("expected %q back from agent on connA, got %q", "agent-to-client-100", got)
 	}
 
-	// (b) Verify Connection A can send data to the agent once agent is reading
+	// 4. Now unblock backend send and verify Connection A can send data to the agent
+	blockSend.Store(false)
+	close(releaseSend)
+
 	if _, err := connA.Write([]byte("client-to-agent-100")); err != nil {
 		t.Fatalf("failed to write tunnel bytes on connA: %v", err)
 	}
@@ -673,12 +711,15 @@ func TestDialResponseRaceWithSendTimeoutPreservesConnection(t *testing.T) {
 	toAgent := make(chan *client.Packet, 16)
 	fromAgent := make(chan *client.Packet, 16)
 
+	releaseDialSend := make(chan struct{})
+	dialRspSentToFrontend := make(chan struct{}, 1)
+
 	agentConn := prepareAgentConn(ctrl, nil)
 	agentConn.EXPECT().SendHeader(gomock.Any()).Return(nil).AnyTimes()
 	agentConn.EXPECT().Send(gomock.Any()).DoAndReturn(func(pkt *client.Packet) error {
 		toAgent <- pkt
 		if pkt.Type == client.PacketType_DIAL_REQ {
-			// Simulate the agent returning DIAL_RSP immediately while the Send worker blocks past timeout
+			// Simulate the agent returning DIAL_RSP immediately
 			fromAgent <- &client.Packet{
 				Type: client.PacketType_DIAL_RSP,
 				Payload: &client.Packet_DialResponse{
@@ -688,7 +729,14 @@ func TestDialResponseRaceWithSendTimeoutPreservesConnection(t *testing.T) {
 					},
 				},
 			}
-			time.Sleep(200 * time.Millisecond)
+			// Wait until DIAL_RSP has been processed and sent to frontend
+			select {
+			case <-dialRspSentToFrontend:
+			case <-time.After(5 * time.Second):
+				t.Error("timed out waiting for DIAL_RSP to reach frontend")
+			}
+			// Block Send worker past backendDialTimeout so sendDialRequestToBackend times out
+			<-releaseDialSend
 		}
 		return nil
 	}).AnyTimes()
@@ -737,12 +785,23 @@ func TestDialResponseRaceWithSendTimeoutPreservesConnection(t *testing.T) {
 		mu.Lock()
 		frontendSentPackets = append(frontendSentPackets, pkt)
 		mu.Unlock()
+		if pkt.Type == client.PacketType_DIAL_RSP {
+			select {
+			case dialRspSentToFrontend <- struct{}{}:
+			default:
+			}
+		}
 		return nil
 	}).AnyTimes()
 
 	gomock.InOrder(
 		frontendConn.EXPECT().Recv().Return(dialReq, nil).Times(1),
-		frontendConn.EXPECT().Recv().Return(dataFromFrontend, nil).Times(1),
+		// When the frontend Recv is called the second time, it proves that the
+		// dial send timeout path in serveRecvFrontend completed and continued.
+		frontendConn.EXPECT().Recv().DoAndReturn(func() (*client.Packet, error) {
+			close(releaseDialSend)
+			return dataFromFrontend, nil
+		}).Times(1),
 		frontendConn.EXPECT().Recv().Return(nil, io.EOF).Times(1),
 	)
 
