@@ -19,18 +19,24 @@ package agent
 import (
 	"errors"
 	"fmt"
+	"net"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
 	"go.uber.org/goleak"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/credentials/insecure"
+	"google.golang.org/grpc/metadata"
 	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/klog/v2"
 	"sigs.k8s.io/apiserver-network-proxy/konnectivity-client/proto/client"
 	"sigs.k8s.io/apiserver-network-proxy/proto/agent"
+	"sigs.k8s.io/apiserver-network-proxy/proto/header"
 )
 
 func TestServeData_HTTP(t *testing.T) {
@@ -483,3 +489,75 @@ func goleakVerifyNone(t *testing.T, options ...goleak.Option) {
 		t.Error(err)
 	}
 }
+
+func TestClose_Client_NilConn(t *testing.T) {
+	stopCh := make(chan struct{})
+	testClient := &Client{
+		stopCh: stopCh,
+	}
+	testClient.Close()
+	select {
+	case <-stopCh:
+	default:
+		t.Fatal("stopCh not closed by Client.Close()")
+	}
+}
+
+func TestConnect_Client_InvalidTokenPath(t *testing.T) {
+	l, err := net.Listen("tcp", ":0")
+	if err != nil {
+		t.Fatal("failed to open port:", err)
+	}
+	defer l.Close()
+
+	gs := grpc.NewServer()
+	gs.RegisterService(&agent.AgentService_ServiceDesc, fakeServer{})
+
+	var wg sync.WaitGroup
+	defer func() {
+		gs.Stop()
+		wg.Wait()
+	}()
+	wg.Go(func() {
+		gs.Serve(l)
+	})
+
+	// validate the setup actually works and allows the grpc dial to go through
+	cl, _, err := newAgentClient(l.Addr().String(), "", "",
+		&ClientSet{},
+		grpc.WithTransportCredentials(insecure.NewCredentials()),
+	)
+	if err != nil {
+		t.Fatal("failed to create agent client:", err)
+	}
+	if cl.conn == nil {
+		t.Fatal("agent client conn nil")
+	}
+	cl.Close()
+
+	// check error path when invalid SA token
+	cl, _, err = newAgentClient(l.Addr().String(), "", "",
+		&ClientSet{
+			serviceAccountTokenPath: "./does-not-exist",
+		},
+		grpc.WithTransportCredentials(insecure.NewCredentials()),
+	)
+	if !os.IsNotExist(err) {
+		t.Fatal("expected not exist error, got:", err)
+	}
+	if !strings.Contains(err.Error(), "does-not-exist") {
+		t.Fatal("unexpected error:", err)
+	}
+	if cl != nil {
+		t.Fatal("expected nil agent client")
+	}
+}
+
+type fakeServer struct{}
+
+func (fakeServer) Connect(stream agent.AgentService_ConnectServer) error {
+	h := metadata.Pairs(header.ServerID, "", header.ServerCount, "0")
+	return stream.SendHeader(h)
+}
+
+var _ agent.AgentServiceServer = fakeServer{}
