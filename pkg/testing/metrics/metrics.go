@@ -66,6 +66,11 @@ konnectivity_network_proxy_agent_open_endpoint_connections %d`
 # HELP konnectivity_network_proxy_agent_server_connection_lost_total Number of established proxy server connections lost without the agent closing them, by how the loss was detected (example: recv_error).
 # TYPE konnectivity_network_proxy_agent_server_connection_lost_total counter`
 	agentServerConnectionsLostSample = `konnectivity_network_proxy_agent_server_connection_lost_total{reason="%s"} %d`
+
+	agentServerConnectionAttemptsHeader = `
+# HELP konnectivity_network_proxy_agent_server_connection_attempts_total Number of attempts to connect to a proxy server, by result: connected (new server), error.
+# TYPE konnectivity_network_proxy_agent_server_connection_attempts_total counter`
+	agentServerConnectionAttemptsSample = `konnectivity_network_proxy_agent_server_connection_attempts_total{result="%s"} %d`
 )
 
 var DefaultTester = &Tester{}
@@ -91,6 +96,7 @@ type AgentTester interface {
 	ExpectAgentDialFailure(agent.DialFailureReason, int) error
 	ExpectAgentEndpointConnections(int) error
 	ExpectAgentServerConnectionsLost(map[agent.ServerConnectionLostReason]int) error
+	ExpectAgentServerConnectionAttempts(map[agent.ServerConnectionAttemptResult]int) error
 }
 
 func (t *Tester) ExpectServerDialFailures(expected map[server.DialFailureReason]int) error {
@@ -154,6 +160,14 @@ func (t *Tester) ExpectAgentServerConnectionsLost(expected map[agent.ServerConne
 		expect += fmt.Sprintf(agentServerConnectionsLostSample+"\n", r, v)
 	}
 	return t.ExpectMetric(agent.Namespace, agent.Subsystem, "server_connection_lost_total", expect)
+}
+
+func (t *Tester) ExpectAgentServerConnectionAttempts(expected map[agent.ServerConnectionAttemptResult]int) error {
+	expect := agentServerConnectionAttemptsHeader + "\n"
+	for r, v := range expected {
+		expect += fmt.Sprintf(agentServerConnectionAttemptsSample+"\n", r, v)
+	}
+	return t.ExpectMetric(agent.Namespace, agent.Subsystem, "server_connection_attempts_total", expect)
 }
 
 func (t *Tester) ExpectMetric(namespace, subsystem, name, expected string) error {
