@@ -291,6 +291,7 @@ func (cs *ClientSet) connectOnce() error {
 	// In syncForever mode, we always try to connect, to discover new servers.
 	c, receivedServerCount, err := cs.newAgentClient()
 	if err != nil {
+		metrics.Metrics.ObserveServerConnectionAttempt(metrics.ServerConnectionAttemptError)
 		return err
 	}
 
@@ -298,6 +299,7 @@ func (cs *ClientSet) connectOnce() error {
 		c.Close()
 		return err // likely *DuplicateServerError
 	}
+	metrics.Metrics.ObserveServerConnectionAttempt(metrics.ServerConnectionAttemptConnected)
 	// SUCCESS: We connected to a new, unique server.
 	// Only now do we update our view of the server count.
 	cs.lastReceivedServerCount = receivedServerCount
