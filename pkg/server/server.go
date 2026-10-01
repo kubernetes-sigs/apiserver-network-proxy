@@ -916,6 +916,8 @@ func (s *ProxyServer) connect(stream AgentStream) error {
 
 	s.addBackend(backend)
 	defer s.removeBackend(backend)
+	connectedAt := time.Now()
+	defer func() { metrics.Metrics.ObserveBackendConnectionDuration(time.Since(connectedAt)) }()
 
 	go runpprof.Do(context.Background(), labels, func(context.Context) { s.serveRecvBackend(backend, agentID, recvCh) })
 
