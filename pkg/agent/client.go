@@ -199,9 +199,8 @@ func (a *Client) Connect() (int, error) {
 		header.AgentIdentifiers, a.agentIdentifiers)
 	if a.serviceAccountTokenPath != "" {
 		if ctx, err = a.initializeAuthContext(ctx); err != nil {
-			err := conn.Close()
-			if err != nil {
-				klog.ErrorS(err, "failed to close gRPC connection", "agentID", a.agentID)
+			if cerr := conn.Close(); cerr != nil {
+				klog.ErrorS(cerr, "failed to close gRPC connection", "agentID", a.agentID)
 			}
 			return 0, err
 		}
@@ -232,10 +231,11 @@ func (a *Client) Connect() (int, error) {
 func (a *Client) Close() {
 	if a.conn == nil {
 		klog.Errorln("Unexpected empty AgentClient.conn")
-	}
-	err := a.conn.Close()
-	if err != nil {
-		klog.ErrorS(err, "failed to close gRPC connection", "serverID", a.serverID, "agentID", a.agentID)
+	} else {
+		err := a.conn.Close()
+		if err != nil {
+			klog.ErrorS(err, "failed to close gRPC connection", "serverID", a.serverID, "agentID", a.agentID)
+		}
 	}
 	close(a.stopCh)
 }
