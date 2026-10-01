@@ -52,6 +52,7 @@ type ServerMetrics struct {
 	endpointLatencies    *prometheus.HistogramVec
 	frontendLatencies    *prometheus.HistogramVec
 	connectionDuration   *prometheus.HistogramVec
+	backendConnDuration  *prometheus.HistogramVec
 	grpcConnections      *prometheus.GaugeVec
 	httpConnections      prometheus.Gauge
 	backend              *prometheus.GaugeVec
@@ -99,6 +100,16 @@ func newServerMetrics() *ServerMetrics {
 			Subsystem: Subsystem,
 			Name:      "connection_duration_seconds",
 			Help:      "Duration in seconds a proxied end-to-end connection was established (post-dial) before being closed.",
+			Buckets:   connectionDurationBuckets,
+		},
+		[]string{},
+	)
+	backendConnDuration := prometheus.NewHistogramVec(
+		prometheus.HistogramOpts{
+			Namespace: Namespace,
+			Subsystem: Subsystem,
+			Name:      "backend_connection_duration_seconds",
+			Help:      "Duration in seconds an agent connection was registered as a backend before it ended.",
 			Buckets:   connectionDurationBuckets,
 		},
 		[]string{},
@@ -247,6 +258,7 @@ func newServerMetrics() *ServerMetrics {
 	prometheus.MustRegister(endpointLatencies)
 	prometheus.MustRegister(frontendLatencies)
 	prometheus.MustRegister(connectionDuration)
+	prometheus.MustRegister(backendConnDuration)
 	prometheus.MustRegister(grpcConnections)
 	prometheus.MustRegister(httpConnections)
 	prometheus.MustRegister(backend)
@@ -268,6 +280,7 @@ func newServerMetrics() *ServerMetrics {
 		endpointLatencies:    endpointLatencies,
 		frontendLatencies:    frontendLatencies,
 		connectionDuration:   connectionDuration,
+		backendConnDuration:  backendConnDuration,
 		grpcConnections:      grpcConnections,
 		httpConnections:      httpConnections,
 		backend:              backend,
@@ -293,6 +306,7 @@ func (s *ServerMetrics) Reset() {
 	s.endpointLatencies.Reset()
 	s.frontendLatencies.Reset()
 	s.connectionDuration.Reset()
+	s.backendConnDuration.Reset()
 	s.grpcConnections.Reset()
 	s.backend.Reset()
 	s.totalBackendCount.Reset()
@@ -319,6 +333,11 @@ func (s *ServerMetrics) ObserveDialLatency(elapsed time.Duration) {
 // ObserveConnectionDuration records how long an established end-to-end connection remained open.
 func (s *ServerMetrics) ObserveConnectionDuration(elapsed time.Duration) {
 	s.connectionDuration.WithLabelValues().Observe(elapsed.Seconds())
+}
+
+// ObserveBackendConnectionDuration records how long an agent connection was registered as a backend.
+func (s *ServerMetrics) ObserveBackendConnectionDuration(elapsed time.Duration) {
+	s.backendConnDuration.WithLabelValues().Observe(elapsed.Seconds())
 }
 
 // ObserveFrontendWriteLatency records how long the frontend Send call takes.
