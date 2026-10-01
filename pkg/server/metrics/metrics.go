@@ -59,6 +59,7 @@ type ServerMetrics struct {
 	totalBackendCount    *prometheus.GaugeVec
 	pendingDials         *prometheus.GaugeVec
 	establishedConns     *prometheus.GaugeVec
+	establishedClosed    *prometheus.CounterVec
 	fullRecvChannels     *prometheus.GaugeVec
 	fullWriteQueues      *prometheus.GaugeVec
 	blockedWriteChannels *prometheus.GaugeVec
@@ -171,6 +172,15 @@ func newServerMetrics() *ServerMetrics {
 		},
 		[]string{},
 	)
+	establishedClosed := prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Namespace: Namespace,
+			Subsystem: Subsystem,
+			Name:      "established_connections_closed_total",
+			Help:      "Number of established end-to-end connections closed, by reason (example: backend_close when the agent connection carrying them ended).",
+		},
+		[]string{"reason"},
+	)
 	fullRecvChannels := prometheus.NewGaugeVec(
 		prometheus.GaugeOpts{
 			Namespace: Namespace,
@@ -265,6 +275,7 @@ func newServerMetrics() *ServerMetrics {
 	prometheus.MustRegister(totalBackendCount)
 	prometheus.MustRegister(pendingDials)
 	prometheus.MustRegister(establishedConns)
+	prometheus.MustRegister(establishedClosed)
 	prometheus.MustRegister(fullRecvChannels)
 	prometheus.MustRegister(fullFrontendWriteQueues)
 	prometheus.MustRegister(blockedFrontendWriteChannels)
@@ -287,6 +298,7 @@ func newServerMetrics() *ServerMetrics {
 		totalBackendCount:    totalBackendCount,
 		pendingDials:         pendingDials,
 		establishedConns:     establishedConns,
+		establishedClosed:    establishedClosed,
 		fullRecvChannels:     fullRecvChannels,
 		fullWriteQueues:      fullFrontendWriteQueues,
 		blockedWriteChannels: blockedFrontendWriteChannels,
@@ -312,6 +324,7 @@ func (s *ServerMetrics) Reset() {
 	s.totalBackendCount.Reset()
 	s.pendingDials.Reset()
 	s.establishedConns.Reset()
+	s.establishedClosed.Reset()
 	s.fullRecvChannels.Reset()
 	s.fullWriteQueues.Reset()
 	s.blockedWriteChannels.Reset()
@@ -381,6 +394,24 @@ func (s *ServerMetrics) SetPendingDialCount(count int) {
 // SetEstablishedConnCount sets the number of established connections.
 func (s *ServerMetrics) SetEstablishedConnCount(count int) {
 	s.establishedConns.WithLabelValues().Set(float64(count))
+}
+
+// ConnectionClosedReason is why an established end-to-end connection was removed.
+type ConnectionClosedReason string
+
+const (
+	ConnectionClosedCloseResponse ConnectionClosedReason = "close_rsp"      // CLOSE_RSP received from the agent; the close handshake completed.
+	ConnectionClosedFrontendClose ConnectionClosedReason = "frontend_close" // The frontend stream ended while the connection was still established.
+	ConnectionClosedBackendClose  ConnectionClosedReason = "backend_close"  // The agent connection ended while the connection was still established.
+	ConnectionClosedSendResponse  ConnectionClosedReason = "send_rsp"       // Established, but the DIAL_RSP could not be delivered to the frontend.
+)
+
+// ObserveEstablishedConnectionsClosed records count established connections removed for reason.
+func (s *ServerMetrics) ObserveEstablishedConnectionsClosed(reason ConnectionClosedReason, count int) {
+	if count == 0 {
+		return
+	}
+	s.establishedClosed.WithLabelValues(string(reason)).Add(float64(count))
 }
 
 // FullRecvChannel retrieves the metric for counting full receive channels.

@@ -52,6 +52,11 @@ const (
 # TYPE konnectivity_network_proxy_server_established_connections gauge`
 	serverEstablishedConnsSample = `konnectivity_network_proxy_server_established_connections{} %d`
 
+	serverEstablishedClosedHeader = `
+# HELP konnectivity_network_proxy_server_established_connections_closed_total Number of established end-to-end connections closed, by reason (example: backend_close when the agent connection carrying them ended).
+# TYPE konnectivity_network_proxy_server_established_connections_closed_total counter`
+	serverEstablishedClosedSample = `konnectivity_network_proxy_server_established_connections_closed_total{reason="%s"} %d`
+
 	agentDialFailureHeader = `
 # HELP konnectivity_network_proxy_agent_endpoint_dial_failure_total Number of failures dialing the remote endpoint, by reason (example: timeout).
 # TYPE konnectivity_network_proxy_agent_endpoint_dial_failure_total counter`
@@ -89,6 +94,7 @@ type ServerTester interface {
 	ExpectServerPendingDials(int) error
 	ExpectServerReadyBackends(int) error
 	ExpectServerEstablishedConns(int) error
+	ExpectServerEstablishedConnsClosed(map[server.ConnectionClosedReason]int) error
 }
 
 type AgentTester interface {
@@ -135,6 +141,14 @@ func (t *Tester) ExpectServerEstablishedConns(v int) error {
 	expect := serverEstablishedConnsHeader + "\n"
 	expect += fmt.Sprintf(serverEstablishedConnsSample+"\n", v)
 	return t.ExpectMetric(server.Namespace, server.Subsystem, "established_connections", expect)
+}
+
+func (t *Tester) ExpectServerEstablishedConnsClosed(expected map[server.ConnectionClosedReason]int) error {
+	expect := serverEstablishedClosedHeader + "\n"
+	for r, v := range expected {
+		expect += fmt.Sprintf(serverEstablishedClosedSample+"\n", r, v)
+	}
+	return t.ExpectMetric(server.Namespace, server.Subsystem, "established_connections_closed_total", expect)
 }
 
 func (t *Tester) ExpectAgentDialFailures(expected map[agent.DialFailureReason]int) error {
