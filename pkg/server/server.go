@@ -579,6 +579,7 @@ func (s *ProxyServer) proxy(stream ProxyStream) error {
 		}
 		for _, f := range s.removeEstablishedForStream(streamUID) {
 			klog.V(2).InfoS("frontend stream shutdown, cleaning frontend", "connectionID", f.connectID, "dialID", f.dialID)
+			metrics.Metrics.ObserveEstablishedConnectionsClosed(metrics.ConnectionClosedFrontendClose, 1)
 			s.sendBackendClose(f.backend, f.connectID, f.dialID, "frontend stream shutdown")
 		}
 	}()
@@ -1016,6 +1017,7 @@ func (s *ProxyServer) serveRecvBackend(backend *Backend, agentID string, recvCh 
 		if len(established) > 0 {
 			klog.V(2).InfoS("Close established connections to agent",
 				"count", len(established), "agentID", agentID)
+			metrics.Metrics.ObserveEstablishedConnectionsClosed(metrics.ConnectionClosedBackendClose, len(established))
 		}
 
 		for _, frontend := range established {
@@ -1079,7 +1081,9 @@ func (s *ProxyServer) serveRecvBackend(backend *Backend, agentID string, recvCh 
 					// If we never finish setting up the tunnel for ConnectID, then the connection is dead.
 					// Currently, the agent will no resend DIAL_RSP, so connection is dead.
 					// We already attempted to tell the frontend that. We should ensure we tell the backend.
-					s.removeEstablished(agentID, resp.ConnectID)
+					if s.removeEstablished(agentID, resp.ConnectID) != nil {
+						metrics.Metrics.ObserveEstablishedConnectionsClosed(metrics.ConnectionClosedSendResponse, 1)
+					}
 					s.sendBackendClose(backend, resp.ConnectID, resp.Random, "dial error")
 					break
 				}
@@ -1143,6 +1147,7 @@ func (s *ProxyServer) serveRecvBackend(backend *Backend, agentID string, recvCh 
 				klog.V(2).InfoS("could not get frontend client for closing", "agentID", agentID, "connectionID", resp.ConnectID)
 				break
 			}
+			metrics.Metrics.ObserveEstablishedConnectionsClosed(metrics.ConnectionClosedCloseResponse, 1)
 			if err := frontend.send(pkt); err != nil {
 				// Normal when frontend closes it.
 				klog.ErrorS(err, "CLOSE_RSP send to client stream error", "agentID", agentID, "connectionID", resp.ConnectID)

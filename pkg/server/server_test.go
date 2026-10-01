@@ -2047,3 +2047,38 @@ func TestBackendCloseFailsPendingDials(t *testing.T) {
 		t.Errorf("expected only the dial over the closed backend to be removed, got %d remaining", got)
 	}
 }
+
+// TestEstablishedConnectionsClosedMetric verifies that established connections
+// removed when the agent connection ends, and those removed by the CLOSE
+// handshake, are counted under distinct reasons.
+func TestEstablishedConnectionsClosedMetric(t *testing.T) {
+	metrics.Metrics.Reset()
+	const agentID = "agent1"
+
+	p := NewProxyServer("", []proxystrategies.ProxyStrategy{proxystrategies.ProxyStrategyDefault}, 1, nil, xfrChannelSize)
+	backend := &Backend{}
+	stream := &probeProxyStream{onSend: func(*client.Packet) error { return nil }}
+	for connID := int64(1); connID <= 3; connID++ {
+		p.addEstablished(agentID, connID, &ProxyClientConnection{
+			frontend:  &Frontend{stream: stream, streamUID: "stream-uid"},
+			connectID: connID,
+			backend:   backend,
+		})
+	}
+
+	// The agent confirms the close of one connection, then its connection ends
+	// with the other two still established.
+	recvCh := make(chan *client.Packet, 1)
+	recvCh <- closeRspPkt(1, "")
+	close(recvCh)
+	p.serveRecvBackend(backend, agentID, recvCh)
+
+	expect := map[metrics.ConnectionClosedReason]int{
+		metrics.ConnectionClosedCloseResponse: 1,
+		metrics.ConnectionClosedBackendClose:  2,
+	}
+	if err := metricstest.DefaultTester.ExpectServerEstablishedConnsClosed(expect); err != nil {
+		t.Error(err)
+	}
+	assertEstablishedConnsMetric(t, 0)
+}
