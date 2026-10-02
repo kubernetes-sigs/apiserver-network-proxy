@@ -6,6 +6,10 @@
 /easy-rsa.tar.gz
 /easy-rsa
 
+# build outputs of the examples
+/examples/kind-multinode/rendered/
+/examples/kubernetes-troubleshooting/webhook/bin/
+
 # editor and IDE paraphernalia
 .idea
 .vscode
