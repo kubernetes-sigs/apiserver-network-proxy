@@ -235,9 +235,35 @@ the call takes `timeoutSeconds + 10 s`, and the apiserver request goroutine is b
 for that time. This needs a change in `konnectivity-client` so that `Close()` returns
 without waiting for the agent.
 
+Mode `servers` reset under the same load (sockets destroyed on the server nodes; the
+balancer relays the loss to the agents, which log `error reading from server: EOF`,
+counted as `server_connection_lost_total{reason="recv_error"}` because the transport
+ended without a graceful end of stream):
+
+| Measure | Value |
+|---|---|
+| fail-opens | 532 in 12 s, then 0 |
+| per apiserver | 66, 297 and 169 calls, all `No agent available` except two `EOF` on the keep-alive connections that were open at T0. Each apiserver failed every call from T0 until its server registered its first agent again: 1.4 s, 12 s and 6.9 s. The two apiservers that the kind balancer had not assigned any load-generator connection to show nothing. |
+| client latency | unchanged: mean 4.5 to 5.2 ms, p99 at most 8.4 ms, max 73 ms; throughput stayed at 100 requests/s |
+| apiserver histogram | no call above 100 ms |
+| servers | `ready_backends` 3 → 0 on all five within 4 s; first agent back after 1.5 to 17 s; all 15 streams back at T0+86 s; `dial_failure_count{reason="no_agent"}` +66, +296, +168, equal to the fail-opens |
+| webhook | handler time unchanged; active connections 4 → 3 → 4 |
+
+Both runs inject the same fault on the same code; they differ only in which side learns
+that the connections are gone. When the servers see the loss (mode `servers`), they drop
+their backends at once, every dial fails with `No agent available` and the apiserver
+fails open immediately; the outage is complete for the apiservers whose server has no
+agent, and lasts until the first agent comes back (a few seconds with three agents and
+a 5 s sync interval). When the servers do not see the loss (mode `agents`), they keep
+routing dials and requests into dead backends; fewer calls fail, but each failing call
+holds its request for `timeoutSeconds + CloseTimeout`, the apiserver's connections stay
+in `dialing`, and clients with a bounded number of in-flight requests lose throughput
+for that time. With `failurePolicy: Fail` the first mode is a short hard outage and the
+second a long latency stall on a fraction of requests. The production symptoms match
+the second mode, so the damage comes from the servers not learning about the reset.
+
 ## Open items
 
-- Run mode `servers` under webhook load and compare fail-fast behaviour with mode `agents`.
 - Starve one agent's node of CPU (`docker update --cpus 0.05 <worker>`) to reproduce
   "one slow agent slows 1/N of all dials", since the server picks a backend at random.
 - Switch the apiserver egress selector to `Direct` and restart the apiservers to measure
