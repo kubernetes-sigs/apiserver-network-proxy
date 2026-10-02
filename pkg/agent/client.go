@@ -250,7 +250,7 @@ func (a *Client) Send(pkt *client.Packet) error {
 	if err != nil && err != io.EOF {
 		metrics.Metrics.ObserveServerFailureDeprecated(metrics.DirectionToServer)
 		metrics.Metrics.ObserveStreamError(segment, err, pkt.Type)
-		a.cs.RemoveClient(a.serverID)
+		a.cs.removeClient(a)
 	}
 	return err
 }
@@ -326,7 +326,7 @@ func (a *Client) initializeAuthContext(ctx context.Context) (context.Context, er
 // The requests include things like opening a connection to a server,
 // streaming data and close the connection.
 func (a *Client) Serve() {
-	defer a.cs.RemoveClient(a.serverID)
+	defer a.cs.removeClient(a)
 	defer func() {
 		// close all of conns with remote when Client exits
 		for _, eConn := range a.connManager.List() {
@@ -741,7 +741,7 @@ func (a *Client) probe() {
 			}
 		}
 		klog.V(1).InfoS("Removing client used for server connection", "state", a.conn.GetState(), "serverID", a.serverID)
-		a.cs.RemoveClient(a.serverID)
+		a.cs.removeClient(a)
 		return
 	}
 }
