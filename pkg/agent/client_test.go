@@ -31,11 +31,15 @@ import (
 
 	"go.uber.org/goleak"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/grpc/metadata"
+	"google.golang.org/grpc/status"
 	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/klog/v2"
 	"sigs.k8s.io/apiserver-network-proxy/konnectivity-client/proto/client"
+	"sigs.k8s.io/apiserver-network-proxy/pkg/agent/metrics"
+	metricstest "sigs.k8s.io/apiserver-network-proxy/pkg/testing/metrics"
 	"sigs.k8s.io/apiserver-network-proxy/proto/agent"
 	"sigs.k8s.io/apiserver-network-proxy/proto/header"
 )
@@ -548,6 +552,69 @@ func TestServe_ExitDoesNotRemoveReplacementClient(t *testing.T) {
 	default:
 	}
 	cs.RemoveClient(serverID)
+}
+
+func TestServe_ServerConnectionLost(t *testing.T) {
+	testcases := []struct {
+		name          string
+		recvErr       error
+		closedLocally bool
+		want          map[metrics.ServerConnectionLostReason]int
+	}{
+		{
+			name:    "eof",
+			recvErr: io.EOF,
+			want:    map[metrics.ServerConnectionLostReason]int{metrics.ServerConnectionLostEOF: 1},
+		},
+		{
+			name:    "cancelled",
+			recvErr: status.Error(codes.Canceled, "canceled"),
+			want:    map[metrics.ServerConnectionLostReason]int{metrics.ServerConnectionLostCancelled: 1},
+		},
+		{
+			name:    "recv error",
+			recvErr: status.Error(codes.Unavailable, "error reading from server: read: connection reset by peer"),
+			want:    map[metrics.ServerConnectionLostReason]int{metrics.ServerConnectionLostRecvError: 1},
+		},
+		{
+			name:          "closed locally",
+			recvErr:       status.Error(codes.Canceled, "grpc: the client connection is closing"),
+			closedLocally: true,
+			want:          nil,
+		},
+	}
+
+	for _, tc := range testcases {
+		t.Run(tc.name, func(t *testing.T) {
+			metrics.Metrics.Reset()
+			defer goleakVerifyNone(t, goleak.IgnoreCurrent())
+
+			const serverID = "server-1"
+			cs := &ClientSet{clients: make(map[string]*Client)}
+			testClient := &Client{
+				connManager:   newConnectionManager(),
+				stopCh:        make(chan struct{}),
+				probeInterval: time.Hour,
+				serverID:      serverID,
+				cs:            cs,
+			}
+			clientStream, _ := pipe()
+			testClient.stream = &brokenStream{AgentService_ConnectClient: clientStream, recvErr: tc.recvErr}
+			cs.clients[serverID] = testClient
+			if tc.closedLocally {
+				cs.RemoveClient(serverID)
+			}
+
+			testClient.Serve()
+
+			if cs.HasID(serverID) {
+				t.Error("client still registered after Serve returned")
+			}
+			if err := metricstest.DefaultTester.ExpectAgentServerConnectionsLost(tc.want); err != nil {
+				t.Error(err)
+			}
+		})
+	}
 }
 
 func TestConnect_Client_InvalidTokenPath(t *testing.T) {
