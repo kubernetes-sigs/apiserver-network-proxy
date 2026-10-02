@@ -19,6 +19,7 @@ package agent
 import (
 	"errors"
 	"fmt"
+	"io"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -501,6 +502,52 @@ func TestClose_Client_NilConn(t *testing.T) {
 	default:
 		t.Fatal("stopCh not closed by Client.Close()")
 	}
+}
+
+// TestServe_ExitDoesNotRemoveReplacementClient covers the race between a
+// client whose stream died and the sync loop reconnecting to the same server:
+// if the old client is already gone from the ClientSet when its Serve loop
+// exits, the exit must not remove (and close) the client that replaced it.
+func TestServe_ExitDoesNotRemoveReplacementClient(t *testing.T) {
+	defer goleakVerifyNone(t, goleak.IgnoreCurrent())
+
+	const serverID = "server-1"
+	cs := &ClientSet{clients: make(map[string]*Client)}
+	newClient := func() *Client {
+		c := &Client{
+			connManager:   newConnectionManager(),
+			stopCh:        make(chan struct{}),
+			probeInterval: time.Hour,
+			serverID:      serverID,
+			cs:            cs,
+		}
+		clientStream, _ := pipe()
+		c.stream = &brokenStream{AgentService_ConnectClient: clientStream, recvErr: io.EOF}
+		return c
+	}
+
+	old := newClient()
+	cs.clients[serverID] = old
+	// The stream to serverID died and was removed once already (for example by
+	// the probe); the sync loop then reconnected to the same server.
+	cs.RemoveClient(serverID)
+	replacement := newClient()
+	if err := cs.AddClient(serverID, replacement); err != nil {
+		t.Fatalf("AddClient: %v", err)
+	}
+
+	// The old client's Serve loop now exits on its dead stream.
+	old.Serve()
+
+	if !cs.HasID(serverID) {
+		t.Fatal("replacement client was removed by the old client's Serve exit")
+	}
+	select {
+	case <-replacement.stopCh:
+		t.Fatal("replacement client was closed by the old client's Serve exit")
+	default:
+	}
+	cs.RemoveClient(serverID)
 }
 
 func TestConnect_Client_InvalidTokenPath(t *testing.T) {
