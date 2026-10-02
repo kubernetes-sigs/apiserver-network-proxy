@@ -97,6 +97,8 @@ Scripts:
 | `scripts/tail-logs.sh` | Tails server, agent and balancer logs into `$OUT_DIR/logs/`. |
 | `scripts/lb-tools.sh start` | Starts a privileged `netshoot` container in the balancer's network namespace, for `ss`, `iptables`, `tcpdump`. |
 | `scripts/reset-flows.sh <mode>` | Resets all agent-to-server flows; see [Scenarios](#scenarios). |
+| `scripts/starve-agent.sh <node> [quota]` | Limits the agent container on one node to `quota` µs of CPU per 100 ms through its cgroup (default 5000, 5% of one CPU); `restore` lifts the limit. |
+| `scripts/dial-load.sh` | Runs `kubectl exec` in a loop; each call is a new tunnel dial through a randomly chosen agent. Logs per-call latency to `$OUT_DIR/dial-load.log`. |
 | `webhook/deploy.sh` | Builds and deploys the measuring webhook and extracts kubeconfig credentials for the load generator. |
 | `webhook/monitor.sh` | Every 10 s, apiserver-measured versus webhook-measured latency, fail-opens, connections. |
 
@@ -146,6 +148,27 @@ The load generator creates ConfigMaps with `dryRun=All`, so the webhook runs and
 nothing is stored. The webhook has `failurePolicy: Ignore` and `timeoutSeconds: 10`, so
 a tunnel failure shows up as a fail-open and a latency spike instead of a rejected
 request. Inject a reset with `scripts/reset-flows.sh` while the load runs.
+
+### One agent starved of CPU
+
+The server picks an agent at random for every new dial, and a connection stays on that
+agent for its whole life. An agent on a node with no idle CPU therefore slows every
+connection pinned to it and about 1/N of all new dials. Starve one agent while the
+webhook load and a dial load run:
+
+```sh
+scripts/dial-load.sh &                      # new dial every ~0.7 s through a random agent
+kubectl -n kube-system get pods -l k8s-app=konnectivity-agent -o wide   # pick a node
+scripts/snapshot.sh > before.txt
+scripts/starve-agent.sh <worker-node> 5000  # 5% of one CPU; try 1000 for 1%
+sleep 180
+scripts/snapshot.sh > after.txt
+scripts/starve-agent.sh <worker-node> restore
+```
+
+`open_endpoint_connections` in the snapshot tells you which agent holds the webhook's
+keep-alive tunnels; starving that one shows the pinned-connection effect, starving
+another one shows only the new-dial effect.
 
 ## Results
 
@@ -262,16 +285,50 @@ for that time. With `failurePolicy: Fail` the first mode is a short hard outage 
 second a long latency stall on a fraction of requests. The production symptoms match
 the second mode, so the damage comes from the servers not learning about the reset.
 
+### One agent starved of CPU (2026-10-02)
+
+The agent on one worker was limited through its cgroup while the webhook load
+(100 requests/s over four keep-alive tunnels, all of which happened to be pinned to that
+agent) and the `kubectl exec` dial load (one new dial every 0.7 s, one third of them
+through that agent) kept running. The agent stayed Ready with no restarts and no probe
+failures in both runs. The webhook handler time stayed at 0.05 ms throughout, so every
+increase below is on the path.
+
+| Measure | baseline | 5% of one CPU, 20 min | 1% of one CPU, 150 s |
+|---|---|---|---|
+| apiserver-measured admission duration, mean | 1.5 ms | 1.9 ms | 120 to 155 ms |
+| admission calls above 100 ms | 0 | 67 of 121,726 (0.055%) | 40 to 50% |
+| client p99 per 5 s window | 6 ms | above 20 ms in 93 of 246 windows, max 200 ms | 300 ms typical, max 700 ms |
+| client throughput | 100 requests/s | 100 requests/s | 28 requests/s (all four workers queued behind the one agent) |
+| server `dial_duration_seconds`, all dials | 0.9 ms mean, none above 25 ms | 0.9 ms mean, 0.1% above 25 ms | 32 ms mean, **33.7% above 25 ms**, 11% above 100 ms |
+| `kubectl exec` round trip | p50 187 ms, p99 218 ms | p50 186 ms, p99 236 ms, max 423 ms | p50 190 ms, p90 697 ms, p99 1018 ms, max 1443 ms |
+| starved agent's own `dial_duration_seconds` (agent to endpoint) | 0.24 ms | 0.24 ms | 19 ms (other agents 0.2 ms) |
+| fail-opens, errors | 0 | 0 | 0 |
+
+Two things stand out. At 5% the pinned webhook tunnels already show it (p99 up, calls
+above 100 ms appear) while the dial path is almost untouched: a dial needs only a few
+milliseconds of CPU and fits inside the quota most of the time. At 1% the dial path
+shows the expected shape exactly: one third of all dials, the starved agent's share,
+are slow, the median is unchanged and the tail grows by hundreds of milliseconds, which
+is how "one slow agent in N" appears in a dial histogram. The client-side latencies
+cluster at multiples of 100 ms, the CFS period: the agent runs out of quota and waits
+for the next period.
+
+Which agent carries the pinned tunnels is decided once per dial and persists for the
+life of the connection; before the previous reset the four webhook tunnels were spread
+3+1 over two agents, after it they all landed on one. A reset re-rolls that placement.
+
 ## Open items
 
-- Starve one agent's node of CPU (`docker update --cpus 0.05 <worker>`) to reproduce
-  "one slow agent slows 1/N of all dials", since the server picks a backend at random.
 - Switch the apiserver egress selector to `Direct` and restart the apiservers to measure
   the tunnel cost against a direct path on the same host.
 - Fix `conn.Close()` in `konnectivity-client` so that a dead backend does not add
   `CloseTimeout` to every request that times out on it.
 - Decide whether the agent should resync aggressively after losing all server
   connections instead of one random dial per `--sync-interval`.
+- Evaluate backend selection on the server that takes recent dial latency or pending
+  dials per agent into account, so that one slow agent stops receiving 1/N of new dials.
+  The server already has the per-dial timing; it is not kept per agent.
 
 ## Cleanup
 
