@@ -50,17 +50,18 @@ var (
 
 // AgentMetrics includes all the metrics of the proxy agent.
 type AgentMetrics struct {
-	dialLatencies       *prometheus.HistogramVec
-	serverFailures      *prometheus.CounterVec
-	dialFailures        *prometheus.CounterVec
-	serverConnections   *prometheus.GaugeVec
-	serverCount         prometheus.Gauge
-	endpointConnections *prometheus.GaugeVec
-	streamPackets       *prometheus.CounterVec
-	streamErrors        *prometheus.CounterVec
-	leaseLists          *prometheus.CounterVec
-	leaseWatches        *prometheus.CounterVec
-	leaseListLatencies  *prometheus.HistogramVec
+	dialLatencies         *prometheus.HistogramVec
+	serverFailures        *prometheus.CounterVec
+	dialFailures          *prometheus.CounterVec
+	serverConnections     *prometheus.GaugeVec
+	serverConnectionsLost *prometheus.CounterVec
+	serverCount           prometheus.Gauge
+	endpointConnections   *prometheus.GaugeVec
+	streamPackets         *prometheus.CounterVec
+	streamErrors          *prometheus.CounterVec
+	leaseLists            *prometheus.CounterVec
+	leaseWatches          *prometheus.CounterVec
+	leaseListLatencies    *prometheus.HistogramVec
 }
 
 // newAgentMetrics create a new AgentMetrics, configured with default metric names.
@@ -101,6 +102,15 @@ func newAgentMetrics() *AgentMetrics {
 			Help:      "Current number of open server connections.",
 		},
 		[]string{},
+	)
+	serverConnectionsLost := prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Namespace: Namespace,
+			Subsystem: Subsystem,
+			Name:      "server_connection_lost_total",
+			Help:      "Number of established proxy server connections lost without the agent closing them, by how the loss was detected (example: recv_error).",
+		},
+		[]string{"reason"},
 	)
 	serverCount := prometheus.NewGauge(
 		prometheus.GaugeOpts{
@@ -153,6 +163,7 @@ func newAgentMetrics() *AgentMetrics {
 	prometheus.MustRegister(serverFailures)
 	prometheus.MustRegister(dialFailures)
 	prometheus.MustRegister(serverConnections)
+	prometheus.MustRegister(serverConnectionsLost)
 	prometheus.MustRegister(endpointConnections)
 	prometheus.MustRegister(streamPackets)
 	prometheus.MustRegister(streamErrors)
@@ -161,17 +172,18 @@ func newAgentMetrics() *AgentMetrics {
 	prometheus.MustRegister(leaseWatches)
 	prometheus.MustRegister(leaseListLatencies)
 	return &AgentMetrics{
-		dialLatencies:       dialLatencies,
-		serverFailures:      serverFailures,
-		dialFailures:        dialFailures,
-		serverConnections:   serverConnections,
-		endpointConnections: endpointConnections,
-		streamPackets:       streamPackets,
-		streamErrors:        streamErrors,
-		serverCount:         serverCount,
-		leaseLists:          leaseLists,
-		leaseWatches:        leaseWatches,
-		leaseListLatencies:  leaseListLatencies,
+		dialLatencies:         dialLatencies,
+		serverFailures:        serverFailures,
+		dialFailures:          dialFailures,
+		serverConnections:     serverConnections,
+		serverConnectionsLost: serverConnectionsLost,
+		endpointConnections:   endpointConnections,
+		streamPackets:         streamPackets,
+		streamErrors:          streamErrors,
+		serverCount:           serverCount,
+		leaseLists:            leaseLists,
+		leaseWatches:          leaseWatches,
+		leaseListLatencies:    leaseListLatencies,
 	}
 
 }
@@ -182,6 +194,7 @@ func (a *AgentMetrics) Reset() {
 	a.serverFailures.Reset()
 	a.dialFailures.Reset()
 	a.serverConnections.Reset()
+	a.serverConnectionsLost.Reset()
 	a.endpointConnections.Reset()
 	a.streamPackets.Reset()
 	a.streamErrors.Reset()
@@ -213,6 +226,29 @@ func (a *AgentMetrics) ObserveDialFailure(reason DialFailureReason) {
 
 func (a *AgentMetrics) SetServerConnectionsCount(count int) {
 	a.serverConnections.WithLabelValues().Set(float64(count))
+}
+
+// ServerConnectionLostReason describes how the agent detected that an
+// established proxy server connection was gone.
+type ServerConnectionLostReason string
+
+const (
+	// ServerConnectionLostEOF: the server ended the Connect stream.
+	ServerConnectionLostEOF ServerConnectionLostReason = "eof"
+	// ServerConnectionLostCancelled: the stream was cancelled by the server side.
+	ServerConnectionLostCancelled ServerConnectionLostReason = "cancelled"
+	// ServerConnectionLostRecvError: reading from the stream failed (connection reset, transport closed, ...).
+	ServerConnectionLostRecvError ServerConnectionLostReason = "recv_error"
+	// ServerConnectionLostSendError: writing to the stream failed.
+	ServerConnectionLostSendError ServerConnectionLostReason = "send_error"
+	// ServerConnectionLostProbe: the connectivity probe found the gRPC connection not ready.
+	ServerConnectionLostProbe ServerConnectionLostReason = "probe"
+)
+
+// ObserveServerConnectionLost records an established server connection that
+// was lost without the agent closing it.
+func (a *AgentMetrics) ObserveServerConnectionLost(reason ServerConnectionLostReason) {
+	a.serverConnectionsLost.WithLabelValues(string(reason)).Inc()
 }
 
 func (a *AgentMetrics) SetServerCount(count int) {

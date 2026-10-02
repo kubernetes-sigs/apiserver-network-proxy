@@ -61,6 +61,11 @@ const (
 # HELP konnectivity_network_proxy_agent_open_endpoint_connections Current number of open endpoint connections.
 # TYPE konnectivity_network_proxy_agent_open_endpoint_connections gauge
 konnectivity_network_proxy_agent_open_endpoint_connections %d`
+
+	agentServerConnectionsLostHeader = `
+# HELP konnectivity_network_proxy_agent_server_connection_lost_total Number of established proxy server connections lost without the agent closing them, by how the loss was detected (example: recv_error).
+# TYPE konnectivity_network_proxy_agent_server_connection_lost_total counter`
+	agentServerConnectionsLostSample = `konnectivity_network_proxy_agent_server_connection_lost_total{reason="%s"} %d`
 )
 
 var DefaultTester = &Tester{}
@@ -85,6 +90,7 @@ type AgentTester interface {
 	ExpectAgentDialFailures(map[agent.DialFailureReason]int) error
 	ExpectAgentDialFailure(agent.DialFailureReason, int) error
 	ExpectAgentEndpointConnections(int) error
+	ExpectAgentServerConnectionsLost(map[agent.ServerConnectionLostReason]int) error
 }
 
 func (t *Tester) ExpectServerDialFailures(expected map[server.DialFailureReason]int) error {
@@ -140,6 +146,14 @@ func (t *Tester) ExpectAgentDialFailure(reason agent.DialFailureReason, count in
 func (t *Tester) ExpectAgentEndpointConnections(count int) error {
 	expect := fmt.Sprintf(agentEndpointConnections+"\n", count)
 	return t.ExpectMetric(agent.Namespace, agent.Subsystem, "open_endpoint_connections", expect)
+}
+
+func (t *Tester) ExpectAgentServerConnectionsLost(expected map[agent.ServerConnectionLostReason]int) error {
+	expect := agentServerConnectionsLostHeader + "\n"
+	for r, v := range expected {
+		expect += fmt.Sprintf(agentServerConnectionsLostSample+"\n", r, v)
+	}
+	return t.ExpectMetric(agent.Namespace, agent.Subsystem, "server_connection_lost_total", expect)
 }
 
 func (t *Tester) ExpectMetric(namespace, subsystem, name, expected string) error {
