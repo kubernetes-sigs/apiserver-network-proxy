@@ -20,13 +20,16 @@ import (
 	"bufio"
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"math/rand"
 	"net"
 	"net/http"
+	"net/http/httputil"
 	"strings"
 	"sync"
+	"time"
 
 	"google.golang.org/grpc/metadata"
 	"k8s.io/klog/v2"
@@ -57,7 +60,42 @@ var bufferPool = sync.Pool{
 // Tunnel implements Proxy based on HTTP Connect, which tunnels the traffic to
 // the agent registered in ProxyServer.
 type Tunnel struct {
-	Server *ProxyServer
+	Server   *ProxyServer
+	proxy    *httputil.ReverseProxy
+	initOnce sync.Once
+}
+
+func (t *Tunnel) getReverseProxy() *httputil.ReverseProxy {
+	t.initOnce.Do(func() {
+		transport := &http.Transport{
+			DialContext:         t.Server.DialContext,
+			MaxIdleConns:        100,
+			IdleConnTimeout:     90 * time.Second,
+			TLSHandshakeTimeout: 10 * time.Second,
+		}
+		director := func(req *http.Request) {
+			if req.URL.Scheme == "" {
+				req.URL.Scheme = "http"
+			}
+			if req.URL.Host == "" {
+				req.URL.Host = req.Host
+			}
+		}
+		errorHandler := func(rw http.ResponseWriter, req *http.Request, err error) {
+			klog.ErrorS(err, "forward proxy error", "url", req.URL, "host", req.Host)
+			statusCode := mapDialErrorToHTTPStatus(err.Error())
+			if errors.Is(err, context.DeadlineExceeded) || errors.Is(err, errBackendDialTimeout) {
+				statusCode = http.StatusGatewayTimeout
+			}
+			http.Error(rw, fmt.Sprintf("Proxy error: %v", err), statusCode)
+		}
+		t.proxy = &httputil.ReverseProxy{
+			Director:     director,
+			Transport:    transport,
+			ErrorHandler: errorHandler,
+		}
+	})
+	return t.proxy
 }
 
 func (t *Tunnel) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -69,7 +107,11 @@ func (t *Tunnel) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		klog.V(2).InfoS("TLS", "commonName", r.TLS.PeerCertificates[0].Subject.CommonName)
 	}
 	if r.Method != http.MethodConnect {
-		http.Error(w, "this proxy only supports CONNECT passthrough", http.StatusMethodNotAllowed)
+		if r.URL.Host == "" && r.Host == "" {
+			http.Error(w, "missing host in request", http.StatusBadRequest)
+			return
+		}
+		t.getReverseProxy().ServeHTTP(w, r)
 		return
 	}
 
