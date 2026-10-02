@@ -35,6 +35,8 @@ import (
 	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/klog/v2"
 	"sigs.k8s.io/apiserver-network-proxy/konnectivity-client/proto/client"
+	metrics "sigs.k8s.io/apiserver-network-proxy/pkg/agent/metrics"
+	metricstest "sigs.k8s.io/apiserver-network-proxy/pkg/testing/metrics"
 	"sigs.k8s.io/apiserver-network-proxy/proto/agent"
 	"sigs.k8s.io/apiserver-network-proxy/proto/header"
 )
@@ -225,6 +227,218 @@ func TestClose_Client(t *testing.T) {
 		t.Errorf("expect Unknown connectID; got %v", closeErr)
 	}
 
+}
+
+func TestConnectionCloseMetric_ServerClose(t *testing.T) {
+	metrics.Metrics.Reset()
+
+	var stream agent.AgentService_ConnectClient
+	stopCh := make(chan struct{})
+	cs := &ClientSet{
+		clients: make(map[string]*Client),
+		stopCh:  stopCh,
+	}
+	testClient := &Client{
+		connManager: newConnectionManager(),
+		stopCh:      stopCh,
+		cs:          cs,
+	}
+	testClient.stream, stream = pipe()
+
+	go testClient.Serve()
+	defer close(stopCh)
+
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		fmt.Fprint(w, "hello, world")
+	}))
+	defer ts.Close()
+
+	// Dial and wait for the connection to be established.
+	if err := stream.Send(newDialPacket("tcp", ts.URL[len("http://"):], 111)); err != nil {
+		t.Fatal(err)
+	}
+	pkt, _ := stream.Recv()
+	if pkt == nil || pkt.Type != client.PacketType_DIAL_RSP {
+		t.Fatalf("expected DIAL_RSP; got %+v", pkt)
+	}
+	connID := pkt.Payload.(*client.Packet_DialResponse).DialResponse.ConnectID
+
+	// Server-initiated close via CLOSE_REQ.
+	if err := stream.Send(newClosePacket(connID)); err != nil {
+		t.Fatal(err)
+	}
+	pkt, _ = stream.Recv()
+	if pkt == nil || pkt.Type != client.PacketType_CLOSE_RSP {
+		t.Fatalf("expected CLOSE_RSP; got %+v", pkt)
+	}
+	waitForConnectionDeletion(t, testClient, connID)
+
+	if err := metricstest.DefaultTester.ExpectAgentConnectionClose(metrics.ConnectionCloseServer, 1); err != nil {
+		t.Errorf("Expected %s metric: %v", "endpoint_connection_close_total", err)
+	}
+}
+
+func TestConnectionCloseMetric_EndpointClose(t *testing.T) {
+	metrics.Metrics.Reset()
+
+	var stream agent.AgentService_ConnectClient
+	stopCh := make(chan struct{})
+	cs := &ClientSet{
+		clients: make(map[string]*Client),
+		stopCh:  stopCh,
+	}
+	testClient := &Client{
+		connManager: newConnectionManager(),
+		stopCh:      stopCh,
+		cs:          cs,
+	}
+	testClient.stream, stream = pipe()
+
+	go testClient.Serve()
+	defer close(stopCh)
+
+	// A listener that closes every accepted connection immediately, so the
+	// agent's remoteToSendChannel read returns EOF and the connection is torn
+	// down by the endpoint (no server CLOSE_REQ, no agent shutdown).
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer ln.Close()
+	go func() {
+		for {
+			conn, err := ln.Accept()
+			if err != nil {
+				return
+			}
+			conn.Close()
+		}
+	}()
+
+	if err := stream.Send(newDialPacket("tcp", ln.Addr().String(), 111)); err != nil {
+		t.Fatal(err)
+	}
+	pkt, _ := stream.Recv()
+	if pkt == nil || pkt.Type != client.PacketType_DIAL_RSP {
+		t.Fatalf("expected DIAL_RSP; got %+v", pkt)
+	}
+	connID := pkt.Payload.(*client.Packet_DialResponse).DialResponse.ConnectID
+
+	// The endpoint close propagates as a CLOSE_RSP from the agent.
+	pkt, _ = stream.Recv()
+	if pkt == nil || pkt.Type != client.PacketType_CLOSE_RSP {
+		t.Fatalf("expected CLOSE_RSP; got %+v", pkt)
+	}
+	waitForConnectionDeletion(t, testClient, connID)
+
+	if err := metricstest.DefaultTester.ExpectAgentConnectionClose(metrics.ConnectionCloseEndpoint, 1); err != nil {
+		t.Errorf("Expected %s metric: %v", "endpoint_connection_close_total", err)
+	}
+}
+
+func TestConnectionCloseMetric_AgentShutdown(t *testing.T) {
+	metrics.Metrics.Reset()
+
+	var stream agent.AgentService_ConnectClient
+	stopCh := make(chan struct{})
+	cs := &ClientSet{
+		clients: make(map[string]*Client),
+		stopCh:  stopCh,
+	}
+	testClient := &Client{
+		connManager: newConnectionManager(),
+		stopCh:      stopCh,
+		cs:          cs,
+	}
+	testClient.stream, stream = pipe()
+
+	go testClient.Serve()
+
+	// A remote endpoint that sends one byte (so the agent's remoteToSendChannel
+	// loops back to its send/stopCh select) and then holds the connection open.
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer ln.Close()
+	serverConnCh := make(chan net.Conn, 1)
+	go func() {
+		conn, err := ln.Accept()
+		if err != nil {
+			return
+		}
+		_, _ = conn.Write([]byte("x"))
+		serverConnCh <- conn
+	}()
+
+	if err := stream.Send(newDialPacket("tcp", ln.Addr().String(), 111)); err != nil {
+		t.Fatal(err)
+	}
+	pkt, _ := stream.Recv()
+	if pkt == nil || pkt.Type != client.PacketType_DIAL_RSP {
+		t.Fatalf("expected DIAL_RSP; got %+v", pkt)
+	}
+
+	// Wait until the agent has read the byte and is parked in the send/stopCh
+	// select, so that closing stopCh deterministically drives the
+	// agent_shutdown close reason rather than an endpoint read error.
+	serverConn := <-serverConnCh
+	defer serverConn.Close()
+	if err := wait.PollImmediate(20*time.Millisecond, 5*time.Second, func() (bool, error) {
+		for _, eConn := range testClient.connManager.List() {
+			return len(eConn.sendCh) == 0, nil // byte consumed from sendCh => parked in select
+		}
+		return false, nil
+	}); err != nil {
+		t.Fatal("endpoint connection was never established")
+	}
+
+	close(stopCh)
+
+	// Poll the metric: Serve's shutdown and the pump goroutines record the
+	// agent_shutdown close asynchronously.
+	if err := wait.PollImmediate(50*time.Millisecond, 10*time.Second, func() (bool, error) {
+		return metricstest.DefaultTester.ExpectAgentConnectionClose(metrics.ConnectionCloseAgentShutdown, 1) == nil, nil
+	}); err != nil {
+		t.Errorf("Expected %s metric: %v", "endpoint_connection_close_total",
+			metricstest.DefaultTester.ExpectAgentConnectionClose(metrics.ConnectionCloseAgentShutdown, 1))
+	}
+}
+
+// TestCloseReasonRace exercises concurrent close-reason writes and reads on an
+// endpointConn, mirroring an endpoint EOF racing a server CLOSE_REQ. It is meant
+// to be run under `go test -race`.
+func TestCloseReasonRace(t *testing.T) {
+	const iterations = 1000
+	for i := 0; i < iterations; i++ {
+		eConn := &endpointConn{}
+		var wg sync.WaitGroup
+		wg.Add(3)
+		// Server-initiated close.
+		go func() {
+			defer wg.Done()
+			eConn.setCloseReason(metrics.ConnectionCloseServer)
+		}()
+		// Agent-shutdown close.
+		go func() {
+			defer wg.Done()
+			eConn.setCloseReason(metrics.ConnectionCloseAgentShutdown)
+		}()
+		// cleanFunc reading the reason to record the metric.
+		go func() {
+			defer wg.Done()
+			_ = eConn.getCloseReason()
+		}()
+		wg.Wait()
+
+		// First-writer-wins: exactly one of the two set reasons must stick, and it
+		// must never be empty (getCloseReason defaults to endpoint_close only when
+		// unset, but here a setter always ran).
+		got := eConn.getCloseReason()
+		if got != metrics.ConnectionCloseServer && got != metrics.ConnectionCloseAgentShutdown {
+			t.Fatalf("unexpected close reason %q", got)
+		}
+	}
 }
 
 func TestConnectionMismatch(t *testing.T) {

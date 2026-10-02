@@ -1359,6 +1359,48 @@ func assertConnectionDurationCount(t *testing.T, want uint64) {
 	}
 }
 
+func TestConnectionCloseMetric(t *testing.T) {
+	metrics.Metrics.Reset()
+
+	backend := &Backend{}
+	streamUID := "target-uuid"
+
+	p := NewProxyServer("", []proxystrategies.ProxyStrategy{proxystrategies.ProxyStrategyDefault}, 1, nil, xfrChannelSize)
+
+	// Frontend-initiated close: markFrontendClosed records intent, then the
+	// agent's CLOSE_RSP triggers removeEstablished -> frontend_close.
+	p.addEstablished("agent1", int64(1), &ProxyClientConnection{backend: backend})
+	p.markFrontendClosed("agent1", int64(1))
+	p.removeEstablished("agent1", int64(1))
+
+	// Unsolicited close: agent sends CLOSE_RSP because the endpoint closed on
+	// its own (no preceding CLOSE_REQ) -> endpoint_close, not frontend_close.
+	p.addEstablished("agent2", int64(1), &ProxyClientConnection{backend: backend})
+	p.removeEstablished("agent2", int64(1))
+
+	// Backend-connection lost: removeEstablishedForBackendConn.
+	p.addEstablished("agent3", int64(1), &ProxyClientConnection{backend: backend})
+	if _, err := p.removeEstablishedForBackendConn("agent3", backend); err != nil {
+		t.Fatalf("removeEstablishedForBackendConn returned error: %v", err)
+	}
+
+	// Frontend stream shutdown: removeEstablishedForStream.
+	p.addEstablished("agent4", int64(1), &ProxyClientConnection{
+		backend:  backend,
+		frontend: &Frontend{streamUID: streamUID},
+	})
+	p.removeEstablishedForStream(streamUID)
+
+	if err := metricstest.DefaultTester.ExpectServerConnectionCloses(map[metrics.ConnectionCloseReason]int{
+		metrics.ConnectionCloseFrontend:       1,
+		metrics.ConnectionCloseEndpoint:       1,
+		metrics.ConnectionCloseBackend:        1,
+		metrics.ConnectionCloseStreamShutdown: 1,
+	}); err != nil {
+		t.Errorf("Expected %s metric: %v", "connection_close_total", err)
+	}
+}
+
 func TestRemoveEstablishedForBackendConn(t *testing.T) {
 	backend1 := &Backend{}
 	backend2 := &Backend{}

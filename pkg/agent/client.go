@@ -50,6 +50,18 @@ type endpointConn struct {
 	connID    int64
 	cleanFunc func()
 
+	// establishedAt is set when the dial to the remote endpoint succeeds. It is
+	// used to record the connection's lifespan when it is closed.
+	establishedAt time.Time
+
+	// closeReason records why the connection is being torn down. It is set by the
+	// initiator of the close before calling cleanup(), and consumed in cleanFunc
+	// when recording close metrics. Reads and writes are serialized by
+	// closeReasonMu, since the close can be initiated concurrently by the server
+	// (CLOSE_REQ), the endpoint (EOF/read error) or agent shutdown.
+	closeReasonMu sync.Mutex
+	closeReason   metrics.ConnectionCloseReason
+
 	// dataCh is a queue to decouple reads from the ANP Server
 	// to the corresponding writes to the data plane.
 	// This is for traffic coming from the KAS.
@@ -72,6 +84,28 @@ type endpointConn struct {
 
 func (e *endpointConn) cleanup() {
 	e.cleanOnce.Do(e.cleanFunc)
+}
+
+// setCloseReason records the reason for closing the connection. Only the first
+// reason set is kept, since the close is driven by whichever initiator wins the
+// race to tear the connection down.
+func (e *endpointConn) setCloseReason(reason metrics.ConnectionCloseReason) {
+	e.closeReasonMu.Lock()
+	defer e.closeReasonMu.Unlock()
+	if e.closeReason == "" {
+		e.closeReason = reason
+	}
+}
+
+// getCloseReason returns the recorded close reason, or endpoint_close if no
+// initiator set one (e.g. the endpoint closed the connection on its own).
+func (e *endpointConn) getCloseReason() metrics.ConnectionCloseReason {
+	e.closeReasonMu.Lock()
+	defer e.closeReasonMu.Unlock()
+	if e.closeReason == "" {
+		return metrics.ConnectionCloseEndpoint
+	}
+	return e.closeReason
 }
 
 func (e *endpointConn) sendViaDataChannel(msg []byte) {
@@ -328,8 +362,15 @@ func (a *Client) initializeAuthContext(ctx context.Context) (context.Context, er
 func (a *Client) Serve() {
 	defer a.cs.RemoveClient(a.serverID)
 	defer func() {
-		// close all of conns with remote when Client exits
-		for _, eConn := range a.connManager.List() {
+		// Close all remaining connections when the client exits. Record the
+		// agent_shutdown reason on every connection first (before any cleanup
+		// runs), so the close is attributed to agent_shutdown even if a pump
+		// goroutine reacts to stopCh and reaches cleanup concurrently.
+		conns := a.connManager.List()
+		for _, eConn := range conns {
+			eConn.setCloseReason(metrics.ConnectionCloseAgentShutdown)
+		}
+		for _, eConn := range conns {
 			eConn.cleanup()
 		}
 		klog.V(2).InfoS("cleanup all of conn contexts when client exits")
@@ -396,7 +437,12 @@ func (a *Client) Serve() {
 				warnChLim: a.warnOnChannelLimit,
 			}
 			eConn.cleanFunc = func() {
-				// block on purpose
+				// Block until the dial goroutine has finished. This is required
+				// for correctness: the dial goroutine sets eConn.conn and
+				// eConn.establishedAt on success, so waiting on dialDone
+				// guarantees we never read an uninitialized conn/establishedAt
+				// below (including when recording the connection-duration
+				// metric). Do not remove or reorder this receive.
 				<-dialDone
 				if eConn.conn == nil {
 					// TODO: move this guard lower
@@ -431,6 +477,11 @@ func (a *Client) Serve() {
 				}
 				close(eConn.dataCh)
 				a.connManager.Delete(eConn.connID)
+				// The connection was established (conn is non-nil), so record its
+				// lifespan and the reason it was closed. getCloseReason defaults to
+				// endpoint_close when no initiator set a reason.
+				metrics.Metrics.ObserveConnectionDuration(time.Since(eConn.establishedAt))
+				metrics.Metrics.ObserveConnectionClose(eConn.getCloseReason())
 				if err := eConn.conn.Close(); err != nil {
 					klog.ErrorS(err, "failed to close connection to remote", "dialID", dialReq.Random, "connectionID", connID)
 				}
@@ -484,6 +535,7 @@ func (a *Client) Serve() {
 				metrics.Metrics.ObserveDialLatency(time.Since(start))
 				klog.V(3).InfoS("Endpoint connection established", "dialID", dialReq.Random, "connectionID", connID, "dialAddress", dialReq.Address)
 				eConn.conn = conn
+				eConn.establishedAt = time.Now()
 				a.connManager.Add(connID, eConn)
 				dialResp.GetDialResponse().ConnectID = connID
 				labels := runpprof.Labels(
@@ -542,6 +594,7 @@ func (a *Client) Serve() {
 
 			eConn, ok := a.connManager.Get(connID)
 			if ok {
+				eConn.setCloseReason(metrics.ConnectionCloseServer)
 				eConn.cleanup()
 			} else {
 				klog.V(4).InfoS("Failed to find connection context for close", "connectionID", connID)
@@ -621,6 +674,10 @@ func (a *Client) remoteToSendChannel(connID int64, eConn *endpointConn) {
 		select {
 		case eConn.sendCh <- data:
 		case <-a.stopCh:
+			// The agent is shutting down. Record the reason before the deferred
+			// cleanup runs, so the close is attributed to agent_shutdown rather
+			// than defaulting to endpoint_close.
+			eConn.setCloseReason(metrics.ConnectionCloseAgentShutdown)
 			return
 		}
 	}
