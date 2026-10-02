@@ -691,6 +691,83 @@ func testBasicProxyHTTPConnect(t *testing.T, startProxy func(testing.TB) framewo
 
 }
 
+func TestProxy_HTTPForwardProxy(t *testing.T) {
+	expectCleanShutdown(t)
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodPost {
+			body, err := io.ReadAll(r.Body)
+			if err != nil {
+				http.Error(w, err.Error(), http.StatusInternalServerError)
+				return
+			}
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte("echo: " + string(body)))
+			return
+		}
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte("get-response"))
+	}))
+	defer server.Close()
+
+	ps := runHTTPConnProxyServer(t)
+	defer ps.Stop()
+
+	a := runAgent(t, ps.AgentAddr())
+	defer a.Stop()
+	waitForConnectedServerCount(t, 1, a)
+
+	dummyProxyURL, err := url.Parse("http://konnectivity-proxy")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	client := &http.Client{
+		Transport: &http.Transport{
+			Proxy: http.ProxyURL(dummyProxyURL),
+			DialContext: func(ctx context.Context, _, _ string) (net.Conn, error) {
+				var d net.Dialer
+				return d.DialContext(ctx, "unix", ps.FrontAddr())
+			},
+		},
+	}
+
+	// 1. Test GET request
+	resp, err := client.Get(server.URL + "/test-path")
+	if err != nil {
+		t.Fatalf("GET request failed: %v", err)
+	}
+	if resp.StatusCode != http.StatusOK {
+		t.Errorf("expected status 200, got %d", resp.StatusCode)
+	}
+	body, err := io.ReadAll(resp.Body)
+	resp.Body.Close()
+	if err != nil {
+		t.Fatalf("reading GET body failed: %v", err)
+	}
+	if string(body) != "get-response" {
+		t.Errorf("expected %q, got %q", "get-response", string(body))
+	}
+
+	// 2. Test POST request
+	postBody := strings.NewReader("hello proxy world")
+	resp, err = client.Post(server.URL+"/test-post", "text/plain", postBody)
+	if err != nil {
+		t.Fatalf("POST request failed: %v", err)
+	}
+	if resp.StatusCode != http.StatusOK {
+		t.Errorf("expected status 200, got %d", resp.StatusCode)
+	}
+	body, err = io.ReadAll(resp.Body)
+	resp.Body.Close()
+	if err != nil {
+		t.Fatalf("reading POST body failed: %v", err)
+	}
+	if string(body) != "echo: hello proxy world" {
+		t.Errorf("expected %q, got %q", "echo: hello proxy world", string(body))
+	}
+}
+
 func TestFailedDNSLookupProxy_HTTPCONN(t *testing.T) {
 	expectCleanShutdown(t)
 
