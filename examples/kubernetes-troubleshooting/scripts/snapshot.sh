@@ -6,11 +6,11 @@ set -u
 
 echo "##### $(date -u +%T)"
 echo "== agents"
-agent_metrics | awk '$2 ~ /^konnectivity_network_proxy_agent_(open_server_connections|known_server_count|server_connection_lost_total|server_connection_attempts_total|stream_errors_total|open_endpoint_connections)/ {
+agent_metrics | awk '$2 ~ /^konnectivity_network_proxy_agent_(open_server_connections|known_server_count|server_connection_lost_total|server_connection_attempts_total|stream_errors_total|open_endpoint_connections|dial_duration_seconds_(sum|count))/ {
   sub(/^konnectivity_network_proxy_agent_/, "", $2); printf "  %-28s %s %s\n", $1, $2, $3 }'
 echo "== servers"
 for node in $(control_planes); do
-  server_metrics "$node" | awk -v n="$node" '/^konnectivity_network_proxy_server_(ready_backends\{|grpc_connections|pending_backend_dials|established_connections |established_connections_closed_total|dial_failure_count|backend_connection_duration_seconds_(count|bucket\{le="(1|60|3600)"\}))/ {
+  server_metrics "$node" | awk -v n="$node" '/^konnectivity_network_proxy_server_(ready_backends\{|grpc_connections|pending_backend_dials|established_connections |established_connections_closed_total|dial_failure_count|backend_connection_duration_seconds_(count|bucket\{le="(1|60|3600)"\})|dial_duration_seconds_(sum|count|bucket\{le="(0.025|0.1|0.5)"\}))/ {
     sub(/^konnectivity_network_proxy_server_/, ""); printf "  %-28s %s %s\n", n, $1, $2 }'
 done
 echo "== apiservers"
