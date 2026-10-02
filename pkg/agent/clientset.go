@@ -162,6 +162,24 @@ func (cs *ClientSet) RemoveClient(serverID string) {
 	metrics.Metrics.SetServerConnectionsCount(len(cs.clients))
 }
 
+// removeClient removes c if it is still the registered client for its server.
+// It returns false when c was already removed, or when the sync loop has
+// replaced it with a newer client to the same server; that client is left alone.
+func (cs *ClientSet) removeClient(c *Client) bool {
+	cs.mu.Lock()
+	defer cs.mu.Unlock()
+	if cs.clients[c.serverID] != c {
+		if cs.clients[c.serverID] != nil {
+			klog.V(2).InfoS("Skipping client removal; server already has a newer client registered", "serverID", c.serverID, "agentID", c.agentID)
+		}
+		return false
+	}
+	c.Close()
+	delete(cs.clients, c.serverID)
+	metrics.Metrics.SetServerConnectionsCount(len(cs.clients))
+	return true
+}
+
 type ClientSetConfig struct {
 	Address                 string
 	AgentID                 string
@@ -273,6 +291,7 @@ func (cs *ClientSet) connectOnce() error {
 	// In syncForever mode, we always try to connect, to discover new servers.
 	c, receivedServerCount, err := cs.newAgentClient()
 	if err != nil {
+		metrics.Metrics.ObserveServerConnectionAttempt(metrics.ServerConnectionAttemptError)
 		return err
 	}
 
@@ -280,6 +299,7 @@ func (cs *ClientSet) connectOnce() error {
 		c.Close()
 		return err // likely *DuplicateServerError
 	}
+	metrics.Metrics.ObserveServerConnectionAttempt(metrics.ServerConnectionAttemptConnected)
 	// SUCCESS: We connected to a new, unique server.
 	// Only now do we update our view of the server count.
 	cs.lastReceivedServerCount = receivedServerCount
