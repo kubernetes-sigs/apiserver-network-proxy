@@ -19,6 +19,7 @@ package agent
 import (
 	"errors"
 	"fmt"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -270,6 +271,133 @@ func TestConnectionCloseMetric_ServerClose(t *testing.T) {
 
 	if err := metricstest.DefaultTester.ExpectAgentConnectionClose(metrics.ConnectionCloseServer, 1); err != nil {
 		t.Errorf("Expected %s metric: %v", "endpoint_connection_close_total", err)
+	}
+}
+
+func TestConnectionCloseMetric_EndpointClose(t *testing.T) {
+	metrics.Metrics.Reset()
+
+	var stream agent.AgentService_ConnectClient
+	stopCh := make(chan struct{})
+	cs := &ClientSet{
+		clients: make(map[string]*Client),
+		stopCh:  stopCh,
+	}
+	testClient := &Client{
+		connManager: newConnectionManager(),
+		stopCh:      stopCh,
+		cs:          cs,
+	}
+	testClient.stream, stream = pipe()
+
+	go testClient.Serve()
+	defer close(stopCh)
+
+	// A listener that closes every accepted connection immediately, so the
+	// agent's remoteToSendChannel read returns EOF and the connection is torn
+	// down by the endpoint (no server CLOSE_REQ, no agent shutdown).
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer ln.Close()
+	go func() {
+		for {
+			conn, err := ln.Accept()
+			if err != nil {
+				return
+			}
+			conn.Close()
+		}
+	}()
+
+	if err := stream.Send(newDialPacket("tcp", ln.Addr().String(), 111)); err != nil {
+		t.Fatal(err)
+	}
+	pkt, _ := stream.Recv()
+	if pkt == nil || pkt.Type != client.PacketType_DIAL_RSP {
+		t.Fatalf("expected DIAL_RSP; got %+v", pkt)
+	}
+	connID := pkt.Payload.(*client.Packet_DialResponse).DialResponse.ConnectID
+
+	// The endpoint close propagates as a CLOSE_RSP from the agent.
+	pkt, _ = stream.Recv()
+	if pkt == nil || pkt.Type != client.PacketType_CLOSE_RSP {
+		t.Fatalf("expected CLOSE_RSP; got %+v", pkt)
+	}
+	waitForConnectionDeletion(t, testClient, connID)
+
+	if err := metricstest.DefaultTester.ExpectAgentConnectionClose(metrics.ConnectionCloseEndpoint, 1); err != nil {
+		t.Errorf("Expected %s metric: %v", "endpoint_connection_close_total", err)
+	}
+}
+
+func TestConnectionCloseMetric_AgentShutdown(t *testing.T) {
+	metrics.Metrics.Reset()
+
+	var stream agent.AgentService_ConnectClient
+	stopCh := make(chan struct{})
+	cs := &ClientSet{
+		clients: make(map[string]*Client),
+		stopCh:  stopCh,
+	}
+	testClient := &Client{
+		connManager: newConnectionManager(),
+		stopCh:      stopCh,
+		cs:          cs,
+	}
+	testClient.stream, stream = pipe()
+
+	go testClient.Serve()
+
+	// A remote endpoint that sends one byte (so the agent's remoteToSendChannel
+	// loops back to its send/stopCh select) and then holds the connection open.
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer ln.Close()
+	serverConnCh := make(chan net.Conn, 1)
+	go func() {
+		conn, err := ln.Accept()
+		if err != nil {
+			return
+		}
+		_, _ = conn.Write([]byte("x"))
+		serverConnCh <- conn
+	}()
+
+	if err := stream.Send(newDialPacket("tcp", ln.Addr().String(), 111)); err != nil {
+		t.Fatal(err)
+	}
+	pkt, _ := stream.Recv()
+	if pkt == nil || pkt.Type != client.PacketType_DIAL_RSP {
+		t.Fatalf("expected DIAL_RSP; got %+v", pkt)
+	}
+
+	// Wait until the agent has read the byte and is parked in the send/stopCh
+	// select, so that closing stopCh deterministically drives the
+	// agent_shutdown close reason rather than an endpoint read error.
+	serverConn := <-serverConnCh
+	defer serverConn.Close()
+	if err := wait.PollImmediate(20*time.Millisecond, 5*time.Second, func() (bool, error) {
+		for _, eConn := range testClient.connManager.List() {
+			return len(eConn.sendCh) == 0, nil // byte consumed from sendCh => parked in select
+		}
+		return false, nil
+	}); err != nil {
+		t.Fatal("endpoint connection was never established")
+	}
+
+	close(stopCh)
+
+	// Poll the metric: Serve's shutdown and the pump goroutines record the
+	// agent_shutdown close asynchronously.
+	if err := wait.PollImmediate(50*time.Millisecond, 10*time.Second, func() (bool, error) {
+		return metricstest.DefaultTester.ExpectAgentConnectionClose(metrics.ConnectionCloseAgentShutdown, 1) == nil, nil
+	}); err != nil {
+		t.Errorf("Expected %s metric: %v", "endpoint_connection_close_total",
+			metricstest.DefaultTester.ExpectAgentConnectionClose(metrics.ConnectionCloseAgentShutdown, 1))
 	}
 }
 

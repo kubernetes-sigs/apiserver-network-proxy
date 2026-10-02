@@ -362,9 +362,15 @@ func (a *Client) initializeAuthContext(ctx context.Context) (context.Context, er
 func (a *Client) Serve() {
 	defer a.cs.RemoveClient(a.serverID)
 	defer func() {
-		// close all of conns with remote when Client exits
-		for _, eConn := range a.connManager.List() {
+		// Close all remaining connections when the client exits. Record the
+		// agent_shutdown reason on every connection first (before any cleanup
+		// runs), so the close is attributed to agent_shutdown even if a pump
+		// goroutine reacts to stopCh and reaches cleanup concurrently.
+		conns := a.connManager.List()
+		for _, eConn := range conns {
 			eConn.setCloseReason(metrics.ConnectionCloseAgentShutdown)
+		}
+		for _, eConn := range conns {
 			eConn.cleanup()
 		}
 		klog.V(2).InfoS("cleanup all of conn contexts when client exits")
@@ -431,7 +437,12 @@ func (a *Client) Serve() {
 				warnChLim: a.warnOnChannelLimit,
 			}
 			eConn.cleanFunc = func() {
-				// block on purpose
+				// Block until the dial goroutine has finished. This is required
+				// for correctness: the dial goroutine sets eConn.conn and
+				// eConn.establishedAt on success, so waiting on dialDone
+				// guarantees we never read an uninitialized conn/establishedAt
+				// below (including when recording the connection-duration
+				// metric). Do not remove or reorder this receive.
 				<-dialDone
 				if eConn.conn == nil {
 					// TODO: move this guard lower
@@ -663,6 +674,10 @@ func (a *Client) remoteToSendChannel(connID int64, eConn *endpointConn) {
 		select {
 		case eConn.sendCh <- data:
 		case <-a.stopCh:
+			// The agent is shutting down. Record the reason before the deferred
+			// cleanup runs, so the close is attributed to agent_shutdown rather
+			// than defaulting to endpoint_close.
+			eConn.setCloseReason(metrics.ConnectionCloseAgentShutdown)
 			return
 		}
 	}

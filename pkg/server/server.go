@@ -413,6 +413,15 @@ func (s *ProxyServer) removeEstablished(agentID string, connID int64) *ProxyClie
 	// A CLOSE_RSP is only attributed to the frontend when the frontend actually
 	// requested the close (CLOSE_REQ). Otherwise the agent sent an unsolicited
 	// CLOSE_RSP because the endpoint closed on its own.
+	//
+	// Note: there is a benign attribution race between this path and
+	// removeEstablishedForStream. If an agent CLOSE_RSP arrives concurrently
+	// with the frontend gRPC stream closing/cancelling, whichever acquires fmu
+	// first removes the connection and records the close. Both paths are
+	// mutually exclusive and correct (fmu-guarded), but when
+	// removeEstablishedForStream wins the close is recorded as stream_shutdown
+	// instead of frontend_close/endpoint_close. This only shifts the reason
+	// label under heavy stream teardown; the total close count is unaffected.
 	closeReason := metrics.ConnectionCloseEndpoint
 	if ret.frontendClosed {
 		closeReason = metrics.ConnectionCloseFrontend
