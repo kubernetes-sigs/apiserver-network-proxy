@@ -19,6 +19,8 @@ package agent
 import (
 	"errors"
 	"fmt"
+	"io"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -469,3 +471,121 @@ func goleakVerifyNone(t *testing.T, options ...goleak.Option) {
 		t.Error(err)
 	}
 }
+
+func TestClose_Client_NilConn(t *testing.T) {
+	stopCh := make(chan struct{})
+	testClient := &Client{
+		stopCh: stopCh,
+	}
+	testClient.Close()
+	select {
+	case <-stopCh:
+	default:
+		t.Fatal("stopCh not closed by Client.Close()")
+	}
+}
+
+// TestServe_ExitDoesNotRemoveReplacementClient covers the race between a
+// client whose stream died and the sync loop reconnecting to the same server:
+// if the old client is already gone from the ClientSet when its Serve loop
+// exits, the exit must not remove (and close) the client that replaced it.
+func TestServe_ExitDoesNotRemoveReplacementClient(t *testing.T) {
+	defer goleakVerifyNone(t, goleak.IgnoreCurrent())
+
+	const serverID = "server-1"
+	cs := &ClientSet{clients: make(map[string]*Client)}
+	newClient := func() *Client {
+		c := &Client{
+			connManager:   newConnectionManager(),
+			stopCh:        make(chan struct{}),
+			probeInterval: time.Hour,
+			serverID:      serverID,
+			cs:            cs,
+		}
+		clientStream, _ := pipe()
+		c.stream = &brokenStream{AgentService_ConnectClient: clientStream, recvErr: io.EOF}
+		return c
+	}
+
+	old := newClient()
+	cs.clients[serverID] = old
+	// The stream to serverID died and was removed once already (for example by
+	// the probe); the sync loop then reconnected to the same server.
+	cs.RemoveClient(serverID)
+	replacement := newClient()
+	if err := cs.AddClient(serverID, replacement); err != nil {
+		t.Fatalf("AddClient: %v", err)
+	}
+
+	// The old client's Serve loop now exits on its dead stream.
+	old.Serve()
+
+	if !cs.HasID(serverID) {
+		t.Fatal("replacement client was removed by the old client's Serve exit")
+	}
+	select {
+	case <-replacement.stopCh:
+		t.Fatal("replacement client was closed by the old client's Serve exit")
+	default:
+	}
+	cs.RemoveClient(serverID)
+}
+
+func TestConnect_Client_InvalidTokenPath(t *testing.T) {
+	l, err := net.Listen("tcp", ":0")
+	if err != nil {
+		t.Fatal("failed to open port:", err)
+	}
+	defer l.Close()
+
+	gs := grpc.NewServer()
+	gs.RegisterService(&agent.AgentService_ServiceDesc, fakeServer{})
+
+	var wg sync.WaitGroup
+	defer func() {
+		gs.Stop()
+		wg.Wait()
+	}()
+	wg.Go(func() {
+		gs.Serve(l)
+	})
+
+	// validate the setup actually works and allows the grpc dial to go through
+	cl, _, err := newAgentClient(l.Addr().String(), "", "",
+		&ClientSet{},
+		grpc.WithTransportCredentials(insecure.NewCredentials()),
+	)
+	if err != nil {
+		t.Fatal("failed to create agent client:", err)
+	}
+	if cl.conn == nil {
+		t.Fatal("agent client conn nil")
+	}
+	cl.Close()
+
+	// check error path when invalid SA token
+	cl, _, err = newAgentClient(l.Addr().String(), "", "",
+		&ClientSet{
+			serviceAccountTokenPath: "./does-not-exist",
+		},
+		grpc.WithTransportCredentials(insecure.NewCredentials()),
+	)
+	if !os.IsNotExist(err) {
+		t.Fatal("expected not exist error, got:", err)
+	}
+	if !strings.Contains(err.Error(), "does-not-exist") {
+		t.Fatal("unexpected error:", err)
+	}
+	if cl != nil {
+		t.Fatal("expected nil agent client")
+	}
+}
+
+type fakeServer struct{}
+
+func (fakeServer) Connect(stream agent.AgentService_ConnectServer) error {
+	h := metadata.Pairs(header.ServerID, "", header.ServerCount, "0")
+	return stream.SendHeader(h)
+}
+
+var _ agent.AgentServiceServer = fakeServer{}
