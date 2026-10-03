@@ -103,6 +103,7 @@ Scripts:
 | `scripts/reset-flows.sh <mode>` | Resets all agent-to-server flows; `both`, `agents`, `servers`, `restore`. See scenarios 01 to 03. |
 | `scripts/starve-agent.sh <node> [quota]` | Limits the agent container on one node to `quota` µs of CPU per 100 ms through its cgroup (default 5000, 5% of one CPU); `restore` lifts the limit. |
 | `scripts/dial-load.sh` | Runs `kubectl exec` in a loop; each call is a new tunnel dial through a randomly chosen agent. Logs per-call latency to `$OUT_DIR/dial-load.log`. |
+| `scripts/vip-churn.sh [seconds]` | Counts the new connections through the balancer in the interval, how many produced a new server connection, how many were closed as duplicates, and the sockets the balancer holds toward the servers. |
 | `webhook/deploy.sh` | Builds and deploys the measuring webhook and extracts kubeconfig credentials for the load generator. |
 | `webhook/monitor.sh` | Every 10 s, apiserver-measured versus webhook-measured latency, fail-opens, connections. |
 | `tunnel-probe` | Runs on a control-plane node (`docker cp` the binary to `/usr/local/bin`; `/tmp` on kind nodes is a tmpfs that `docker cp` does not reach). `kt-probe -url http://<webhook-pod-ip>:9090/metrics -timeout 10s`. |
@@ -135,8 +136,8 @@ measurements with the change applied next to the measurements without it.
 
 | # | Scenario | Change | Problem it addresses | State |
 |---|---|---|---|---|
-| 1 | 00 | agent: skip the sync dial when the lease count is satisfied | connection churn at rest hides the real events in server logs and `stream_errors_total` | planned |
-| 2 | 01, 03 | agent: fast re-sync while `open_server_connections < known_server_count` | re-mesh takes N·ln(N) × `--sync-interval` | planned |
+| 1 | 00 | agent: skip the sync dial when the lease count is satisfied | every agent opens and closes one connection to the VIP per interval forever: a port reservation on a NAT-style VIP, a connection setup per attempt, and noise that hides real events | measured: 36 → 0 flows/min for 3 agents, see [00](scenarios/00-baseline.md#changes-and-their-effect) |
+| 2 | 01, 03 | agent: fast re-sync while under-connected | re-mesh takes N·ln(N) × `--sync-interval` | withdrawn: it would spend the same N·ln(N) connections in seconds and reserve that many ports on the VIP at once, for a small gain; see [00](scenarios/00-baseline.md#connection-churn-and-port-exhaustion-at-the-vip) |
 | 3 | 02 | `konnectivity-client`: `conn.Close()` returns without waiting for `CLOSE_RSP` | a call into a dead tunnel takes `timeoutSeconds + 10 s` and holds the apiserver's request goroutine | measured: 20 s → 10 s, see [02](scenarios/02-reset-seen-by-agents-only.md#changes-and-their-effect) |
 | 4 | 02 | server: `--keepalive-time` default low enough to detect half-open streams without traffic; `--backend-dial-timeout` enabled and a backend that times out a dial marked draining | servers keep dead backends for 20 s or more and route dials into them | planned |
 | 5 | 04 | server: backend selection that compares candidates on recent dial latency or in-flight dials | one slow agent receives its full 1/N share of new dials | planned |
