@@ -105,7 +105,7 @@ changed client. Then `reset-flows.sh agents`.
 The change removes the 10 s that `Close()` added on top of the request's own timeout;
 the request now takes exactly `timeoutSeconds`. What remains is the server routing new
 dials into half-open backends for up to 20 s after the reset, which the second request
-on the changed client shows; that is addressed by change 3 in the
+on the changed client shows; that is addressed by change 4 in the
 [fixes table](../README.md#fixes).
 
 ### Planned
