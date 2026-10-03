@@ -17,6 +17,10 @@ The directory contains:
   monitor.
 - `webhook-load/`: a load generator that triggers the webhook with server-side dry-run
   requests.
+- `tunnel-probe/`: a client that sends requests through a konnectivity-server's unix
+  socket over one keep-alive connection, the way the apiserver calls a webhook, and logs
+  each request's duration. Build it against two versions of `konnectivity-client` to
+  compare them on the same fault.
 - `scenarios/`: one document per fault scenario, with steps, measurements, and the
   effect of each fix once it lands.
 
@@ -101,6 +105,7 @@ Scripts:
 | `scripts/dial-load.sh` | Runs `kubectl exec` in a loop; each call is a new tunnel dial through a randomly chosen agent. Logs per-call latency to `$OUT_DIR/dial-load.log`. |
 | `webhook/deploy.sh` | Builds and deploys the measuring webhook and extracts kubeconfig credentials for the load generator. |
 | `webhook/monitor.sh` | Every 10 s, apiserver-measured versus webhook-measured latency, fail-opens, connections. |
+| `tunnel-probe` | Runs on a control-plane node (`docker cp` the binary to `/usr/local/bin`; `/tmp` on kind nodes is a tmpfs that `docker cp` does not reach). `kt-probe -url http://<webhook-pod-ip>:9090/metrics -timeout 10s`. |
 
 ## Scenarios
 
@@ -128,13 +133,13 @@ the order in which the changes are worked on; each one gets its own pull request
 the scenario document records the measurements with the change applied next to the
 measurements without it.
 
-| # | Change | Problem it addresses | Scenario |
-|---|---|---|---|
-| 1 | `konnectivity-client`: `conn.Close()` returns without waiting for `CLOSE_RSP` | a call into a dead tunnel takes `timeoutSeconds + 10 s` and holds the apiserver's request goroutine | 02 |
-| 2 | agent: fast re-sync while `open_server_connections < known_server_count` | re-mesh takes N·ln(N) × `--sync-interval` | 01, 03 |
-| 3 | server: `--keepalive-time` default low enough to detect half-open streams without traffic; `--backend-dial-timeout` enabled and a backend that times out a dial marked draining | servers keep dead backends for 20 s or more and route dials into them | 02 |
-| 4 | agent: skip the sync dial when the lease count is satisfied | connection churn at rest hides the real events | 00 |
-| 5 | server: backend selection that compares candidates on recent dial latency or in-flight dials | one slow agent receives its full 1/N share of new dials | 04 |
+| # | Change | Problem it addresses | Scenario | State |
+|---|---|---|---|---|
+| 1 | `konnectivity-client`: `conn.Close()` returns without waiting for `CLOSE_RSP` | a call into a dead tunnel takes `timeoutSeconds + 10 s` and holds the apiserver's request goroutine | 02 | measured: 20 s → 10 s, see [02](scenarios/02-reset-seen-by-agents-only.md#changes-and-their-effect) |
+| 2 | agent: fast re-sync while `open_server_connections < known_server_count` | re-mesh takes N·ln(N) × `--sync-interval` | 01, 03 | planned |
+| 3 | server: `--keepalive-time` default low enough to detect half-open streams without traffic; `--backend-dial-timeout` enabled and a backend that times out a dial marked draining | servers keep dead backends for 20 s or more and route dials into them | 02 | planned |
+| 4 | agent: skip the sync dial when the lease count is satisfied | connection churn at rest hides the real events | 00 | planned |
+| 5 | server: backend selection that compares candidates on recent dial latency or in-flight dials | one slow agent receives its full 1/N share of new dials | 04 | planned |
 
 Not changeable here, recorded as conclusions for operators: the balancer resetting its
 flows, the agents' CPU request and placement, the webhook's `timeoutSeconds` and
