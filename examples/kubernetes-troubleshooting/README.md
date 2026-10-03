@@ -128,18 +128,18 @@ through the kind envoy balancer, `--sync-interval=5s`, `--sync-forever`,
 
 ## Fixes
 
-Each problem the scenarios isolate has a change associated with it. The order below is
-the order in which the changes are worked on; each one gets its own pull request, and
-the scenario document records the measurements with the change applied next to the
-measurements without it.
+Each problem the scenarios isolate has a change associated with it. The changes are
+ordered by the scenario that measures them and are worked on in that order, each as a
+commit on this branch followed by a commit that records, in the scenario document, the
+measurements with the change applied next to the measurements without it.
 
-| # | Change | Problem it addresses | Scenario | State |
+| # | Scenario | Change | Problem it addresses | State |
 |---|---|---|---|---|
-| 1 | `konnectivity-client`: `conn.Close()` returns without waiting for `CLOSE_RSP` | a call into a dead tunnel takes `timeoutSeconds + 10 s` and holds the apiserver's request goroutine | 02 | measured: 20 s → 10 s, see [02](scenarios/02-reset-seen-by-agents-only.md#changes-and-their-effect) |
-| 2 | agent: fast re-sync while `open_server_connections < known_server_count` | re-mesh takes N·ln(N) × `--sync-interval` | 01, 03 | planned |
-| 3 | server: `--keepalive-time` default low enough to detect half-open streams without traffic; `--backend-dial-timeout` enabled and a backend that times out a dial marked draining | servers keep dead backends for 20 s or more and route dials into them | 02 | planned |
-| 4 | agent: skip the sync dial when the lease count is satisfied | connection churn at rest hides the real events | 00 | planned |
-| 5 | server: backend selection that compares candidates on recent dial latency or in-flight dials | one slow agent receives its full 1/N share of new dials | 04 | planned |
+| 1 | 00 | agent: skip the sync dial when the lease count is satisfied | connection churn at rest hides the real events in server logs and `stream_errors_total` | planned |
+| 2 | 01, 03 | agent: fast re-sync while `open_server_connections < known_server_count` | re-mesh takes N·ln(N) × `--sync-interval` | planned |
+| 3 | 02 | `konnectivity-client`: `conn.Close()` returns without waiting for `CLOSE_RSP` | a call into a dead tunnel takes `timeoutSeconds + 10 s` and holds the apiserver's request goroutine | measured: 20 s → 10 s, see [02](scenarios/02-reset-seen-by-agents-only.md#changes-and-their-effect) |
+| 4 | 02 | server: `--keepalive-time` default low enough to detect half-open streams without traffic; `--backend-dial-timeout` enabled and a backend that times out a dial marked draining | servers keep dead backends for 20 s or more and route dials into them | planned |
+| 5 | 04 | server: backend selection that compares candidates on recent dial latency or in-flight dials | one slow agent receives its full 1/N share of new dials | planned |
 
 Not changeable here, recorded as conclusions for operators: the balancer resetting its
 flows, the agents' CPU request and placement, the webhook's `timeoutSeconds` and
