@@ -53,7 +53,7 @@ every flow.
 | tunnels | 11 → 0; every `kubectl logs -f` stream ended at T0 |
 | servers | `ready_backends` 3 → 0 on all five within the same second; the first server stayed at 0 for 35 s |
 | apiserver | `dial_failure_total{reason="endpoint"}` +66 (`No agent available`) over 25 s, then none |
-| re-mesh | agents back to 5 of 5 servers after 36 s, 56 s and 77 s; `server_connection_attempts_total{connected}` +5 and `{duplicate}` +80 per agent |
+| re-mesh | agents back to 5 of 5 servers after 36 s, 56 s and 77 s; `server_connection_attempts_total{result="connected"}` +5 per agent and about 80 further connections per agent through the balancer that were closed as duplicates |
 | `backend_connection_duration_seconds` | 5 observations per server in the 60 s to 3600 s buckets, against about 50 in `le="1"` from the sync loop in the same window |
 | balancer access log | the destroyed flows end with `flags=- details=-`; only the aggregate `upstream_cx_destroy` counters move |
 
@@ -73,5 +73,14 @@ every flow.
 
 ## Changes and their effect
 
-None yet. Planned: fast re-sync in the agent while
-`open_server_connections < known_server_count`.
+The agent change measured in [00](00-baseline.md#changes-and-their-effect) leaves
+recovery as described above: after a reset the agents dial every interval until each
+holds every server (36 s, 71 s and 141 s in that run) and then stop dialing.
+
+Making the agent dial faster while under-connected was considered and withdrawn. The
+number of connections a re-mesh needs through a random balancer is about N·ln(N) per
+agent whatever the pace; dialing faster only reserves that many ports on the VIP at
+once instead of spreading them at the resting rate, and the apiservers recover as soon
+as each server has its first agent back, which takes about `N × interval / agents`
+(1 s at 100 agents and 20 servers). See
+[00](00-baseline.md#connection-churn-and-port-exhaustion-at-the-vip).

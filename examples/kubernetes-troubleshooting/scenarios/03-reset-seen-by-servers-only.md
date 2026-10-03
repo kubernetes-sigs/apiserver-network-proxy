@@ -64,4 +64,8 @@ learns that the connections are gone.
 
 ## Changes and their effect
 
-None yet. The fast re-sync planned for 01 shortens the no-agent window here too.
+None that target this scenario. The no-agent window per server is `N × interval /
+agents` on average (1.4 s, 12 s and 6.9 s measured here with 3 agents and 5 servers;
+about 1 s at 100 agents and 20 servers), and shortening it by dialing faster was
+withdrawn because of its cost in VIP ports; see
+[00](00-baseline.md#connection-churn-and-port-exhaustion-at-the-vip).
