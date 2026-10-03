@@ -27,6 +27,7 @@ import (
 	"net/http/httptest"
 	"net/url"
 	"reflect"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -2081,4 +2082,229 @@ func TestEstablishedConnectionsClosedMetric(t *testing.T) {
 		t.Error(err)
 	}
 	assertEstablishedConnsMetric(t, 0)
+}
+
+func TestProxyServer_DialContext_Success(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+
+	metrics.Metrics.Reset()
+
+	proxyServer := NewProxyServer(uuid.New().String(), []proxystrategies.ProxyStrategy{proxystrategies.ProxyStrategyDefault}, 1, &AgentTokenAuthenticationOptions{}, xfrChannelSize)
+	agentConn, backend := prepareAgentConnMD(t, ctrl, proxyServer, nil)
+
+	const connectID int64 = 42
+	recvCh := make(chan *client.Packet, 10)
+	agentConn.EXPECT().Recv().DoAndReturn(func() (*client.Packet, error) {
+		pkt, ok := <-recvCh
+		if !ok {
+			return nil, io.EOF
+		}
+		return pkt, nil
+	}).AnyTimes()
+
+	var capturedDialID int64
+	dialReqReceived := make(chan struct{})
+	dataReqReceived := make(chan struct{})
+	closeReqReceived := make(chan struct{})
+
+	agentConn.EXPECT().Send(gomock.Any()).DoAndReturn(func(pkt *client.Packet) error {
+		switch pkt.Type {
+		case client.PacketType_DIAL_REQ:
+			capturedDialID = pkt.GetDialRequest().Random
+			close(dialReqReceived)
+			// respond with DIAL_RSP
+			recvCh <- &client.Packet{
+				Type: client.PacketType_DIAL_RSP,
+				Payload: &client.Packet_DialResponse{
+					DialResponse: &client.DialResponse{
+						Random:    capturedDialID,
+						ConnectID: connectID,
+					},
+				},
+			}
+		case client.PacketType_DATA:
+			if string(pkt.GetData().Data) == "ping" {
+				close(dataReqReceived)
+				// respond with DATA "pong"
+				recvCh <- &client.Packet{
+					Type: client.PacketType_DATA,
+					Payload: &client.Packet_Data{
+						Data: &client.Data{
+							ConnectID: connectID,
+							Data:      []byte("pong"),
+						},
+					},
+				}
+			}
+		case client.PacketType_CLOSE_REQ:
+			close(closeReqReceived)
+			recvCh <- &client.Packet{
+				Type: client.PacketType_CLOSE_RSP,
+				Payload: &client.Packet_CloseResponse{
+					CloseResponse: &client.CloseResponse{
+						ConnectID: connectID,
+					},
+				},
+			}
+		}
+		return nil
+	}).AnyTimes()
+
+	go proxyServer.serveRecvBackend(backend, backend.GetAgentID(), recvCh)
+	defer func() {
+		close(recvCh)
+	}()
+
+	ctx := context.Background()
+	conn, err := proxyServer.DialContext(ctx, "tcp", "127.0.0.1:8080")
+	if err != nil {
+		t.Fatalf("unexpected error dialing context: %v", err)
+	}
+	defer conn.Close()
+
+	<-dialReqReceived
+
+	// Test Write
+	n, err := conn.Write([]byte("ping"))
+	if err != nil || n != 4 {
+		t.Fatalf("unexpected write result n=%d, err=%v", n, err)
+	}
+
+	<-dataReqReceived
+
+	// Test Read
+	buf := make([]byte, 10)
+	n, err = conn.Read(buf)
+	if err != nil || string(buf[:n]) != "pong" {
+		t.Fatalf("unexpected read result n=%d, data=%q, err=%v", n, string(buf[:n]), err)
+	}
+
+	// Test LocalAddr and RemoteAddr
+	if conn.LocalAddr() == nil || conn.LocalAddr().Network() != "tcp" {
+		t.Errorf("unexpected LocalAddr: %v", conn.LocalAddr())
+	}
+	if conn.RemoteAddr() == nil || conn.RemoteAddr().String() != "127.0.0.1:8080" {
+		t.Errorf("unexpected RemoteAddr: %v", conn.RemoteAddr())
+	}
+
+	// Test Close
+	if err := conn.Close(); err != nil {
+		t.Fatalf("unexpected error closing conn: %v", err)
+	}
+	<-closeReqReceived
+}
+
+func TestProxyServer_DialContext_NoBackend(t *testing.T) {
+	proxyServer := NewProxyServer(uuid.New().String(), []proxystrategies.ProxyStrategy{proxystrategies.ProxyStrategyDefault}, 1, &AgentTokenAuthenticationOptions{}, xfrChannelSize)
+	ctx := context.Background()
+	conn, err := proxyServer.DialContext(ctx, "tcp", "127.0.0.1:8080")
+	if conn != nil || err == nil {
+		t.Fatalf("expected error when no backends available, got conn=%v, err=%v", conn, err)
+	}
+}
+
+func TestProxyServer_DialContext_DialError(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+
+	metrics.Metrics.Reset()
+
+	proxyServer := NewProxyServer(uuid.New().String(), []proxystrategies.ProxyStrategy{proxystrategies.ProxyStrategyDefault}, 1, &AgentTokenAuthenticationOptions{}, xfrChannelSize)
+	agentConn, backend := prepareAgentConnMD(t, ctrl, proxyServer, nil)
+
+	recvCh := make(chan *client.Packet, 10)
+	agentConn.EXPECT().Recv().DoAndReturn(func() (*client.Packet, error) {
+		pkt, ok := <-recvCh
+		if !ok {
+			return nil, io.EOF
+		}
+		return pkt, nil
+	}).AnyTimes()
+
+	agentConn.EXPECT().Send(gomock.Any()).DoAndReturn(func(pkt *client.Packet) error {
+		if pkt.Type == client.PacketType_DIAL_REQ {
+			recvCh <- &client.Packet{
+				Type: client.PacketType_DIAL_RSP,
+				Payload: &client.Packet_DialResponse{
+					DialResponse: &client.DialResponse{
+						Random: pkt.GetDialRequest().Random,
+						Error:  "connection refused",
+					},
+				},
+			}
+		}
+		return nil
+	}).AnyTimes()
+
+	go proxyServer.serveRecvBackend(backend, backend.GetAgentID(), recvCh)
+	defer close(recvCh)
+
+	ctx := context.Background()
+	conn, err := proxyServer.DialContext(ctx, "tcp", "127.0.0.1:8080")
+	if conn != nil || err == nil || !strings.Contains(err.Error(), "connection refused") {
+		t.Fatalf("expected connection refused error, got conn=%v, err=%v", conn, err)
+	}
+}
+
+func TestProxyServer_DialContext_Timeout(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+
+	metrics.Metrics.Reset()
+
+	proxyServer := NewProxyServer(uuid.New().String(), []proxystrategies.ProxyStrategy{proxystrategies.ProxyStrategyDefault}, 1, &AgentTokenAuthenticationOptions{}, xfrChannelSize)
+	proxyServer.SetBackendDialTimeout(100 * time.Millisecond)
+	agentConn, backend := prepareAgentConnMD(t, ctrl, proxyServer, nil)
+
+	recvCh := make(chan *client.Packet, 10)
+	agentConn.EXPECT().Recv().DoAndReturn(func() (*client.Packet, error) {
+		pkt, ok := <-recvCh
+		if !ok {
+			return nil, io.EOF
+		}
+		return pkt, nil
+	}).AnyTimes()
+
+	agentConn.EXPECT().Send(gomock.Any()).Return(nil).AnyTimes()
+
+	go proxyServer.serveRecvBackend(backend, backend.GetAgentID(), recvCh)
+	defer close(recvCh)
+
+	ctx := context.Background()
+	conn, err := proxyServer.DialContext(ctx, "tcp", "127.0.0.1:8080")
+	if conn != nil || !errors.Is(err, errBackendDialTimeout) {
+		t.Fatalf("expected timeout error, got conn=%v, err=%v", conn, err)
+	}
+}
+
+func TestProxyServer_DialContext_ContextCancelled(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+
+	metrics.Metrics.Reset()
+
+	proxyServer := NewProxyServer(uuid.New().String(), []proxystrategies.ProxyStrategy{proxystrategies.ProxyStrategyDefault}, 1, &AgentTokenAuthenticationOptions{}, xfrChannelSize)
+	agentConn, backend := prepareAgentConnMD(t, ctrl, proxyServer, nil)
+
+	recvCh := make(chan *client.Packet, 10)
+	agentConn.EXPECT().Recv().DoAndReturn(func() (*client.Packet, error) {
+		pkt, ok := <-recvCh
+		if !ok {
+			return nil, io.EOF
+		}
+		return pkt, nil
+	}).AnyTimes()
+
+	agentConn.EXPECT().Send(gomock.Any()).Return(nil).AnyTimes()
+
+	go proxyServer.serveRecvBackend(backend, backend.GetAgentID(), recvCh)
+	defer close(recvCh)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel() // cancel immediately
+	conn, err := proxyServer.DialContext(ctx, "tcp", "127.0.0.1:8080")
+	if conn != nil || !errors.Is(err, context.Canceled) {
+		t.Fatalf("expected context.Canceled error, got conn=%v, err=%v", conn, err)
+	}
 }
