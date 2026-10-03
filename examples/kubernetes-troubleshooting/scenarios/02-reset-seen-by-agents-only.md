@@ -87,12 +87,30 @@ In addition to the signals of 01:
 
 ## Changes and their effect
 
-None yet. Planned, in this order:
+### `konnectivity-client`: `conn.Close()` returns without waiting for `CLOSE_RSP`
 
-1. `konnectivity-client`: `conn.Close()` returns without waiting for `CLOSE_RSP`.
-   Expected: the 20 s calls become 10 s (the webhook's own timeout) and the client
-   keeps its throughput.
-2. Server: `--keepalive-time` default low enough to detect a half-open stream without
-   traffic; `--backend-dial-timeout` enabled and a backend that times out a dial marked
-   draining. Expected: half-open backends leave the selection within seconds.
-3. Agent: fast re-sync while under-connected. Expected: re-mesh in seconds.
+Measured on 2026-10-03 with `tunnel-probe`, which sends one request every 500 ms over a
+single keep-alive connection through a konnectivity-server's unix socket, with a 10 s
+per-request timeout, the way the apiserver calls a webhook. Two probes ran side by side
+on two control-plane nodes: one built against the previous client, one against the
+changed client. Then `reset-flows.sh agents`.
+
+| | previous `Close()` | changed `Close()` |
+|---|---|---|
+| request in flight on the pinned connection at T0 | 20,018 ms, `context deadline exceeded` | 10,000 ms, `context deadline exceeded` |
+| next request | 1 ms (fresh dial reached a live agent) | 10,000 ms: the fresh dial was routed to another half-open backend, which the server detected 10 s later |
+| requests completed in the first 60 s | 79 | 79 |
+| everything else | at most 6 ms | at most 6 ms |
+
+The change removes the 10 s that `Close()` added on top of the request's own timeout;
+the request now takes exactly `timeoutSeconds`. What remains is the server routing new
+dials into half-open backends for up to 20 s after the reset, which the second request
+on the changed client shows; that is addressed by change 3 in the
+[fixes table](../README.md#fixes).
+
+### Planned
+
+- Server: `--keepalive-time` default low enough to detect a half-open stream without
+  traffic; `--backend-dial-timeout` enabled and a backend that times out a dial marked
+  draining. Expected: half-open backends leave the selection within seconds.
+- Agent: fast re-sync while under-connected. Expected: re-mesh in seconds.
