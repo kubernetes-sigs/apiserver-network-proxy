@@ -50,6 +50,7 @@ func TestDefaultServerOptions(t *testing.T) {
 	assertDefaultValue(t, "AdminPort", defaultServerOptions.AdminPort, 8095)
 	assertDefaultValue(t, "AdminBindAddress", defaultServerOptions.AdminBindAddress, "127.0.0.1")
 	assertDefaultValue(t, "KeepaliveTime", defaultServerOptions.KeepaliveTime, 1*time.Hour)
+	assertDefaultValue(t, "KeepaliveTimeout", defaultServerOptions.KeepaliveTimeout, 20*time.Second)
 	assertDefaultValue(t, "FrontendKeepaliveTime", defaultServerOptions.FrontendKeepaliveTime, 1*time.Hour)
 	assertDefaultValue(t, "EnableProfiling", defaultServerOptions.EnableProfiling, false)
 	assertDefaultValue(t, "EnableContentionProfiling", defaultServerOptions.EnableContentionProfiling, false)
@@ -245,6 +246,16 @@ func TestValidate(t *testing.T) {
 		"PositiveBackendDialTimeout": {
 			field:    "BackendDialTimeout",
 			value:    30 * time.Second,
+			expected: nil,
+		},
+		"ZeroKeepaliveTimeout": {
+			field:    "KeepaliveTimeout",
+			value:    0 * time.Second,
+			expected: fmt.Errorf("keepalive-timeout must be > 0, got 0s"),
+		},
+		"PositiveKeepaliveTimeout": {
+			field:    "KeepaliveTimeout",
+			value:    5 * time.Second,
 			expected: nil,
 		},
 	} {

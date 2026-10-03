@@ -65,7 +65,11 @@ type ProxyRunOptions struct {
 	HealthBindAddress string
 	// After a duration of this time if the server doesn't see any activity it
 	// pings the client to see if the transport is still alive.
-	KeepaliveTime         time.Duration
+	KeepaliveTime time.Duration
+	// After having pinged for keepalive check, the server waits for a duration
+	// of KeepaliveTimeout and if no activity is seen even after that the
+	// connection is closed.
+	KeepaliveTimeout      time.Duration
 	FrontendKeepaliveTime time.Duration
 	// Enables pprof at host:AdminPort/debug/pprof.
 	EnableProfiling bool
@@ -147,6 +151,7 @@ func (o *ProxyRunOptions) Flags() *pflag.FlagSet {
 	flags.IntVar(&o.HealthPort, "health-port", o.HealthPort, "Port we listen for health connections on.")
 	flags.StringVar(&o.HealthBindAddress, "health-bind-address", o.HealthBindAddress, "Bind address for health connections. If empty, we will bind to all interfaces.")
 	flags.DurationVar(&o.KeepaliveTime, "keepalive-time", o.KeepaliveTime, "Time for gRPC agent server keepalive.")
+	flags.DurationVar(&o.KeepaliveTimeout, "keepalive-timeout", o.KeepaliveTimeout, "Time the gRPC agent server waits for an agent to acknowledge a keepalive ping (an HTTP/2 PING frame) before closing the connection. Detects an agent that went away without a reset reaching the server, also through a balancer.")
 	flags.DurationVar(&o.FrontendKeepaliveTime, "frontend-keepalive-time", o.FrontendKeepaliveTime, "Time for gRPC frontend server keepalive.")
 	flags.BoolVar(&o.EnableProfiling, "enable-profiling", o.EnableProfiling, "enable pprof at host:admin-port/debug/pprof")
 	flags.BoolVar(&o.EnableContentionProfiling, "enable-contention-profiling", o.EnableContentionProfiling, "enable contention profiling at host:admin-port/debug/pprof/block. \"--enable-profiling\" must also be set.")
@@ -194,6 +199,7 @@ func (o *ProxyRunOptions) Print() {
 	klog.V(1).Infof("Health port set to %d.\n", o.HealthPort)
 	klog.V(1).Infof("Health bind address set to %q.\n", o.HealthBindAddress)
 	klog.V(1).Infof("Keepalive time set to %v.\n", o.KeepaliveTime)
+	klog.V(1).Infof("Keepalive timeout set to %v.\n", o.KeepaliveTimeout)
 	klog.V(1).Infof("Frontend keepalive time set to %v.\n", o.FrontendKeepaliveTime)
 	klog.V(1).Infof("EnableProfiling set to %v.\n", o.EnableProfiling)
 	klog.V(1).Infof("EnableContentionProfiling set to %v.\n", o.EnableContentionProfiling)
@@ -374,6 +380,9 @@ func (o *ProxyRunOptions) Validate() error {
 		}
 	}
 
+	if o.KeepaliveTimeout <= 0 {
+		return fmt.Errorf("keepalive-timeout must be > 0, got %v", o.KeepaliveTimeout)
+	}
 	// Validate graceful shutdown timeout
 	if o.GracefulShutdownTimeout < 0 {
 		return fmt.Errorf("graceful-shutdown-timeout must be >= 0, got %v", o.GracefulShutdownTimeout)
@@ -407,6 +416,7 @@ func NewProxyRunOptions() *ProxyRunOptions {
 		AdminPort:                 8095,
 		AdminBindAddress:          "127.0.0.1",
 		KeepaliveTime:             1 * time.Hour,
+		KeepaliveTimeout:          20 * time.Second,
 		FrontendKeepaliveTime:     1 * time.Hour,
 		EnableProfiling:           false,
 		EnableContentionProfiling: false,
