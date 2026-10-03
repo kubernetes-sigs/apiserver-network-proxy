@@ -19,6 +19,7 @@ package agent
 import (
 	"errors"
 	"fmt"
+	"io"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -30,11 +31,15 @@ import (
 
 	"go.uber.org/goleak"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/grpc/metadata"
+	"google.golang.org/grpc/status"
 	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/klog/v2"
 	"sigs.k8s.io/apiserver-network-proxy/konnectivity-client/proto/client"
+	"sigs.k8s.io/apiserver-network-proxy/pkg/agent/metrics"
+	metricstest "sigs.k8s.io/apiserver-network-proxy/pkg/testing/metrics"
 	"sigs.k8s.io/apiserver-network-proxy/proto/agent"
 	"sigs.k8s.io/apiserver-network-proxy/proto/header"
 )
@@ -500,6 +505,115 @@ func TestClose_Client_NilConn(t *testing.T) {
 	case <-stopCh:
 	default:
 		t.Fatal("stopCh not closed by Client.Close()")
+	}
+}
+
+// TestServe_ExitDoesNotRemoveReplacementClient covers the race between a
+// client whose stream died and the sync loop reconnecting to the same server:
+// if the old client is already gone from the ClientSet when its Serve loop
+// exits, the exit must not remove (and close) the client that replaced it.
+func TestServe_ExitDoesNotRemoveReplacementClient(t *testing.T) {
+	defer goleakVerifyNone(t, goleak.IgnoreCurrent())
+
+	const serverID = "server-1"
+	cs := &ClientSet{clients: make(map[string]*Client)}
+	newClient := func() *Client {
+		c := &Client{
+			connManager:   newConnectionManager(),
+			stopCh:        make(chan struct{}),
+			probeInterval: time.Hour,
+			serverID:      serverID,
+			cs:            cs,
+		}
+		clientStream, _ := pipe()
+		c.stream = &brokenStream{AgentService_ConnectClient: clientStream, recvErr: io.EOF}
+		return c
+	}
+
+	old := newClient()
+	cs.clients[serverID] = old
+	// The stream to serverID died and was removed once already (for example by
+	// the probe); the sync loop then reconnected to the same server.
+	cs.RemoveClient(serverID)
+	replacement := newClient()
+	if err := cs.AddClient(serverID, replacement); err != nil {
+		t.Fatalf("AddClient: %v", err)
+	}
+
+	// The old client's Serve loop now exits on its dead stream.
+	old.Serve()
+
+	if !cs.HasID(serverID) {
+		t.Fatal("replacement client was removed by the old client's Serve exit")
+	}
+	select {
+	case <-replacement.stopCh:
+		t.Fatal("replacement client was closed by the old client's Serve exit")
+	default:
+	}
+	cs.RemoveClient(serverID)
+}
+
+func TestServe_ServerConnectionLost(t *testing.T) {
+	testcases := []struct {
+		name          string
+		recvErr       error
+		closedLocally bool
+		want          map[metrics.ServerConnectionLostReason]int
+	}{
+		{
+			name:    "eof",
+			recvErr: io.EOF,
+			want:    map[metrics.ServerConnectionLostReason]int{metrics.ServerConnectionLostEOF: 1},
+		},
+		{
+			name:    "cancelled",
+			recvErr: status.Error(codes.Canceled, "canceled"),
+			want:    map[metrics.ServerConnectionLostReason]int{metrics.ServerConnectionLostCancelled: 1},
+		},
+		{
+			name:    "recv error",
+			recvErr: status.Error(codes.Unavailable, "error reading from server: read: connection reset by peer"),
+			want:    map[metrics.ServerConnectionLostReason]int{metrics.ServerConnectionLostRecvError: 1},
+		},
+		{
+			name:          "closed locally",
+			recvErr:       status.Error(codes.Canceled, "grpc: the client connection is closing"),
+			closedLocally: true,
+			want:          nil,
+		},
+	}
+
+	for _, tc := range testcases {
+		t.Run(tc.name, func(t *testing.T) {
+			metrics.Metrics.Reset()
+			defer goleakVerifyNone(t, goleak.IgnoreCurrent())
+
+			const serverID = "server-1"
+			cs := &ClientSet{clients: make(map[string]*Client)}
+			testClient := &Client{
+				connManager:   newConnectionManager(),
+				stopCh:        make(chan struct{}),
+				probeInterval: time.Hour,
+				serverID:      serverID,
+				cs:            cs,
+			}
+			clientStream, _ := pipe()
+			testClient.stream = &brokenStream{AgentService_ConnectClient: clientStream, recvErr: tc.recvErr}
+			cs.clients[serverID] = testClient
+			if tc.closedLocally {
+				cs.RemoveClient(serverID)
+			}
+
+			testClient.Serve()
+
+			if cs.HasID(serverID) {
+				t.Error("client still registered after Serve returned")
+			}
+			if err := metricstest.DefaultTester.ExpectAgentServerConnectionsLost(tc.want); err != nil {
+				t.Error(err)
+			}
+		})
 	}
 }
 

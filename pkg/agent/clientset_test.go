@@ -17,7 +17,18 @@ limitations under the License.
 package agent
 
 import (
+	"errors"
+	"net"
 	"testing"
+	"time"
+
+	"google.golang.org/grpc"
+	"google.golang.org/grpc/credentials/insecure"
+	"google.golang.org/grpc/metadata"
+	"sigs.k8s.io/apiserver-network-proxy/pkg/agent/metrics"
+	metricstest "sigs.k8s.io/apiserver-network-proxy/pkg/testing/metrics"
+	"sigs.k8s.io/apiserver-network-proxy/proto/agent"
+	"sigs.k8s.io/apiserver-network-proxy/proto/header"
 )
 
 type FakeServerCounter struct {
@@ -26,6 +37,65 @@ type FakeServerCounter struct {
 
 func (f *FakeServerCounter) Count() int {
 	return f.count
+}
+
+// blockingServer answers the Connect headers and then holds the stream open.
+type blockingServer struct {
+	serverID string
+}
+
+func (s blockingServer) Connect(stream agent.AgentService_ConnectServer) error {
+	h := metadata.Pairs(header.ServerID, s.serverID, header.ServerCount, "1")
+	if err := stream.SendHeader(h); err != nil {
+		return err
+	}
+	<-stream.Context().Done()
+	return nil
+}
+
+func TestConnectOnce_ServerConnectionAttempts(t *testing.T) {
+	metrics.Metrics.Reset()
+
+	l, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal("failed to open port:", err)
+	}
+	gs := grpc.NewServer()
+	gs.RegisterService(&agent.AgentService_ServiceDesc, blockingServer{serverID: "server-1"})
+	go gs.Serve(l)
+	defer gs.Stop()
+
+	stopCh := make(chan struct{})
+	defer close(stopCh)
+	cs := &ClientSet{
+		clients:       make(map[string]*Client),
+		address:       l.Addr().String(),
+		syncForever:   true,
+		probeInterval: time.Hour,
+		dialOptions:   []grpc.DialOption{grpc.WithTransportCredentials(insecure.NewCredentials())},
+		serverCounter: &FakeServerCounter{count: 1},
+		stopCh:        stopCh,
+	}
+	defer cs.shutdown()
+
+	if err := cs.connectOnce(); err != nil {
+		t.Fatalf("first connectOnce: %v", err)
+	}
+	if err := cs.connectOnce(); !errors.As(err, new(*DuplicateServerError)) {
+		t.Fatalf("second connectOnce: want DuplicateServerError, got %v", err)
+	}
+	gs.Stop()
+	if err := cs.connectOnce(); err == nil || errors.As(err, new(*DuplicateServerError)) {
+		t.Fatalf("connectOnce after server stop: want connection error, got %v", err)
+	}
+
+	expect := map[metrics.ServerConnectionAttemptResult]int{
+		metrics.ServerConnectionAttemptConnected: 1,
+		metrics.ServerConnectionAttemptError:     1,
+	}
+	if err := metricstest.DefaultTester.ExpectAgentServerConnectionAttempts(expect); err != nil {
+		t.Error(err)
+	}
 }
 
 func TestAggregateServerCounter(t *testing.T) {
