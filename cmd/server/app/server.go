@@ -508,7 +508,7 @@ func (p *Proxy) runAgentServer(o *options.ProxyRunOptions, server *server.ProxyS
 	addr := net.JoinHostPort(o.AgentBindAddress, strconv.Itoa(o.AgentPort))
 	agentServerOptions := []grpc.ServerOption{
 		grpc.Creds(credentials.NewTLS(tlsConfig)),
-		grpc.KeepaliveParams(keepalive.ServerParameters{Time: o.KeepaliveTime}),
+		grpc.KeepaliveParams(keepalive.ServerParameters{Time: o.KeepaliveTime, Timeout: o.KeepaliveTimeout}),
 		grpc.KeepaliveEnforcementPolicy(keepalive.EnforcementPolicy{
 			MinTime:             30 * time.Second,
 			PermitWithoutStream: true,
