@@ -104,6 +104,7 @@ Scripts:
 | `scripts/starve-agent.sh <node> [quota]` | Limits the agent container on one node to `quota` µs of CPU per 100 ms through its cgroup (default 5000, 5% of one CPU); `restore` lifts the limit. |
 | `scripts/dial-load.sh` | Runs `kubectl exec` in a loop; each call is a new tunnel dial through a randomly chosen agent. Logs per-call latency to `$OUT_DIR/dial-load.log`. |
 | `scripts/vip-churn.sh [seconds]` | Counts the new connections through the balancer in the interval, how many produced a new server connection, how many were closed as duplicates, and the sockets the balancer holds toward the servers. |
+| `scripts/dial-share.sh [seconds]` | Dials each agent received in the interval, its share and mean dial time, and the servers' dial time distribution. Shows whether a slow agent keeps receiving its share. |
 | `webhook/deploy.sh` | Builds and deploys the measuring webhook and extracts kubeconfig credentials for the load generator. |
 | `webhook/monitor.sh` | Every 10 s, apiserver-measured versus webhook-measured latency, fail-opens, connections. |
 | `tunnel-probe` | Runs on a control-plane node (`docker cp` the binary to `/usr/local/bin`; `/tmp` on kind nodes is a tmpfs that `docker cp` does not reach). `kt-probe -url http://<webhook-pod-ip>:9090/metrics -timeout 10s`. |
@@ -140,7 +141,7 @@ measurements with the change applied next to the measurements without it.
 | 2 | 01, 03 | agent: fast re-sync while under-connected | re-mesh takes N·ln(N) × `--sync-interval` | withdrawn: it would spend the same N·ln(N) connections in seconds and reserve that many ports on the VIP at once, for a small gain; see [00](scenarios/00-baseline.md#connection-churn-and-port-exhaustion-at-the-vip) |
 | 3 | 02 | `konnectivity-client`: `conn.Close()` returns without waiting for `CLOSE_RSP` | a call into a dead tunnel takes `timeoutSeconds + 10 s` and holds the apiserver's request goroutine | measured: 20 s → 10 s, see [02](scenarios/02-reset-seen-by-agents-only.md#changes-and-their-effect) |
 | 4 | 02 | server: `--keepalive-timeout` flag; run with `--keepalive-time=10s --keepalive-timeout=5s` | servers keep dead backends for 20 to 40 s and route dials into them | measured: half-open backends gone in 12 s instead of 28 s idle, dials into them fail in 5 s instead of the caller's timeout; in-band pings, no new flows, see [02](scenarios/02-reset-seen-by-agents-only.md#changes-and-their-effect) |
-| 5 | 04 | server: backend selection that compares candidates on recent dial latency or in-flight dials | one slow agent receives its full 1/N share of new dials | planned |
+| 5 | 04 | server: compare the two candidate backends on expected dial time (recent dial latency × dials in flight) before receive-channel occupancy | one slow agent receives its full 1/N share of new dials | measured: the starved agent's share 35% → 6%, dials above 25 ms 27% → 4%, see [04](scenarios/04-cpu-starved-agent.md#changes-and-their-effect) |
 
 Not changeable here, recorded as conclusions for operators: the balancer resetting its
 flows, the agents' CPU request and placement, the webhook's `timeoutSeconds` and

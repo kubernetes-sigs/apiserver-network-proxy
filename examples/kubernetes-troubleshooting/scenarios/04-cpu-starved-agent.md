@@ -35,6 +35,8 @@ counters so you can confirm the limit is biting.
 
 ## What to observe
 
+- `scripts/dial-share.sh 150`: the starved agent's share of new dials and its mean dial
+  time next to the other agents', and the servers' dial time distribution.
 - Server `dial_duration_seconds`: the fraction above 25 ms and 100 ms, and the mean.
   The median stays put; the tail is the starved agent's share of dials.
 - Agent `dial_duration_seconds` on the starved agent versus the others.
@@ -82,7 +84,40 @@ throughout, so every increase below is on the path.
 
 ## Changes and their effect
 
-None yet. Planned: backend selection on the server that compares candidates on recent
-dial latency or in-flight dials per agent, so that a slow agent stops receiving its
-1/N share of new dials. The server already times every dial; it does not keep that per
-agent. Pinned connections cannot be moved; that is inherent to the design.
+### Server: compare the two candidates on expected dial time
+
+The server keeps per backend the number of dials in flight (a `DIAL_REQ` sent, no
+`DIAL_RSP` yet) and a moving average of the completed dials' latency as the server
+sees it (from the apiserver's request to the agent's `DIAL_RSP`; failed dials do not
+count, since a failing endpoint says nothing about the agent). The two random candidates
+are compared on the product of the two, the expected time for a new dial: latencies
+under 5 ms count as equal, a sample older than 30 s is forgotten so that the agent is
+tried again, and a candidate whose cost is at least twice the other's loses. Otherwise
+the receive-channel comparison and then chance decide, as before. The selection stays
+local to each server and needs no new traffic.
+
+Measured on 2026-10-03 with `dial-load.sh` at an interval of 0.1 s (about four dials
+per second), `webhook-load` at 100 requests/s, and the agent that held the webhook's
+keep-alive tunnels (two before, three after; the servers' restart re-rolled the
+placement) starved to 1% of one CPU for 150 s. Baseline before each run: 0.8 ms mean
+server dial time, no dial above 25 ms, shares within 26 to 39%.
+
+| | occupancy only | expected dial time |
+|---|---|---|
+| starved agent's share of new dials | 35.2% (137 of 390) | 5.8% (31 of 530) |
+| dial time at the starved agent, mean | 31.5 ms | 22.8 ms |
+| server dial time, all dials, mean | 31.1 ms | 5.3 ms |
+| dials above 25 ms | 27.4% | 3.8% |
+| dials above 100 ms | 11.5% | 1.7% |
+| `kubectl exec` round trip p50 / p90 / p99 / max | 181 / 503 / 697 / 1,197 ms | 163 / 187 / 497 / 1,089 ms |
+| webhook calls over the pinned tunnels, p99 per 5 s window | 200 to 300 ms in 30 of 31 windows | 200 ms in 31 of 31 windows |
+
+The 31 dials the starved agent still received are the first dials before any sample
+existed plus one retry per server after each 30 s window (five servers, five windows);
+those are the dials that remain slow. The connections pinned to the agent before it was
+starved stay there and stay slow: selection decides where a new dial goes and cannot
+move an established connection.
+
+A run with the starved agent carrying no pinned tunnel (its only work the dials
+themselves) is not comparable: within 1% of a CPU the agent still dialed in 2.7 ms on
+average, so it kept a 25% share on merit, and the servers' mean stayed at 1.4 ms.
