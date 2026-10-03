@@ -32,9 +32,6 @@ import (
 // successful delivery of CLOSE_REQ.
 const CloseTimeout = 10 * time.Second
 
-var errConnTunnelClosed = errors.New("tunnel closed")
-var errConnCloseTimeout = errors.New("close timeout")
-
 // conn is an implementation of net.Conn, where the data is transported
 // over an established tunnel defined by a gRPC service ProxyService.
 type conn struct {
@@ -125,6 +122,13 @@ func (c *conn) SetWriteDeadline(t time.Time) error {
 
 // Close closes the connection, sends best-effort close signal to proxy
 // service, and frees resources.
+//
+// Close returns as soon as the close signal has been sent. net/http calls
+// Close synchronously when a request's context ends, so waiting here for the
+// proxy to confirm would add up to CloseTimeout to every request that times
+// out on a dead backend. The confirmation is awaited in the background and
+// the tunnel is released when it arrives, when the tunnel ends, or after
+// CloseTimeout, whichever comes first.
 func (c *conn) Close() error {
 	old := atomic.SwapUint32(&c.closing, 1)
 	if old != 0 {
@@ -133,25 +137,32 @@ func (c *conn) Close() error {
 	}
 	klog.V(4).Infoln("closing connection", "dialID", c.random, "connectionID", c.connID)
 
-	defer c.tunnel.closeTunnel()
-
+	var err error
 	if c.connID != 0 {
-		c.tunnel.sendCloseRequest(c.connID)
+		err = c.tunnel.sendCloseRequest(c.connID)
 	} else {
 		// Never received a DIAL response so no connection ID.
-		c.tunnel.sendDialClose(c.random)
+		err = c.tunnel.sendDialClose(c.random)
 	}
 
+	go c.awaitCloseResponse()
+	return err
+}
+
+// awaitCloseResponse waits for the proxy to acknowledge the close and then
+// releases the tunnel. It runs off the caller's path.
+func (c *conn) awaitCloseResponse() {
+	defer c.tunnel.closeTunnel()
+
+	timer := time.NewTimer(CloseTimeout)
+	defer timer.Stop()
 	select {
 	case errMsg := <-c.closeCh:
 		if errMsg != "" {
-			return errors.New(errMsg)
+			klog.V(2).InfoS("close response reported an error", "dialID", c.random, "connectionID", c.connID, "error", errMsg)
 		}
-		return nil
 	case <-c.tunnel.Done():
-		return errConnTunnelClosed
-	case <-time.After(CloseTimeout):
+	case <-timer.C:
+		klog.V(2).InfoS("timed out waiting for close response", "dialID", c.random, "connectionID", c.connID, "timeout", CloseTimeout)
 	}
-
-	return errConnCloseTimeout
 }
