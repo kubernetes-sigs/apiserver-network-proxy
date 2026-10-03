@@ -67,6 +67,11 @@ type ClientSet struct {
 	// 	syncForever is true if we should continue syncing (support dynamic server count).
 	syncForever bool
 
+	// countServerLeases is true when the server count comes from server leases.
+	// New servers then show up in the count without the agent dialing, so the
+	// syncForever dial is skipped while the agent is connected to every server.
+	countServerLeases bool
+
 	// probeInterval is the interval at which the agent
 	// periodically checks if its connections to the proxy server is ready.
 	probeInterval time.Duration
@@ -191,6 +196,7 @@ type ClientSetConfig struct {
 	ServiceAccountTokenPath string
 	WarnOnChannelLimit      bool
 	SyncForever             bool
+	CountServerLeases       bool
 	XfrChannelSize          int
 	ServerCountSource       string
 }
@@ -208,6 +214,7 @@ func (cc *ClientSetConfig) NewAgentClientSet(drainCh, stopCh <-chan struct{}) *C
 		serviceAccountTokenPath: cc.ServiceAccountTokenPath,
 		warnOnChannelLimit:      cc.WarnOnChannelLimit,
 		syncForever:             cc.SyncForever,
+		countServerLeases:       cc.CountServerLeases,
 		drainCh:                 drainCh,
 		xfrChannelSize:          cc.XfrChannelSize,
 		stopCh:                  stopCh,
@@ -283,12 +290,12 @@ func (cs *ClientSet) connectOnce() error {
 
 	serverCount := cs.determineServerCount()
 
-	// If not in syncForever mode, we only connect if we have fewer connections than the server count.
-	if !cs.syncForever && cs.ClientsCount() >= serverCount && serverCount > 0 {
-		return nil // Nothing to do.
+	// Connected to every known server: nothing to do, unless syncForever has to
+	// discover servers that only a response header can reveal.
+	if cs.ClientsCount() >= serverCount && serverCount > 0 && (!cs.syncForever || cs.countServerLeases) {
+		return nil
 	}
 
-	// In syncForever mode, we always try to connect, to discover new servers.
 	c, receivedServerCount, err := cs.newAgentClient()
 	if err != nil {
 		metrics.Metrics.ObserveServerConnectionAttempt(metrics.ServerConnectionAttemptError)
