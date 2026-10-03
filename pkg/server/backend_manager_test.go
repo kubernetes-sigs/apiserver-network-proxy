@@ -21,6 +21,7 @@ import (
 	"math/rand"
 	"reflect"
 	"testing"
+	"time"
 
 	"go.uber.org/mock/gomock"
 	"google.golang.org/grpc/metadata"
@@ -641,6 +642,159 @@ func TestDefaultBackendManager_GetRandomBackend_UsesPowerOfTwoChoices(t *testing
 	}
 	if !selected[leastBusy] || !selected[middle] {
 		t.Fatalf("selected backends = %v, want both lower-pressure choices to be reachable", selected)
+	}
+}
+
+func TestBackendDialCost(t *testing.T) {
+	now := time.Now()
+	tests := []struct {
+		name     string
+		samples  []time.Duration
+		sampleAt time.Time
+		inFlight int64
+		want     time.Duration
+	}{
+		{name: "no sample", want: dialLatencyFloor},
+		{name: "fast sample stays at the floor", samples: []time.Duration{time.Millisecond}, sampleAt: now, want: dialLatencyFloor},
+		{name: "slow sample", samples: []time.Duration{200 * time.Millisecond}, sampleAt: now, want: 200 * time.Millisecond},
+		{name: "samples are averaged", samples: []time.Duration{100 * time.Millisecond, 300 * time.Millisecond}, sampleAt: now, want: 200 * time.Millisecond},
+		{name: "dials in flight scale the cost", samples: []time.Duration{10 * time.Millisecond}, sampleAt: now, inFlight: 2, want: 30 * time.Millisecond},
+		{name: "no sample, dials in flight", inFlight: 1, want: 2 * dialLatencyFloor},
+		{name: "stale sample is ignored", samples: []time.Duration{200 * time.Millisecond}, sampleAt: now.Add(-dialLatencyWindow - time.Second), want: dialLatencyFloor},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			b := &Backend{}
+			for _, d := range test.samples {
+				b.observeDial(d, test.sampleAt)
+			}
+			b.dialsInFlight.Store(test.inFlight)
+			if got := b.dialCost(now); got != test.want {
+				t.Fatalf("dialCost() = %v, want %v", got, test.want)
+			}
+		})
+	}
+}
+
+func TestBackendObserveDialRestartsAfterWindow(t *testing.T) {
+	now := time.Now()
+	b := &Backend{}
+	b.observeDial(400*time.Millisecond, now.Add(-dialLatencyWindow-time.Second))
+	b.observeDial(10*time.Millisecond, now)
+	if got := b.dialCost(now); got != 10*time.Millisecond {
+		t.Fatalf("dialCost() = %v, want the new sample alone, 10ms", got)
+	}
+}
+
+func TestDefaultBackendManager_GetRandomBackend_AvoidsSlowDialer(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	fast, _ := NewBackend(mockAgentConn(ctrl, "fast", nil))
+	slow, _ := NewBackend(mockAgentConn(ctrl, "slow", nil))
+	setBackendRecvChannel(fast, 10, 5)
+	setBackendRecvChannel(slow, 10, 0)
+	fast.observeDial(2*time.Millisecond, time.Now())
+	slow.observeDial(100*time.Millisecond, time.Now())
+
+	manager := NewDefaultBackendManager()
+	manager.AddBackend(fast)
+	manager.AddBackend(slow)
+
+	for i := 0; i < 20; i++ {
+		got, err := manager.Backend(context.Background())
+		if err != nil {
+			t.Fatalf("Backend failed: %v", err)
+		}
+		if got != fast {
+			t.Fatalf("Backend returned %q, want the faster dialer despite its receive-channel occupancy", got.id)
+		}
+	}
+
+	// Once the slow agent's sample ages out it competes again.
+	slow.dialLatencyMu.Lock()
+	slow.dialLatencyAt = time.Now().Add(-dialLatencyWindow - time.Second)
+	slow.dialLatencyMu.Unlock()
+	for i := 0; i < 20; i++ {
+		got, err := manager.Backend(context.Background())
+		if err != nil {
+			t.Fatalf("Backend failed: %v", err)
+		}
+		if got != slow {
+			t.Fatalf("Backend returned %q after the sample expired, want the less occupied backend", got.id)
+		}
+	}
+}
+
+func TestDefaultBackendManager_GetRandomBackend_AvoidsBackendWithDialsInFlight(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	idle, _ := NewBackend(mockAgentConn(ctrl, "idle", nil))
+	busy, _ := NewBackend(mockAgentConn(ctrl, "busy", nil))
+	busy.dialsInFlight.Store(1)
+
+	manager := NewDefaultBackendManager()
+	manager.AddBackend(idle)
+	manager.AddBackend(busy)
+
+	for i := 0; i < 20; i++ {
+		got, err := manager.Backend(context.Background())
+		if err != nil {
+			t.Fatalf("Backend failed: %v", err)
+		}
+		if got != idle {
+			t.Fatalf("Backend returned %q, want the backend without dials in flight", got.id)
+		}
+	}
+}
+
+func TestDefaultBackendManager_GetRandomBackend_SimilarDialersShareLoad(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	first, _ := NewBackend(mockAgentConn(ctrl, "first", nil))
+	second, _ := NewBackend(mockAgentConn(ctrl, "second", nil))
+	first.observeDial(10*time.Millisecond, time.Now())
+	second.observeDial(15*time.Millisecond, time.Now())
+
+	manager := NewDefaultBackendManager()
+	manager.random = rand.New(rand.NewSource(1)) // #nosec G404 -- deterministic test source
+	manager.AddBackend(first)
+	manager.AddBackend(second)
+
+	selected := map[*Backend]int{}
+	for i := 0; i < 200; i++ {
+		got, err := manager.Backend(context.Background())
+		if err != nil {
+			t.Fatalf("Backend failed: %v", err)
+		}
+		selected[got]++
+	}
+	for _, backend := range []*Backend{first, second} {
+		if selected[backend] < 70 || selected[backend] > 130 {
+			t.Fatalf("backend %q selected %d times, want a random share", backend.id, selected[backend])
+		}
+	}
+}
+
+func TestPendingDialManager_TracksDialsInFlight(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	backend, _ := NewBackend(mockAgentConn(ctrl, "agent", nil))
+	pm := NewPendingDialManager()
+
+	pm.Add(1, &ProxyClientConnection{backend: backend})
+	pm.Add(2, &ProxyClientConnection{backend: backend})
+	pm.Add(3, &ProxyClientConnection{backend: backend, frontend: &Frontend{streamUID: "stream"}})
+	if got := backend.dialsInFlight.Load(); got != 3 {
+		t.Fatalf("dialsInFlight = %d after Add, want 3", got)
+	}
+	pm.Remove(1)
+	pm.Remove(1)
+	if got := backend.dialsInFlight.Load(); got != 2 {
+		t.Fatalf("dialsInFlight = %d after Remove, want 2", got)
+	}
+	pm.removeForStream("stream")
+	if got := backend.dialsInFlight.Load(); got != 1 {
+		t.Fatalf("dialsInFlight = %d after removeForStream, want 1", got)
+	}
+	pm.removeForBackend(backend)
+	if got := backend.dialsInFlight.Load(); got != 0 {
+		t.Fatalf("dialsInFlight = %d after removeForBackend, want 0", got)
 	}
 }
 
