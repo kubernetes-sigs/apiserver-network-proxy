@@ -84,11 +84,40 @@ Balancer: envoy's `tcp_proxy` default `idle_timeout` is 1 h, the same as the pro
 `--keepalive-time`. The access log shows the agent streams being recreated every hour
 and `tcp.konnectivity_tcp.idle_timeout` counting them.
 
+### The same load with the tunnel removed (2026-10-04)
+
+To separate the tunnel's cost from everything else on the path, the apiservers' `cluster`
+egress was switched to `Direct` and back, with the webhook load at 100 requests/s and
+`dial-load.sh` at 0.1 s running throughout; 3 minutes of each. In kind the egress
+selector file is one file, `examples/kind-multinode/egress_selector_configuration.yaml`,
+bind-mounted from the repository into every control-plane node, so the switch is made
+by editing that file and restarting each apiserver (`crictl stop` on the
+`kube-apiserver` container; the kubelet starts it again), and undone by restoring the
+file from git and restarting again. The servers of changes 4 and 5 and the agents of
+changes 1 and 6 were running; they do not take part in a direct call.
+
+| Measure | through the tunnel | direct |
+|---|---|---|
+| apiserver-measured admission duration, mean | 1.47 ms | 0.61 ms |
+| webhook handler time | 0.052 ms | 0.049 ms |
+| apiserver-measured minus handler | 1.41 ms | 0.56 ms |
+| client-observed end to end, p50 / p99 | 4.26 / 5.98 ms | 3.67 / 4.97 ms |
+| `kubectl exec ... true` round trip, p50 / p90 / p99 | 164 / 170 / 198 ms | 158 / 163 / 187 ms |
+| calls above 100 ms, fail-opens | 0, 0 | 0, 0 |
+
+The tunnel adds 0.85 ms to a webhook call on a keep-alive connection on one host (two
+extra hops, each a gRPC stream and a copy: apiserver to server over the unix socket,
+server to agent over TLS), and 6 to 11 ms to a `kubectl exec`, which also pays a dial.
+The 0.56 ms that remain without the tunnel are the apiserver's own HTTP client, TLS and
+the admission plumbing.
+
 ## Interpretation
 
-- The proxy adds about 1.4 ms to each webhook call on one host. Fleet measurements
-  that show a larger gap between apiserver-measured and webhook-measured latency are
-  dominated by network distance between the control plane and the agents.
+- The proxy adds about 0.85 ms to each webhook call on one host (1.41 ms between the
+  apiserver's and the webhook's clocks, of which 0.56 ms remain with a direct path).
+  Fleet measurements that show a larger gap between apiserver-measured and
+  webhook-measured latency are dominated by network distance between the control plane
+  and the agents.
 - Any middlebox with an idle timeout at or below the gRPC keepalive interval prunes
   idle agent streams silently; `--keepalive-time` has to be below the middlebox timeout.
 
