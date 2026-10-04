@@ -46,6 +46,7 @@ func TestDefaultServerOptions(t *testing.T) {
 	assertDefaultValue(t, "ProbeInterval", defaultAgentOptions.ProbeInterval, 1*time.Second)
 	assertDefaultValue(t, "SyncIntervalCap", defaultAgentOptions.SyncIntervalCap, 10*time.Second)
 	assertDefaultValue(t, "KeepaliveTime", defaultAgentOptions.KeepaliveTime, 1*time.Hour)
+	assertDefaultValue(t, "KeepaliveTimeout", defaultAgentOptions.KeepaliveTimeout, 20*time.Second)
 	assertDefaultValue(t, "ServiceAccountTokenPath", defaultAgentOptions.ServiceAccountTokenPath, "")
 	assertDefaultValue(t, "WarnOnChannelLimit", defaultAgentOptions.WarnOnChannelLimit, false)
 	assertDefaultValue(t, "SyncForever", defaultAgentOptions.SyncForever, false)
@@ -163,6 +164,14 @@ func TestValidate(t *testing.T) {
 		"ServerCountSource": {
 			fieldMap: map[string]any{"server-count-source": "foobar"},
 			expected: "--server-count-source must be one of '', 'default', 'max', got foobar",
+		},
+		"KeepaliveTimeoutZero": {
+			fieldMap: map[string]any{"keepalive-timeout": "0s"},
+			expected: "keepalive-timeout must be > 0, got 0s",
+		},
+		"KeepaliveTimeoutValid": {
+			fieldMap: map[string]any{"keepalive-timeout": "5s"},
+			expected: "",
 		},
 		"LeaseLabelValid": {
 			fieldMap: map[string]any{
