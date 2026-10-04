@@ -70,6 +70,10 @@ type GrpcProxyAgentOptions struct {
 	// After a duration of this time if the agent doesn't see any activity it
 	// pings the server to see if the transport is still alive.
 	KeepaliveTime time.Duration
+	// After having pinged for keepalive check, the agent waits for a duration
+	// of KeepaliveTimeout and if no activity is seen even after that the
+	// connection is closed.
+	KeepaliveTimeout time.Duration
 
 	// file contains service account authorization token for enabling proxy-server token based authorization
 	ServiceAccountTokenPath string
@@ -135,7 +139,8 @@ func (o *GrpcProxyAgentOptions) Flags() *pflag.FlagSet {
 	flags.DurationVar(&o.SyncInterval, "sync-interval", o.SyncInterval, "The initial interval by which the agent periodically checks if it has connections to all instances of the proxy server.")
 	flags.DurationVar(&o.ProbeInterval, "probe-interval", o.ProbeInterval, "The interval by which the agent periodically checks if its connections to the proxy server are ready.")
 	flags.DurationVar(&o.SyncIntervalCap, "sync-interval-cap", o.SyncIntervalCap, "The maximum interval for the SyncInterval to back off to when unable to connect to the proxy server")
-	flags.DurationVar(&o.KeepaliveTime, "keepalive-time", o.KeepaliveTime, "Time for gRPC agent server keepalive.")
+	flags.DurationVar(&o.KeepaliveTime, "keepalive-time", o.KeepaliveTime, "Time without activity after which the agent pings the proxy server. Must be at least the server's keepalive enforcement minimum (30s), or the server closes the connection.")
+	flags.DurationVar(&o.KeepaliveTimeout, "keepalive-timeout", o.KeepaliveTimeout, "Time the agent waits for the proxy server to acknowledge a keepalive ping (an HTTP/2 PING frame) before closing the connection. Detects a server that went away without a reset reaching the agent, also through a balancer.")
 	flags.StringVar(&o.ServiceAccountTokenPath, "service-account-token-path", o.ServiceAccountTokenPath, "If non-empty proxy agent uses this token to prove its identity to the proxy server.")
 	flags.StringVar(&o.AgentIdentifiers, "agent-identifiers", o.AgentIdentifiers, "Identifiers of the agent that will be used by the server when choosing agent. N.B. the list of identifiers must be in URL encoded format. e.g.,host=localhost&host=node1.mydomain.com&cidr=127.0.0.1/16&ipv4=1.2.3.4&ipv4=5.6.7.8&ipv6=:::::&default-route=true")
 	flags.BoolVar(&o.WarnOnChannelLimit, "warn-on-channel-limit", o.WarnOnChannelLimit, "Turns on a warning if the system is going to push to a full channel. The check involves an unsafe read.")
@@ -171,6 +176,7 @@ func (o *GrpcProxyAgentOptions) Print() {
 	klog.V(1).Infof("ProbeInterval set to %v.\n", o.ProbeInterval)
 	klog.V(1).Infof("SyncIntervalCap set to %v.\n", o.SyncIntervalCap)
 	klog.V(1).Infof("Keepalive time set to %v.\n", o.KeepaliveTime)
+	klog.V(1).Infof("Keepalive timeout set to %v.\n", o.KeepaliveTimeout)
 	klog.V(1).Infof("ServiceAccountTokenPath set to %q.\n", o.ServiceAccountTokenPath)
 	klog.V(1).Infof("AgentIdentifiers set to %s.\n", util.PrettyPrintURL(o.AgentIdentifiers))
 	klog.V(1).Infof("WarnOnChannelLimit set to %t.\n", o.WarnOnChannelLimit)
@@ -213,6 +219,9 @@ func (o *GrpcProxyAgentOptions) Validate() error {
 	}
 	if o.AdminServerPort <= 0 {
 		return fmt.Errorf("admin server port %d must be greater than 0", o.AdminServerPort)
+	}
+	if o.KeepaliveTimeout <= 0 {
+		return fmt.Errorf("keepalive-timeout must be > 0, got %v", o.KeepaliveTimeout)
 	}
 	if o.XfrChannelSize <= 0 {
 		return fmt.Errorf("channel size %d must be greater than 0", o.XfrChannelSize)
@@ -284,6 +293,7 @@ func NewGrpcProxyAgentOptions() *GrpcProxyAgentOptions {
 		ProbeInterval:             1 * time.Second,
 		SyncIntervalCap:           10 * time.Second,
 		KeepaliveTime:             1 * time.Hour,
+		KeepaliveTimeout:          20 * time.Second,
 		ServiceAccountTokenPath:   "",
 		WarnOnChannelLimit:        false,
 		SyncForever:               false,
