@@ -100,7 +100,7 @@ Scripts:
 | `scripts/monitor.sh` | One line every 5 s with agent connections, server backends, established tunnels, apiserver dialing/ok/failures. |
 | `scripts/tail-logs.sh` | Tails server, agent and balancer logs into `$OUT_DIR/logs/`. |
 | `scripts/lb-tools.sh start` | Starts a privileged `netshoot` container in the balancer's network namespace, for `ss`, `iptables`, `tcpdump`. |
-| `scripts/reset-flows.sh <mode>` | Resets all agent-to-server flows; `both`, `agents`, `servers`, `restore`. See scenarios 01 to 03. |
+| `scripts/reset-flows.sh <mode>` | Resets all agent-to-server flows; `both`, `agents`, `servers`, `servers-nat`, `restore`. See scenarios 01 to 03 and 05. |
 | `scripts/starve-agent.sh <node> [quota]` | Limits the agent container on one node to `quota` µs of CPU per 100 ms through its cgroup (default 5000, 5% of one CPU); `restore` lifts the limit. |
 | `scripts/dial-load.sh` | Runs `kubectl exec` in a loop; each call is a new tunnel dial through a randomly chosen agent. Logs per-call latency to `$OUT_DIR/dial-load.log`. |
 | `scripts/vip-churn.sh [seconds]` | Counts the new connections through the balancer in the interval, how many produced a new server connection, how many were closed as duplicates, and the sockets the balancer holds toward the servers. |
@@ -122,6 +122,7 @@ exists, the measurements with the fix applied.
 | [02-reset-seen-by-agents-only](scenarios/02-reset-seen-by-agents-only.md) | Same reset, servers kept unaware. Half-open backends, `dialing` pile-up, the `timeoutSeconds + CloseTimeout` stall. Matches the production symptoms. |
 | [03-reset-seen-by-servers-only](scenarios/03-reset-seen-by-servers-only.md) | Same reset, servers notice first. Fail-fast reference for 02. |
 | [04-cpu-starved-agent](scenarios/04-cpu-starved-agent.md) | One agent on a node without idle CPU: 1/N of dials and every pinned connection slow, no errors. |
+| [05-reset-seen-by-servers-only-nat](scenarios/05-reset-seen-by-servers-only-nat.md) | Same reset as 03 through a NAT-style VIP that does not relay the close: agents keep half-open streams for an hour, a server stays without agents, its apiserver fails every tunnel call. |
 
 All scenarios share these conditions: one host, 5 control-plane nodes, 3 workers, agents
 through the kind envoy balancer, `--sync-interval=5s`, `--sync-forever`,
@@ -142,11 +143,13 @@ measurements with the change applied next to the measurements without it.
 | 3 | 02 | `konnectivity-client`: `conn.Close()` returns without waiting for `CLOSE_RSP` | a call into a dead tunnel takes `timeoutSeconds + 10 s` and holds the apiserver's request goroutine | measured: 20 s → 10 s, see [02](scenarios/02-reset-seen-by-agents-only.md#changes-and-their-effect) |
 | 4 | 02 | server: `--keepalive-timeout` flag; run with `--keepalive-time=10s --keepalive-timeout=5s` | servers keep dead backends for 20 to 40 s and route dials into them | measured: half-open backends gone in 12 s instead of 28 s idle, dials into them fail in 5 s instead of the caller's timeout; in-band pings, no new flows, see [02](scenarios/02-reset-seen-by-agents-only.md#changes-and-their-effect) |
 | 5 | 04 | server: compare the two candidate backends on expected dial time (recent dial latency × dials in flight) before receive-channel occupancy | one slow agent receives its full 1/N share of new dials | measured: the starved agent's share 35% → 6%, dials above 25 ms 27% → 4%, see [04](scenarios/04-cpu-starved-agent.md#changes-and-their-effect) |
+| 6 | 05 | agent: `--keepalive-timeout` flag; run with `--keepalive-time=30s --keepalive-timeout=5s` | agents keep half-open server streams for an hour (kernel TCP keepalive default), so a server can stay without agents that long | measured: every server has an agent back within 33 s instead of one server without agents for the hour, see [05](scenarios/05-reset-seen-by-servers-only-nat.md#changes-and-their-effect) |
 
 Not changeable here, recorded as conclusions for operators: the balancer resetting its
 flows, the agents' CPU request and placement, the webhook's `timeoutSeconds` and
-`failurePolicy`, and the server keepalive values behind a balancer or NAT
-(see [02](scenarios/02-reset-seen-by-agents-only.md#recommendation)).
+`failurePolicy`, and the server and agent keepalive values behind a balancer or NAT
+(see [02](scenarios/02-reset-seen-by-agents-only.md#recommendation) and
+[05](scenarios/05-reset-seen-by-servers-only-nat.md#recommendation)).
 
 ## Open items
 
