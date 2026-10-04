@@ -47,6 +47,7 @@ func TestDefaultServerOptions(t *testing.T) {
 	assertDefaultValue(t, "ProbeInterval", defaultAgentOptions.ProbeInterval, 1*time.Second)
 	assertDefaultValue(t, "SyncIntervalCap", defaultAgentOptions.SyncIntervalCap, 10*time.Second)
 	assertDefaultValue(t, "KeepaliveTime", defaultAgentOptions.KeepaliveTime, 1*time.Hour)
+	assertDefaultValue(t, "KeepaliveTimeout", defaultAgentOptions.KeepaliveTimeout, 20*time.Second)
 	assertDefaultValue(t, "ServiceAccountTokenPath", defaultAgentOptions.ServiceAccountTokenPath, "")
 	assertDefaultValue(t, "WarnOnChannelLimit", defaultAgentOptions.WarnOnChannelLimit, false)
 	assertDefaultValue(t, "SyncForever", defaultAgentOptions.SyncForever, false)
@@ -157,8 +158,64 @@ func TestValidate(t *testing.T) {
 			expected: fmt.Errorf("channel size -10 must be greater than 0"),
 		},
 		"ServerCountSource": {
-			fieldMap: map[string]interface{}{"ServerCountSource": "foobar"},
-			expected: fmt.Errorf("--server-count-source must be one of '', 'default', 'max', got foobar"),
+			fieldMap: map[string]any{"server-count-source": "foobar"},
+			expected: "--server-count-source must be one of '', 'default', 'max', got foobar",
+		},
+		"KeepaliveTimeoutZero": {
+			fieldMap: map[string]any{"keepalive-timeout": "0s"},
+			expected: "keepalive-timeout must be > 0, got 0s",
+		},
+		"KeepaliveTimeoutValid": {
+			fieldMap: map[string]any{"keepalive-timeout": "5s"},
+			expected: "",
+		},
+		"LeaseLabelValid": {
+			fieldMap: map[string]any{
+				"lease-label": "k8s-app=konnectivity-server",
+			},
+			expected: "",
+		},
+		"LeaseLabelEmpty": {
+			fieldMap: map[string]any{
+				"lease-label": "",
+			},
+			expected: "",
+		},
+		"LeaseLabelInvalidFormat": {
+			fieldMap: map[string]any{
+				"lease-label": "*notavalidlabel*",
+			},
+			expected: `invalid argument "*notavalidlabel*" for "--lease-label" flag`,
+		},
+		"LeaseLabelMultipleValid": {
+			fieldMap: map[string]any{
+				"lease-label": "k8s-app=konnectivity-server,component=proxy",
+			},
+			expected: "",
+		},
+		"LeaseLabelSelectorValid": {
+			fieldMap: map[string]any{
+				"lease-label-selector": "k8s-app=konnectivity-server",
+			},
+			expected: "",
+		},
+		"LeaseLabelSelectorEmpty": {
+			fieldMap: map[string]any{
+				"lease-label-selector": "",
+			},
+			expected: "",
+		},
+		"LeaseLabelSelectorInvalidFormat": {
+			fieldMap: map[string]any{
+				"lease-label-selector": "*notavalidlabel*",
+			},
+			expected: `invalid argument "*notavalidlabel*" for "--lease-label-selector" flag`,
+		},
+		"LeaseLabelSelectorMultipleValid": {
+			fieldMap: map[string]any{
+				"lease-label-selector": "k8s-app=konnectivity-server,component=proxy",
+			},
+			expected: "",
 		},
 	} {
 		t.Run(desc, func(t *testing.T) {
