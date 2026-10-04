@@ -1339,23 +1339,47 @@ func TestConnectionDurationMetric(t *testing.T) {
 	assertConnectionDurationCount(t, 1)
 }
 
+func TestBackendConnectionDurationMetric(t *testing.T) {
+	metrics.Metrics.Reset()
+	stub := gomock.NewController(t)
+	defer stub.Finish()
+
+	ctx := metadata.NewIncomingContext(context.Background(), metadata.Pairs(header.AgentID, "agent1"))
+	conn := agentmock.NewMockAgentService_ConnectServer(stub)
+	conn.EXPECT().Context().AnyTimes().Return(ctx)
+	conn.EXPECT().SendHeader(gomock.Any()).Return(nil)
+	conn.EXPECT().Recv().Return(nil, io.EOF)
+
+	p := NewProxyServer("", []proxystrategies.ProxyStrategy{proxystrategies.ProxyStrategyDefault}, 1, &AgentTokenAuthenticationOptions{}, xfrChannelSize)
+	if err := p.Connect(conn); err != nil {
+		t.Fatalf("Connect: %v", err)
+	}
+
+	assertHistogramSampleCount(t, "konnectivity_network_proxy_server_backend_connection_duration_seconds", 1)
+}
+
 func assertConnectionDurationCount(t *testing.T, want uint64) {
+	t.Helper()
+	assertHistogramSampleCount(t, "konnectivity_network_proxy_server_connection_duration_seconds", want)
+}
+
+func assertHistogramSampleCount(t *testing.T, name string, want uint64) {
 	t.Helper()
 	metricFamilies, err := prometheus.DefaultGatherer.Gather()
 	if err != nil {
 		t.Fatalf("failed to gather metrics: %v", err)
 	}
 	for _, metricFamily := range metricFamilies {
-		if metricFamily.GetName() != "konnectivity_network_proxy_server_connection_duration_seconds" {
+		if metricFamily.GetName() != name {
 			continue
 		}
 		if got := metricFamily.GetMetric()[0].GetHistogram().GetSampleCount(); got != want {
-			t.Errorf("expected %d connection duration observations, got %d", want, got)
+			t.Errorf("expected %d %s observations, got %d", want, name, got)
 		}
 		return
 	}
 	if want != 0 {
-		t.Error("connection duration metric not found")
+		t.Errorf("%s metric not found", name)
 	}
 }
 
@@ -2022,4 +2046,39 @@ func TestBackendCloseFailsPendingDials(t *testing.T) {
 	if got := pendingDialCount(p); got != 1 {
 		t.Errorf("expected only the dial over the closed backend to be removed, got %d remaining", got)
 	}
+}
+
+// TestEstablishedConnectionsClosedMetric verifies that established connections
+// removed when the agent connection ends, and those removed by the CLOSE
+// handshake, are counted under distinct reasons.
+func TestEstablishedConnectionsClosedMetric(t *testing.T) {
+	metrics.Metrics.Reset()
+	const agentID = "agent1"
+
+	p := NewProxyServer("", []proxystrategies.ProxyStrategy{proxystrategies.ProxyStrategyDefault}, 1, nil, xfrChannelSize)
+	backend := &Backend{}
+	stream := &probeProxyStream{onSend: func(*client.Packet) error { return nil }}
+	for connID := int64(1); connID <= 3; connID++ {
+		p.addEstablished(agentID, connID, &ProxyClientConnection{
+			frontend:  &Frontend{stream: stream, streamUID: "stream-uid"},
+			connectID: connID,
+			backend:   backend,
+		})
+	}
+
+	// The agent confirms the close of one connection, then its connection ends
+	// with the other two still established.
+	recvCh := make(chan *client.Packet, 1)
+	recvCh <- closeRspPkt(1, "")
+	close(recvCh)
+	p.serveRecvBackend(backend, agentID, recvCh)
+
+	expect := map[metrics.ConnectionClosedReason]int{
+		metrics.ConnectionClosedCloseResponse: 1,
+		metrics.ConnectionClosedBackendClose:  2,
+	}
+	if err := metricstest.DefaultTester.ExpectServerEstablishedConnsClosed(expect); err != nil {
+		t.Error(err)
+	}
+	assertEstablishedConnsMetric(t, 0)
 }
