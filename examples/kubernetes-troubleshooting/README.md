@@ -153,8 +153,8 @@ flows, the agents' CPU request and placement, the webhook's `timeoutSeconds` and
 
 ## Open items
 
-- Switch the apiserver egress selector to `Direct` and restart the apiservers to measure
-  the tunnel cost against a direct path on the same host.
+None. The direct-path comparison is recorded in
+[00](scenarios/00-baseline.md#the-same-load-with-the-tunnel-removed-2026-10-04).
 
 ## Cleanup
 
