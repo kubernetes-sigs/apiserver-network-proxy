@@ -32,6 +32,10 @@ import (
 // successful delivery of CLOSE_REQ.
 const CloseTimeout = 10 * time.Second
 
+// errConnTunnelClosed is returned by Close when the tunnel ended before the
+// connection was closed, so the close could not be signalled to the proxy.
+var errConnTunnelClosed = errors.New("tunnel closed")
+
 // conn is an implementation of net.Conn, where the data is transported
 // over an established tunnel defined by a gRPC service ProxyService.
 type conn struct {
@@ -137,6 +141,14 @@ func (c *conn) Close() error {
 	}
 	klog.V(4).Infoln("closing connection", "dialID", c.random, "connectionID", c.connID)
 
+	select {
+	case <-c.tunnel.Done():
+		// The tunnel ended before the close; there is nobody to tell.
+		c.tunnel.closeTunnel()
+		return errConnTunnelClosed
+	default:
+	}
+
 	var err error
 	if c.connID != 0 {
 		err = c.tunnel.sendCloseRequest(c.connID)
@@ -162,6 +174,7 @@ func (c *conn) awaitCloseResponse() {
 			klog.V(2).InfoS("close response reported an error", "dialID", c.random, "connectionID", c.connID, "error", errMsg)
 		}
 	case <-c.tunnel.Done():
+		klog.V(2).InfoS("tunnel closed before the close response", "dialID", c.random, "connectionID", c.connID)
 	case <-timer.C:
 		klog.V(2).InfoS("timed out waiting for close response", "dialID", c.random, "connectionID", c.connID, "timeout", CloseTimeout)
 	}
