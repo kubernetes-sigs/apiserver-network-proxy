@@ -12,17 +12,20 @@ The directory contains:
 
 - `scripts/`: observe the proxy from every side (agents, servers, apiservers, load
   balancer) and inject faults on the agent-to-server path.
-- `webhook/`: an always-allow validating admission webhook that measures its own
-  handling time and connection churn, with a deploy script and a two-sided latency
-  monitor.
-- `webhook-load/`: a load generator that triggers the webhook with server-side dry-run
-  requests.
-- `tunnel-probe/`: a client that sends requests through a konnectivity-server's unix
-  socket over one keep-alive connection, the way the apiserver calls a webhook, and logs
-  each request's duration. Build it against two versions of `konnectivity-client` to
-  compare them on the same fault.
+- `webhook/`: deploy script, manifests and a two-sided latency monitor for the measuring
+  webhook in `cmd/test-webhook`, an always-allow validating admission webhook that
+  measures its own handling time and connection churn.
 - `scenarios/`: one document per fault scenario, with steps, measurements, and the
   effect of each fix once it lands.
+
+Two more programs live under `cmd/`, next to the existing test client and server:
+
+- `cmd/webhook-load`: a load generator that triggers the webhook with server-side
+  dry-run requests.
+- `cmd/tunnel-probe`: a client that sends requests through a konnectivity-server's
+  unix socket over one keep-alive connection, the way the apiserver calls a webhook, and
+  logs each request's duration. Build it against two versions of `konnectivity-client`
+  to compare them on the same fault.
 
 ## Prerequisites
 
@@ -107,7 +110,7 @@ Scripts:
 | `scripts/dial-share.sh [seconds]` | Dials each agent received in the interval, its share and mean dial time, and the servers' dial time distribution. Shows whether a slow agent keeps receiving its share. |
 | `webhook/deploy.sh` | Builds and deploys the measuring webhook and extracts kubeconfig credentials for the load generator. |
 | `webhook/monitor.sh` | Every 10 s, apiserver-measured versus webhook-measured latency, fail-opens, connections. |
-| `tunnel-probe` | Runs on a control-plane node (`docker cp` the binary to `/usr/local/bin`; `/tmp` on kind nodes is a tmpfs that `docker cp` does not reach). `kt-probe -url http://<webhook-pod-ip>:9090/metrics -timeout 10s`. |
+| `cmd/tunnel-probe` | Build with `go build -mod=vendor -o kt-probe ./cmd/tunnel-probe` and run on a control-plane node (`docker cp` the binary to `/usr/local/bin`; `/tmp` on kind nodes is a tmpfs that `docker cp` does not reach). `kt-probe -url http://<webhook-pod-ip>:9090/metrics -timeout 10s`. |
 
 ## Scenarios
 
