@@ -76,6 +76,53 @@ type Backend struct {
 	// receivedEOF is set before a clean receive-loop exit ends the gRPC
 	// handler. Its context cancellation must not abort buffered responses.
 	receivedEOF atomic.Bool
+
+	// dialsInFlight counts DIAL_REQs sent over this backend without a DIAL_RSP
+	// yet. Maintained by PendingDialManager.
+	dialsInFlight atomic.Int64
+
+	dialLatencyMu sync.Mutex
+	// dialLatency is a moving average of the completed dials' latency as seen
+	// by the server; dialLatencyAt is when it was last updated.
+	dialLatency   time.Duration
+	dialLatencyAt time.Time
+}
+
+const (
+	// dialLatencyWindow is how long a dial latency sample influences backend
+	// selection. A slow agent is tried again after it.
+	dialLatencyWindow = 30 * time.Second
+	// dialLatencyFloor is the latency below which agents are equally fast.
+	dialLatencyFloor = 5 * time.Millisecond
+)
+
+// observeDial records the latency of a dial completed over this backend.
+func (b *Backend) observeDial(d time.Duration, now time.Time) {
+	b.dialLatencyMu.Lock()
+	defer b.dialLatencyMu.Unlock()
+	if b.dialLatencyAt.IsZero() || now.Sub(b.dialLatencyAt) > dialLatencyWindow {
+		b.dialLatency = d
+	} else {
+		b.dialLatency = (b.dialLatency + d) / 2
+	}
+	b.dialLatencyAt = now
+}
+
+// dialCost estimates how long a new dial over this backend takes: the recent
+// dial latency, scaled by the dials already waiting on the agent. With no
+// sample in the last dialLatencyWindow the agent is assumed fast.
+func (b *Backend) dialCost(now time.Time) time.Duration {
+	latency := dialLatencyFloor
+	b.dialLatencyMu.Lock()
+	if !b.dialLatencyAt.IsZero() && now.Sub(b.dialLatencyAt) <= dialLatencyWindow && b.dialLatency > latency {
+		latency = b.dialLatency
+	}
+	b.dialLatencyMu.Unlock()
+	inFlight := b.dialsInFlight.Load()
+	if inFlight < 0 {
+		inFlight = 0
+	}
+	return latency * time.Duration(inFlight+1)
 }
 
 // IsDraining returns true if the backend is draining
@@ -523,9 +570,26 @@ func (s *DefaultBackendStorage) lessOccupiedBackend(first, second *Backend) *Bac
 	return second
 }
 
+// preferredBackend returns the candidate expected to complete a new dial
+// sooner. A backend whose dial cost is at least twice the other's loses;
+// otherwise receive-channel pressure and then chance decide, so that agents
+// of similar speed keep sharing the load. The caller must hold s.mu.
+func (s *DefaultBackendStorage) preferredBackend(first, second *Backend) *Backend {
+	now := time.Now()
+	firstCost, secondCost := first.dialCost(now), second.dialCost(now)
+	if secondCost >= 2*firstCost {
+		return first
+	}
+	if firstCost >= 2*secondCost {
+		return second
+	}
+	return s.lessOccupiedBackend(first, second)
+}
+
 // GetRandomBackend samples two distinct non-draining agents and prefers the
-// primary backend with less receive-channel pressure. A sole non-draining
-// agent is used directly; draining agents are used only as a last resort.
+// primary backend expected to dial sooner, see preferredBackend. A sole
+// non-draining agent is used directly; draining agents are used only as a
+// last resort.
 // The storage must maintain the random-routing index; otherwise this method
 // returns ErrNotFound even when backends are registered.
 func (s *DefaultBackendStorage) GetRandomBackend() (*Backend, error) {
@@ -564,7 +628,7 @@ func (s *DefaultBackendStorage) GetRandomBackend() (*Backend, error) {
 			continue
 		}
 
-		selected := s.lessOccupiedBackend(first, second)
+		selected := s.preferredBackend(first, second)
 		klog.V(3).InfoS("Pick agent as backend", "agentID", selected.GetAgentID())
 		return selected, nil
 	}
