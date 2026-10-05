@@ -159,6 +159,9 @@ type PendingDialManager struct {
 func (pm *PendingDialManager) Add(random int64, clientConn *ProxyClientConnection) {
 	pm.mu.Lock()
 	defer pm.mu.Unlock()
+	if old, ok := pm.pendingDial[random]; ok && old.backend != nil {
+		old.backend.dialsInFlight.Add(-1)
+	}
 	pm.pendingDial[random] = clientConn
 	if clientConn.backend != nil {
 		clientConn.backend.dialsInFlight.Add(1)
@@ -221,6 +224,7 @@ func (pm *PendingDialManager) removeForStream(streamUID string) []*ProxyClientCo
 			ret = append(ret, frontend)
 		}
 	}
+	metrics.Metrics.SetPendingDialCount(len(pm.pendingDial))
 	return ret
 }
 

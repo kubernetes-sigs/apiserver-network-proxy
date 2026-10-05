@@ -796,6 +796,21 @@ func TestPendingDialManager_TracksDialsInFlight(t *testing.T) {
 	if got := backend.dialsInFlight.Load(); got != 0 {
 		t.Fatalf("dialsInFlight = %d after removeForBackend, want 0", got)
 	}
+
+	// Re-adding a dial ID moves the in-flight count to the new backend.
+	other, _ := NewBackend(mockAgentConn(ctrl, "other", nil))
+	pm.Add(4, &ProxyClientConnection{backend: backend})
+	pm.Add(4, &ProxyClientConnection{backend: other})
+	if got, want := backend.dialsInFlight.Load(), int64(0); got != want {
+		t.Fatalf("dialsInFlight = %d on the replaced backend, want %d", got, want)
+	}
+	if got, want := other.dialsInFlight.Load(), int64(1); got != want {
+		t.Fatalf("dialsInFlight = %d on the new backend, want %d", got, want)
+	}
+	pm.Remove(4)
+	if got := other.dialsInFlight.Load(); got != 0 {
+		t.Fatalf("dialsInFlight = %d after Remove, want 0", got)
+	}
 }
 
 func TestDefaultBackendManager_GetRandomBackend_DrainingAgentsDoNotBiasEligibleSelection(t *testing.T) {

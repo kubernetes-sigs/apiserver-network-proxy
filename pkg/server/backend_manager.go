@@ -118,7 +118,11 @@ func (b *Backend) dialCost(now time.Time) time.Duration {
 		latency = b.dialLatency
 	}
 	b.dialLatencyMu.Unlock()
-	return latency * time.Duration(b.dialsInFlight.Load()+1)
+	inFlight := b.dialsInFlight.Load()
+	if inFlight < 0 {
+		inFlight = 0
+	}
+	return latency * time.Duration(inFlight+1)
 }
 
 // IsDraining returns true if the backend is draining
