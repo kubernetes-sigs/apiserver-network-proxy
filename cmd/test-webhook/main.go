@@ -14,7 +14,7 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-// Command webhook is an always-allow validating admission webhook that
+// Command test-webhook is an always-allow validating admission webhook that
 // measures its own request handling and connection churn, so that the
 // kube-apiserver's view of the same calls can be compared against it.
 package main
