@@ -10,7 +10,7 @@ IMAGE=${IMAGE:-local/knp-webhook:dev}
 WEBHOOK_NODE=${WEBHOOK_NODE:-$(workers | tail -1)}
 CERTS="$OUT_DIR/webhook-certs"
 
-(cd "$REPO" && CGO_ENABLED=0 go build -mod=vendor -o "$HERE/bin/webhook" ./examples/kubernetes-troubleshooting/webhook)
+(cd "$REPO" && CGO_ENABLED=0 go build -mod=vendor -o "$HERE/bin/webhook" ./cmd/test-webhook)
 docker build -q -t "$IMAGE" -f "$HERE/Dockerfile" "$HERE" >/dev/null
 kind --name "$CLUSTER" load docker-image "$IMAGE" >/dev/null 2>&1
 

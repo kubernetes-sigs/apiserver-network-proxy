@@ -14,7 +14,7 @@ against these numbers.
 ```sh
 webhook/deploy.sh
 CREDS=/tmp/$CLUSTER-troubleshooting/kubeconfig-creds
-go run -mod=vendor ./examples/kubernetes-troubleshooting/webhook-load \
+go run -mod=vendor ./cmd/webhook-load \
   -server "$(cat $CREDS/server)" -ca $CREDS/ca.crt -cert $CREDS/client.crt -key $CREDS/client.key \
   -workers 4 -rate 25 &            # 100 requests/s through the kind load balancer
 webhook/monitor.sh &               # apiserver-measured vs webhook-measured, every 10 s
