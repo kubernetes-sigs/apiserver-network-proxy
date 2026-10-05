@@ -281,6 +281,42 @@ func TestClose(t *testing.T) {
 	metrics.Metrics.Reset() // For clean shutdown.
 }
 
+// TestCloseAfterTunnelClosed covers a tunnel that ended before the caller
+// closed the connection: Close reports it and returns at once.
+func TestCloseAfterTunnelClosed(t *testing.T) {
+	expectCleanShutdown(t)
+
+	ctx := context.Background()
+	s, ps := pipe()
+	ts := testServer(ps, 100)
+
+	defer ps.Close()
+	defer s.Close()
+
+	tunnel := newUnstartedTunnel(s, s.conn())
+
+	go tunnel.serve(ctx)
+	go ts.serve()
+
+	conn, err := tunnel.DialContext(ctx, "tcp", "127.0.0.1:80")
+	if err != nil {
+		t.Fatalf("expect nil; got %v", err)
+	}
+
+	// The transport under the tunnel goes away.
+	s.Close()
+	<-tunnel.Done()
+
+	start := time.Now()
+	if err := conn.Close(); !errors.Is(err, errConnTunnelClosed) {
+		t.Errorf("expected %v from Close on an ended tunnel, got %v", errConnTunnelClosed, err)
+	}
+	if elapsed := time.Since(start); elapsed > time.Second {
+		t.Errorf("Close blocked for %v on an ended tunnel; expected it to return at once", elapsed)
+	}
+	metrics.Metrics.Reset() // For clean shutdown.
+}
+
 // TestCloseTimeout covers a backend that never answers the CLOSE_REQ: Close
 // must return at once (net/http calls it synchronously when a request's
 // context ends) and the tunnel must still be released after CloseTimeout.
