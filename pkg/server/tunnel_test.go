@@ -18,11 +18,13 @@ package server
 
 import (
 	"bufio"
+	"context"
 	"fmt"
 	"io"
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"net/http/httputil"
 	"net/url"
 	"strings"
 	"sync"
@@ -501,5 +503,101 @@ func TestHTTPConnectStreamContextEndsWithStream(t *testing.T) {
 	case <-stream.Context().Done():
 	case <-time.After(5 * time.Second):
 		t.Fatal("timed out waiting for the stream context to be cancelled")
+	}
+}
+
+func TestTunnel_ServeHTTP_NonConnect_MissingHost(t *testing.T) {
+	proxyServer := NewProxyServer(uuid.New().String(), []proxystrategies.ProxyStrategy{proxystrategies.ProxyStrategyDefault}, 1, &AgentTokenAuthenticationOptions{}, xfrChannelSize)
+	tunnel := &Tunnel{Server: proxyServer}
+
+	req := httptest.NewRequest(http.MethodGet, "/test", nil)
+	req.Host = ""
+	rec := httptest.NewRecorder()
+
+	tunnel.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusBadRequest {
+		t.Errorf("expected status %d, got %d", http.StatusBadRequest, rec.Code)
+	}
+}
+
+func TestTunnel_ServeHTTP_NonConnect_DialError(t *testing.T) {
+	proxyServer := NewProxyServer(uuid.New().String(), []proxystrategies.ProxyStrategy{proxystrategies.ProxyStrategyDefault}, 1, &AgentTokenAuthenticationOptions{}, xfrChannelSize)
+	tunnel := &Tunnel{Server: proxyServer}
+
+	req := httptest.NewRequest(http.MethodGet, "http://example.com/test", nil)
+	rec := httptest.NewRecorder()
+
+	tunnel.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusServiceUnavailable {
+		t.Errorf("expected status %d, got %d", http.StatusServiceUnavailable, rec.Code)
+	}
+}
+
+func TestTunnel_ServeHTTP_NonConnect_GetAndPost(t *testing.T) {
+	// Create target HTTP server
+	targetServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodPost {
+			body, _ := io.ReadAll(r.Body)
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte("post-echo: " + string(body)))
+			return
+		}
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte("get-ok"))
+	}))
+	defer targetServer.Close()
+
+	targetURL, _ := url.Parse(targetServer.URL)
+
+	// Create Tunnel with mock proxy server using targetServer's dialer
+	proxyServer := NewProxyServer(uuid.New().String(), []proxystrategies.ProxyStrategy{proxystrategies.ProxyStrategyDefault}, 1, &AgentTokenAuthenticationOptions{}, xfrChannelSize)
+	tunnel := &Tunnel{Server: proxyServer}
+
+	// Customize reverse proxy transport to dial the test server directly
+	tunnel.proxy = nil
+	tunnel.initOnce.Do(func() {
+		transport := &http.Transport{
+			DialContext: func(ctx context.Context, _, _ string) (net.Conn, error) {
+				var d net.Dialer
+				return d.DialContext(ctx, "tcp", targetURL.Host)
+			},
+		}
+		tunnel.proxy = &httputil.ReverseProxy{
+			Director: func(req *http.Request) {
+				if req.URL.Scheme == "" {
+					req.URL.Scheme = "http"
+				}
+				if req.URL.Host == "" {
+					req.URL.Host = req.Host
+				}
+			},
+			Transport: transport,
+		}
+	})
+
+	// 1. Test GET
+	getReq := httptest.NewRequest(http.MethodGet, fmt.Sprintf("http://%s/hello", targetURL.Host), nil)
+	getRec := httptest.NewRecorder()
+	tunnel.ServeHTTP(getRec, getReq)
+
+	if getRec.Code != http.StatusOK {
+		t.Errorf("expected status 200, got %d", getRec.Code)
+	}
+	if getRec.Body.String() != "get-ok" {
+		t.Errorf("expected 'get-ok', got %q", getRec.Body.String())
+	}
+
+	// 2. Test POST
+	postReq := httptest.NewRequest(http.MethodPost, fmt.Sprintf("http://%s/submit", targetURL.Host), strings.NewReader("payload"))
+	postRec := httptest.NewRecorder()
+	tunnel.ServeHTTP(postRec, postReq)
+
+	if postRec.Code != http.StatusOK {
+		t.Errorf("expected status 200, got %d", postRec.Code)
+	}
+	if postRec.Body.String() != "post-echo: payload" {
+		t.Errorf("expected 'post-echo: payload', got %q", postRec.Body.String())
 	}
 }

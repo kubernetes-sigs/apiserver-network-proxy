@@ -21,6 +21,8 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math/rand"
+	"net"
 	runpprof "runtime/pprof"
 	"strconv"
 	"strings"
@@ -117,6 +119,7 @@ func (f *Frontend) closeWithBackend(backend *Backend) {
 const (
 	ModeGRPC        = "grpc"
 	ModeHTTPConnect = "http-connect"
+	ModeConn        = "conn"
 )
 
 const defaultBackendDialTimeout = 0
@@ -300,6 +303,121 @@ func (s *ProxyServer) getBackend(reqHost string) (*Backend, error) {
 		}
 	}
 	return nil, &ErrNotFound{}
+}
+
+// DialContext connects to the address on the named network via an agent backend registered in ProxyServer.
+func (s *ProxyServer) DialContext(ctx context.Context, network, address string) (net.Conn, error) {
+	select {
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	default:
+	}
+
+	backend, err := s.getBackend(address)
+	if err != nil {
+		return nil, err
+	}
+
+	random := rand.Int63() /* #nosec G404 */
+	conn := newServerConn(s, backend, random, address)
+
+	frontend := &Frontend{
+		stream:    conn,
+		streamUID: uuid.New().String(),
+	}
+
+	connection := &ProxyClientConnection{
+		frontend:    frontend,
+		start:       time.Now(),
+		backend:     backend,
+		dialID:      random,
+		agentID:     backend.GetAgentID(),
+		dialAddress: address,
+	}
+
+	s.PendingDial.Add(random, connection)
+
+	established := false
+	dialFailureObserved := false
+	defer func() {
+		if !established {
+			if s.PendingDial.Remove(random) != nil {
+				if !dialFailureObserved {
+					metrics.Metrics.ObserveDialFailure(metrics.DialFailureFrontendClose)
+				}
+			}
+		}
+	}()
+
+	dialProtocol := "tcp"
+	if network != "" {
+		dialProtocol = network
+	}
+
+	dialRequest := &client.Packet{
+		Type: client.PacketType_DIAL_REQ,
+		Payload: &client.Packet_DialRequest{
+			DialRequest: &client.DialRequest{
+				Protocol: dialProtocol,
+				Address:  address,
+				Random:   random,
+			},
+		},
+	}
+
+	if err := s.sendDialRequestToBackend(backend, dialRequest); err != nil {
+		klog.ErrorS(err, "failed to send dial request to backend", "address", address, "dialID", random, "agentID", connection.agentID)
+		dialFailureObserved = true
+		reason := metrics.DialFailureBackendClose
+		if errors.Is(err, errBackendDialTimeout) {
+			reason = metrics.DialFailureBackendDialTimeout
+		}
+		metrics.Metrics.ObserveDialFailure(reason)
+		return nil, err
+	}
+
+	ctxt := backend.Context()
+	var timeoutCh <-chan time.Time
+	var dialTimer *time.Timer
+	if s.backendDialTimeout > 0 {
+		dialTimer = time.NewTimer(s.backendDialTimeout)
+		defer dialTimer.Stop()
+		timeoutCh = dialTimer.C
+	}
+
+	select {
+	case <-conn.connected:
+		established = true
+		conn.connID = connection.connectID
+		return conn, nil
+
+	case err := <-conn.dialErrCh:
+		dialFailureObserved = true
+		return nil, err
+
+	case <-conn.closeCh:
+		dialFailureObserved = true
+		return nil, errors.New("dial closed")
+
+	case <-ctxt.Done():
+		klog.ErrorS(ctxt.Err(), "backend context closed before connection was established", "address", address, "dialID", random, "agentID", connection.agentID)
+		dialFailureObserved = true
+		metrics.Metrics.ObserveDialFailure(metrics.DialFailureBackendClose)
+		return nil, fmt.Errorf("backend context closed: %w", ctxt.Err())
+
+	case <-timeoutCh:
+		klog.ErrorS(errBackendDialTimeout, "backend dial timed out before connection was established", "address", address, "dialID", random, "agentID", connection.agentID)
+		dialFailureObserved = true
+		metrics.Metrics.ObserveDialFailure(metrics.DialFailureBackendDialTimeout)
+		return nil, errBackendDialTimeout
+
+	case <-ctx.Done():
+		klog.V(2).InfoS("dial context cancelled before connection was established", "address", address, "dialID", random, "agentID", connection.agentID)
+		dialFailureObserved = true
+		metrics.Metrics.ObserveDialFailure(metrics.DialFailureFrontendClose)
+		s.sendBackendDialClose(backend, random, "context cancelled")
+		return nil, ctx.Err()
+	}
 }
 
 func (s *ProxyServer) sendDialRequestToBackend(backend *Backend, pkt *client.Packet) error {
