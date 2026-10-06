@@ -137,6 +137,7 @@ func (a *Agent) runProxyConnection(o *options.GrpcProxyAgentOptions, drainCh, st
 		grpc.WithTransportCredentials(credentials.NewTLS(tlsConfig)),
 		grpc.WithKeepaliveParams(keepalive.ClientParameters{
 			Time:                o.KeepaliveTime,
+			Timeout:             o.KeepaliveTimeout,
 			PermitWithoutStream: true,
 		}),
 	}

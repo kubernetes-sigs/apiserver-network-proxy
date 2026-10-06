@@ -159,7 +159,13 @@ type PendingDialManager struct {
 func (pm *PendingDialManager) Add(random int64, clientConn *ProxyClientConnection) {
 	pm.mu.Lock()
 	defer pm.mu.Unlock()
+	if old, ok := pm.pendingDial[random]; ok && old.backend != nil {
+		old.backend.dialsInFlight.Add(-1)
+	}
 	pm.pendingDial[random] = clientConn
+	if clientConn.backend != nil {
+		clientConn.backend.dialsInFlight.Add(1)
+	}
 	metrics.Metrics.SetPendingDialCount(len(pm.pendingDial))
 }
 
@@ -168,6 +174,9 @@ func (pm *PendingDialManager) Remove(random int64) *ProxyClientConnection {
 	defer pm.mu.Unlock()
 	pd := pm.pendingDial[random]
 	delete(pm.pendingDial, random)
+	if pd != nil && pd.backend != nil {
+		pd.backend.dialsInFlight.Add(-1)
+	}
 	metrics.Metrics.SetPendingDialCount(len(pm.pendingDial))
 	return pd
 }
@@ -185,6 +194,7 @@ func (pm *PendingDialManager) removeForBackend(backend *Backend) []*ProxyClientC
 	for dialID, frontend := range pm.pendingDial {
 		if frontend.backend == backend {
 			delete(pm.pendingDial, dialID)
+			backend.dialsInFlight.Add(-1)
 			ret = append(ret, frontend)
 		}
 	}
@@ -208,9 +218,13 @@ func (pm *PendingDialManager) removeForStream(streamUID string) []*ProxyClientCo
 		}
 		if frontend.frontend.streamUID == streamUID {
 			delete(pm.pendingDial, dialID)
+			if frontend.backend != nil {
+				frontend.backend.dialsInFlight.Add(-1)
+			}
 			ret = append(ret, frontend)
 		}
 	}
+	metrics.Metrics.SetPendingDialCount(len(pm.pendingDial))
 	return ret
 }
 
@@ -1087,13 +1101,17 @@ func (s *ProxyServer) serveRecvBackend(backend *Backend, agentID string, recvCh 
 					s.sendBackendClose(backend, resp.ConnectID, resp.Random, "dial error")
 					break
 				}
-				metrics.Metrics.ObserveDialLatency(time.Since(frontend.start))
+				now := time.Now()
+				metrics.Metrics.ObserveDialLatency(now.Sub(frontend.start))
+				if frontend.backend != nil {
+					frontend.backend.observeDial(now.Sub(frontend.start), now)
+				}
 				klog.V(3).InfoS("Proxy connection established",
 					"dialID", resp.Random,
 					"connectionID", resp.ConnectID,
 					"agentID", agentID,
 					"dialAddress", frontend.dialAddress,
-					"dialDuration", time.Since(frontend.start),
+					"dialDuration", now.Sub(frontend.start),
 				)
 			}
 
