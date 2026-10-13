@@ -60,29 +60,34 @@ var bufferPool = sync.Pool{
 // Tunnel implements Proxy based on HTTP Connect, which tunnels the traffic to
 // the agent registered in ProxyServer.
 type Tunnel struct {
-	Server   *ProxyServer
+	Server *ProxyServer
+
+	// dialContext overrides Server.DialContext for forward proxied requests.
+	// It is only set by tests.
+	dialContext func(ctx context.Context, network, address string) (net.Conn, error)
+
 	proxy    *httputil.ReverseProxy
 	initOnce sync.Once
 }
 
+// getReverseProxy returns the forward proxy used for requests other than
+// CONNECT. Such a request names its target in an absolute http:// URI, and is
+// sent to the target over a connection dialed through an agent.
 func (t *Tunnel) getReverseProxy() *httputil.ReverseProxy {
 	t.initOnce.Do(func() {
-		transport := &http.Transport{
-			DialContext:         t.Server.DialContext,
-			MaxIdleConns:        100,
-			IdleConnTimeout:     90 * time.Second,
-			TLSHandshakeTimeout: 10 * time.Second,
+		dialContext := t.dialContext
+		if dialContext == nil {
+			dialContext = t.Server.DialContext
 		}
-		director := func(req *http.Request) {
-			if req.URL.Scheme == "" {
-				req.URL.Scheme = "http"
-			}
-			if req.URL.Host == "" {
-				req.URL.Host = req.Host
-			}
+		transport := &http.Transport{
+			// Never chain to a proxy from the environment.
+			Proxy:           nil,
+			DialContext:     dialContext,
+			MaxIdleConns:    100,
+			IdleConnTimeout: 90 * time.Second,
 		}
 		errorHandler := func(rw http.ResponseWriter, req *http.Request, err error) {
-			klog.ErrorS(err, "forward proxy error", "url", req.URL, "host", req.Host)
+			klog.ErrorS(err, "Forward proxy request failed", "url", req.URL, "host", req.Host)
 			statusCode := mapDialErrorToHTTPStatus(err.Error())
 			if errors.Is(err, context.DeadlineExceeded) || errors.Is(err, errBackendDialTimeout) {
 				statusCode = http.StatusGatewayTimeout
@@ -90,12 +95,29 @@ func (t *Tunnel) getReverseProxy() *httputil.ReverseProxy {
 			http.Error(rw, fmt.Sprintf("Proxy error: %v", err), statusCode)
 		}
 		t.proxy = &httputil.ReverseProxy{
-			Director:     director,
+			// The request already carries the absolute target URL.
+			Rewrite:      func(*httputil.ProxyRequest) {},
 			Transport:    transport,
 			ErrorHandler: errorHandler,
 		}
 	})
 	return t.proxy
+}
+
+// serveForwardProxy serves a request other than CONNECT.
+func (t *Tunnel) serveForwardProxy(w http.ResponseWriter, r *http.Request) {
+	// A forward proxy request names its target in absolute form. A request
+	// in origin form is addressed to this server, and must not be forwarded
+	// to the address in its Host header.
+	if r.URL.Host == "" || !r.URL.IsAbs() {
+		http.Error(w, "this proxy only supports CONNECT and absolute-form http:// requests", http.StatusBadRequest)
+		return
+	}
+	if !strings.EqualFold(r.URL.Scheme, "http") {
+		http.Error(w, fmt.Sprintf("unsupported scheme %q for forward proxying; use CONNECT", r.URL.Scheme), http.StatusBadRequest)
+		return
+	}
+	t.getReverseProxy().ServeHTTP(w, r)
 }
 
 func (t *Tunnel) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -107,11 +129,7 @@ func (t *Tunnel) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		klog.V(2).InfoS("TLS", "commonName", r.TLS.PeerCertificates[0].Subject.CommonName)
 	}
 	if r.Method != http.MethodConnect {
-		if r.URL.Host == "" && r.Host == "" {
-			http.Error(w, "missing host in request", http.StatusBadRequest)
-			return
-		}
-		t.getReverseProxy().ServeHTTP(w, r)
+		t.serveForwardProxy(w, r)
 		return
 	}
 
