@@ -119,7 +119,6 @@ func (f *Frontend) closeWithBackend(backend *Backend) {
 const (
 	ModeGRPC        = "grpc"
 	ModeHTTPConnect = "http-connect"
-	ModeConn        = "conn"
 )
 
 const defaultBackendDialTimeout = 0
@@ -305,49 +304,62 @@ func (s *ProxyServer) getBackend(reqHost string) (*Backend, error) {
 	return nil, &ErrNotFound{}
 }
 
-// DialContext connects to the address on the named network via an agent backend registered in ProxyServer.
+// DialContext connects to the address on the named network via an agent
+// backend registered in ProxyServer. The returned net.Conn carries the
+// connection over the agent tunnel, the same way an HTTP-CONNECT or gRPC
+// frontend connection would.
 func (s *ProxyServer) DialContext(ctx context.Context, network, address string) (net.Conn, error) {
-	select {
-	case <-ctx.Done():
-		return nil, ctx.Err()
-	default:
+	if err := ctx.Err(); err != nil {
+		return nil, err
 	}
 
 	backend, err := s.getBackend(address)
 	if err != nil {
+		klog.ErrorS(err, "Failed to get a backend", "dialAddress", address)
+		metrics.Metrics.ObserveDialFailure(metrics.DialFailureNoAgent)
 		return nil, err
 	}
+	agentID := backend.GetAgentID()
 
 	random := rand.Int63() /* #nosec G404 */
 	conn := newServerConn(s, backend, random, address)
 
-	frontend := &Frontend{
-		stream:    conn,
-		streamUID: uuid.New().String(),
-	}
-
 	connection := &ProxyClientConnection{
-		frontend:    frontend,
+		frontend: &Frontend{
+			stream:    conn,
+			streamUID: uuid.New().String(),
+		},
 		start:       time.Now(),
 		backend:     backend,
 		dialID:      random,
-		agentID:     backend.GetAgentID(),
 		dialAddress: address,
 	}
 
 	s.PendingDial.Add(random, connection)
 
 	established := false
-	dialFailureObserved := false
 	defer func() {
 		if !established {
-			if s.PendingDial.Remove(random) != nil {
-				if !dialFailureObserved {
-					metrics.Metrics.ObserveDialFailure(metrics.DialFailureFrontendClose)
-				}
-			}
+			// If the agent's DIAL_RSP has already claimed the dial, Close
+			// (or the DIAL_RSP handler, if Close runs first) closes the
+			// established connection on the agent, so it is not leaked.
+			_ = conn.Close()
 		}
 	}()
+
+	// failDial observes a dial failure detected here, unless the dial was
+	// already claimed by the agent's response, which observes its own
+	// outcome. If the agent may still be dialing, it is told to stop. That is
+	// sent asynchronously, so that a blocked backend does not delay the caller.
+	failDial := func(reason metrics.DialFailureReason, tellAgent bool) {
+		if s.PendingDial.Remove(random) == nil {
+			return
+		}
+		metrics.Metrics.ObserveDialFailure(reason)
+		if tellAgent {
+			go s.sendBackendDialClose(backend, random, string(reason))
+		}
+	}
 
 	dialProtocol := "tcp"
 	if network != "" {
@@ -365,22 +377,23 @@ func (s *ProxyServer) DialContext(ctx context.Context, network, address string) 
 		},
 	}
 
-	if err := s.sendDialRequestToBackend(backend, dialRequest); err != nil {
-		klog.ErrorS(err, "failed to send dial request to backend", "address", address, "dialID", random, "agentID", connection.agentID)
-		dialFailureObserved = true
-		reason := metrics.DialFailureBackendClose
-		if errors.Is(err, errBackendDialTimeout) {
-			reason = metrics.DialFailureBackendDialTimeout
+	if err := s.sendDialRequestToBackend(ctx, backend, dialRequest); err != nil {
+		klog.ErrorS(err, "DIAL_REQ to Backend failed", "dialAddress", address, "dialID", random, "agentID", agentID)
+		switch {
+		case ctx.Err() != nil:
+			failDial(metrics.DialFailureFrontendClose, true)
+		case errors.Is(err, errBackendDialTimeout):
+			failDial(metrics.DialFailureBackendDialTimeout, true)
+		default:
+			failDial(metrics.DialFailureBackendClose, false)
 		}
-		metrics.Metrics.ObserveDialFailure(reason)
 		return nil, err
 	}
+	klog.V(5).InfoS("DIAL_REQ sent to backend", "dialID", random, "agentID", agentID)
 
-	ctxt := backend.Context()
 	var timeoutCh <-chan time.Time
-	var dialTimer *time.Timer
 	if s.backendDialTimeout > 0 {
-		dialTimer = time.NewTimer(s.backendDialTimeout)
+		dialTimer := time.NewTimer(s.backendDialTimeout)
 		defer dialTimer.Stop()
 		timeoutCh = dialTimer.C
 	}
@@ -388,63 +401,72 @@ func (s *ProxyServer) DialContext(ctx context.Context, network, address string) 
 	select {
 	case <-conn.connected:
 		established = true
-		conn.connID = connection.connectID
 		return conn, nil
 
 	case err := <-conn.dialErrCh:
-		dialFailureObserved = true
+		// The DIAL_RSP, DIAL_CLS or agent connection handler has already
+		// removed the pending dial and observed the failure.
 		return nil, err
 
-	case <-conn.closeCh:
-		dialFailureObserved = true
-		return nil, errors.New("dial closed")
-
-	case <-ctxt.Done():
-		klog.ErrorS(ctxt.Err(), "backend context closed before connection was established", "address", address, "dialID", random, "agentID", connection.agentID)
-		dialFailureObserved = true
-		metrics.Metrics.ObserveDialFailure(metrics.DialFailureBackendClose)
-		return nil, fmt.Errorf("backend context closed: %w", ctxt.Err())
+	case <-backend.Context().Done():
+		err := backend.Context().Err()
+		klog.ErrorS(err, "Backend context closed before connection was established", "dialAddress", address, "dialID", random, "agentID", agentID)
+		failDial(metrics.DialFailureBackendClose, false)
+		return nil, fmt.Errorf("%w: %w", errBackendClosedWhileDialing, err)
 
 	case <-timeoutCh:
-		klog.ErrorS(errBackendDialTimeout, "backend dial timed out before connection was established", "address", address, "dialID", random, "agentID", connection.agentID)
-		dialFailureObserved = true
-		metrics.Metrics.ObserveDialFailure(metrics.DialFailureBackendDialTimeout)
+		klog.ErrorS(errBackendDialTimeout, "Backend dial timed out before connection was established", "dialAddress", address, "dialID", random, "agentID", agentID)
+		failDial(metrics.DialFailureBackendDialTimeout, true)
 		return nil, errBackendDialTimeout
 
 	case <-ctx.Done():
-		klog.V(2).InfoS("dial context cancelled before connection was established", "address", address, "dialID", random, "agentID", connection.agentID)
-		dialFailureObserved = true
-		metrics.Metrics.ObserveDialFailure(metrics.DialFailureFrontendClose)
-		s.sendBackendDialClose(backend, random, "context cancelled")
+		klog.V(2).InfoS("Dial context cancelled before connection was established", "dialAddress", address, "dialID", random, "agentID", agentID)
+		failDial(metrics.DialFailureFrontendClose, true)
 		return nil, ctx.Err()
 	}
 }
 
-func (s *ProxyServer) sendDialRequestToBackend(backend *Backend, pkt *client.Packet) error {
+// sendDialRequestToBackend sends a DIAL_REQ to the backend. It gives up when
+// ctx is done, when the backend connection ends, or when the backend dial
+// timeout expires, even if the send itself remains blocked in the transport.
+// If ctx is done, ctx.Err() is returned.
+func (s *ProxyServer) sendDialRequestToBackend(ctx context.Context, backend *Backend, pkt *client.Packet) error {
 	timeout := s.backendDialTimeout
-	if timeout <= 0 {
+	if timeout <= 0 && ctx.Done() == nil {
 		return backend.Send(pkt)
 	}
 
-	ctx, cancel := context.WithTimeout(backend.Context(), timeout)
+	var sendCtx context.Context
+	var cancel context.CancelFunc
+	if timeout > 0 {
+		sendCtx, cancel = context.WithTimeout(backend.Context(), timeout)
+	} else {
+		sendCtx, cancel = context.WithCancel(backend.Context())
+	}
 	defer cancel()
+	stop := context.AfterFunc(ctx, cancel)
+	defer stop()
 
 	errCh := make(chan error, 1)
 	go func() {
-		errCh <- backend.SendContext(ctx, pkt)
+		errCh <- backend.SendContext(sendCtx, pkt)
 	}()
 
-	// The background goroutine and outer select allow the caller to time out
+	// The background goroutine and outer select allow the caller to give up
 	// while an active transport send remains blocked.
+	var err error
 	select {
-	case err := <-errCh:
+	case err = <-errCh:
 		if errors.Is(err, context.DeadlineExceeded) {
-			return errBackendDialTimeout
+			err = errBackendDialTimeout
 		}
-		return err
-	case <-ctx.Done():
-		return resolveDialSendOnContextDone(ctx, errCh)
+	case <-sendCtx.Done():
+		err = resolveDialSendOnContextDone(sendCtx, errCh)
 	}
+	if err != nil && ctx.Err() != nil {
+		return ctx.Err()
+	}
+	return err
 }
 
 func resolveDialSendOnContextDone(ctx context.Context, errCh <-chan error) error {
@@ -830,7 +852,7 @@ func (s *ProxyServer) serveRecvFrontend(frontend *Frontend, recvCh <-chan *clien
 					backend:     backend,
 					dialAddress: address,
 				})
-			if err := s.sendDialRequestToBackend(backend, pkt); err != nil {
+			if err := s.sendDialRequestToBackend(context.Background(), backend, pkt); err != nil {
 				klog.ErrorS(err, "DIAL_REQ to Backend failed", "dialID", random)
 				if s.PendingDial.Remove(random) == nil {
 					// The dial was already claimed by a DIAL_RSP or cancelled.
