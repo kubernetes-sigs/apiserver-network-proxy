@@ -18,6 +18,7 @@ package tests
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	"fmt"
 	"io"
@@ -689,6 +690,134 @@ func testBasicProxyHTTPConnect(t *testing.T, startProxy func(testing.TB) framewo
 		t.Errorf("expect %v; got %v", "hello", string(data))
 	}
 
+}
+
+// TestProxy_HTTPForwardProxy sends plain http:// requests through the HTTP
+// frontend the way net/http (and curl) do when a proxy is configured: as
+// absolute-form requests rather than CONNECT.
+func TestProxy_HTTPForwardProxy(t *testing.T) {
+	expectCleanShutdown(t)
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodPost {
+			body, err := io.ReadAll(r.Body)
+			if err != nil {
+				http.Error(w, err.Error(), http.StatusInternalServerError)
+				return
+			}
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte("echo: "))
+			_, _ = w.Write(body)
+			return
+		}
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte("get-response"))
+	}))
+	defer server.Close()
+
+	ps := runHTTPConnProxyServer(t)
+	defer ps.Stop()
+
+	a := runAgent(t, ps.AgentAddr())
+	defer a.Stop()
+	waitForConnectedServerCount(t, 1, a)
+
+	dummyProxyURL, err := url.Parse("http://konnectivity-proxy")
+	if err != nil {
+		t.Fatal(err)
+	}
+	dialFrontend := func(ctx context.Context, _, _ string) (net.Conn, error) {
+		var d net.Dialer
+		return d.DialContext(ctx, "unix", ps.FrontAddr())
+	}
+	transport := &http.Transport{
+		Proxy:       http.ProxyURL(dummyProxyURL),
+		DialContext: dialFrontend,
+	}
+	defer transport.CloseIdleConnections()
+	client := &http.Client{Transport: transport, Timeout: wait.ForeverTestTimeout}
+
+	doRequest := func(t *testing.T, method, path string, body []byte) []byte {
+		t.Helper()
+		req, err := http.NewRequest(method, server.URL+path, bytes.NewReader(body))
+		if err != nil {
+			t.Fatal(err)
+		}
+		resp, err := client.Do(req)
+		if err != nil {
+			t.Fatalf("%s request failed: %v", method, err)
+		}
+		defer resp.Body.Close()
+		got, err := io.ReadAll(resp.Body)
+		if err != nil {
+			t.Fatalf("reading %s body failed: %v", method, err)
+		}
+		if resp.StatusCode != http.StatusOK {
+			t.Fatalf("expected status 200, got %d: %s", resp.StatusCode, got)
+		}
+		return got
+	}
+
+	t.Run("get", func(t *testing.T) {
+		if got := doRequest(t, http.MethodGet, "/test-path", nil); string(got) != "get-response" {
+			t.Errorf("expected %q, got %q", "get-response", got)
+		}
+	})
+
+	t.Run("post", func(t *testing.T) {
+		got := doRequest(t, http.MethodPost, "/test-post", []byte("hello proxy world"))
+		if string(got) != "echo: hello proxy world" {
+			t.Errorf("expected %q, got %q", "echo: hello proxy world", got)
+		}
+	})
+
+	t.Run("large bodies", func(t *testing.T) {
+		// Larger than the DATA packet size and the receive buffer bound in
+		// both directions.
+		payload := make([]byte, 4<<20)
+		rand.New(rand.NewSource(1)).Read(payload)
+		got := doRequest(t, http.MethodPost, "/large", payload)
+		if !bytes.Equal(got, append([]byte("echo: "), payload...)) {
+			t.Errorf("echoed body of %d bytes does not match the %d bytes sent", len(got), len(payload))
+		}
+	})
+
+	t.Run("sequential requests", func(t *testing.T) {
+		for i := 0; i < 20; i++ {
+			if got := doRequest(t, http.MethodGet, fmt.Sprintf("/seq/%d", i), nil); string(got) != "get-response" {
+				t.Fatalf("request %d: expected %q, got %q", i, "get-response", got)
+			}
+		}
+	})
+
+	t.Run("concurrent requests", func(t *testing.T) {
+		var wg sync.WaitGroup
+		for i := 0; i < 10; i++ {
+			wg.Add(1)
+			go func(i int) {
+				defer wg.Done()
+				want := fmt.Sprintf("echo: request %d", i)
+				if got := doRequest(t, http.MethodPost, "/concurrent", []byte(fmt.Sprintf("request %d", i))); string(got) != want {
+					t.Errorf("expected %q, got %q", want, got)
+				}
+			}(i)
+		}
+		wg.Wait()
+	})
+
+	t.Run("origin-form request is rejected", func(t *testing.T) {
+		// A request addressed to the proxy itself is not forwarded.
+		direct := &http.Transport{DialContext: dialFrontend}
+		defer direct.CloseIdleConnections()
+		resp, err := (&http.Client{Transport: direct, Timeout: wait.ForeverTestTimeout}).Get("http://konnectivity-proxy/healthz")
+		if err != nil {
+			t.Fatal(err)
+		}
+		resp.Body.Close()
+		if resp.StatusCode != http.StatusBadRequest {
+			t.Errorf("expected status 400, got %d", resp.StatusCode)
+		}
+	})
 }
 
 func TestFailedDNSLookupProxy_HTTPCONN(t *testing.T) {

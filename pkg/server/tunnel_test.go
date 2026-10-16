@@ -18,6 +18,7 @@ package server
 
 import (
 	"bufio"
+	"context"
 	"fmt"
 	"io"
 	"net"
@@ -501,5 +502,170 @@ func TestHTTPConnectStreamContextEndsWithStream(t *testing.T) {
 	case <-stream.Context().Done():
 	case <-time.After(5 * time.Second):
 		t.Fatal("timed out waiting for the stream context to be cancelled")
+	}
+}
+
+func TestTunnel_ServeHTTP_NonConnect_RejectsNonProxyRequests(t *testing.T) {
+	proxyServer := NewProxyServer(uuid.New().String(), []proxystrategies.ProxyStrategy{proxystrategies.ProxyStrategyDefault}, 1, &AgentTokenAuthenticationOptions{}, xfrChannelSize)
+	dialed := false
+	tunnel := &Tunnel{
+		Server: proxyServer,
+		dialContext: func(context.Context, string, string) (net.Conn, error) {
+			dialed = true
+			return nil, fmt.Errorf("unexpected dial")
+		},
+	}
+
+	for _, tc := range []struct {
+		name   string
+		target string
+		host   string
+	}{
+		{name: "missing host", target: "/test", host: ""},
+		// An origin-form request is addressed to this server; it must not be
+		// forwarded to the address in its Host header.
+		{name: "origin form", target: "/test", host: "example.com"},
+		{name: "https scheme", target: "https://example.com/test", host: "example.com"},
+		{name: "ftp scheme", target: "ftp://example.com/test", host: "example.com"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			req := httptest.NewRequest(http.MethodGet, tc.target, nil)
+			req.Host = tc.host
+			rec := httptest.NewRecorder()
+
+			tunnel.ServeHTTP(rec, req)
+
+			if rec.Code != http.StatusBadRequest {
+				t.Errorf("expected status %d, got %d", http.StatusBadRequest, rec.Code)
+			}
+		})
+	}
+	if dialed {
+		t.Error("rejected request was dialed")
+	}
+}
+
+func TestTunnel_ServeHTTP_NonConnect_DialError(t *testing.T) {
+	proxyServer := NewProxyServer(uuid.New().String(), []proxystrategies.ProxyStrategy{proxystrategies.ProxyStrategyDefault}, 1, &AgentTokenAuthenticationOptions{}, xfrChannelSize)
+	tunnel := &Tunnel{Server: proxyServer}
+
+	req := httptest.NewRequest(http.MethodGet, "http://example.com/test", nil)
+	rec := httptest.NewRecorder()
+
+	tunnel.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusServiceUnavailable {
+		t.Errorf("expected status %d, got %d", http.StatusServiceUnavailable, rec.Code)
+	}
+}
+
+func TestTunnel_ServeHTTP_NonConnect_DialTimeout(t *testing.T) {
+	proxyServer := NewProxyServer(uuid.New().String(), []proxystrategies.ProxyStrategy{proxystrategies.ProxyStrategyDefault}, 1, &AgentTokenAuthenticationOptions{}, xfrChannelSize)
+	tunnel := &Tunnel{
+		Server: proxyServer,
+		dialContext: func(context.Context, string, string) (net.Conn, error) {
+			return nil, errBackendDialTimeout
+		},
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "http://example.com/test", nil)
+	rec := httptest.NewRecorder()
+
+	tunnel.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusGatewayTimeout {
+		t.Errorf("expected status %d, got %d", http.StatusGatewayTimeout, rec.Code)
+	}
+}
+
+func TestTunnel_ServeHTTP_NonConnect_GetAndPost(t *testing.T) {
+	type seenRequest struct {
+		method, uri, host string
+		header            http.Header
+	}
+	seen := make(chan seenRequest, 2)
+	targetServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		seen <- seenRequest{r.Method, r.RequestURI, r.Host, r.Header.Clone()}
+		if r.Method == http.MethodPost {
+			body, _ := io.ReadAll(r.Body)
+			w.WriteHeader(http.StatusCreated)
+			_, _ = w.Write([]byte("post-echo: " + string(body)))
+			return
+		}
+		w.Header().Set("X-Target", "yes")
+		_, _ = w.Write([]byte("get-ok"))
+	}))
+	defer targetServer.Close()
+
+	targetURL, _ := url.Parse(targetServer.URL)
+	const virtualHost = "service.example:8080"
+
+	var dialedAddresses []string
+	var mu sync.Mutex
+	proxyServer := NewProxyServer(uuid.New().String(), []proxystrategies.ProxyStrategy{proxystrategies.ProxyStrategyDefault}, 1, &AgentTokenAuthenticationOptions{}, xfrChannelSize)
+	tunnel := &Tunnel{
+		Server: proxyServer,
+		// Stand in for the agent: send the connection for virtualHost to the
+		// test server.
+		dialContext: func(ctx context.Context, network, address string) (net.Conn, error) {
+			mu.Lock()
+			dialedAddresses = append(dialedAddresses, address)
+			mu.Unlock()
+			var d net.Dialer
+			return d.DialContext(ctx, network, targetURL.Host)
+		},
+	}
+
+	// 1. Test GET
+	getReq := httptest.NewRequest(http.MethodGet, "http://"+virtualHost+"/hello?q=1", nil)
+	getReq.Header.Set("Proxy-Authorization", "Basic c2VjcmV0")
+	getReq.Header.Set("X-Custom", "kept")
+	getRec := httptest.NewRecorder()
+	tunnel.ServeHTTP(getRec, getReq)
+
+	if getRec.Code != http.StatusOK {
+		t.Errorf("expected status 200, got %d", getRec.Code)
+	}
+	if getRec.Body.String() != "get-ok" {
+		t.Errorf("expected 'get-ok', got %q", getRec.Body.String())
+	}
+	if getRec.Header().Get("X-Target") != "yes" {
+		t.Errorf("expected response header from target, got %v", getRec.Header())
+	}
+	got := <-seen
+	if got.uri != "/hello?q=1" || got.host != virtualHost {
+		t.Errorf("target got request URI %q host %q, want %q host %q", got.uri, got.host, "/hello?q=1", virtualHost)
+	}
+	if got.header.Get("Proxy-Authorization") != "" {
+		t.Error("Proxy-Authorization was forwarded to the target")
+	}
+	if got.header.Get("X-Custom") != "kept" {
+		t.Errorf("expected X-Custom forwarded, got %v", got.header)
+	}
+
+	// 2. Test POST
+	postReq := httptest.NewRequest(http.MethodPost, "http://"+virtualHost+"/submit", strings.NewReader("payload"))
+	postRec := httptest.NewRecorder()
+	tunnel.ServeHTTP(postRec, postReq)
+
+	if postRec.Code != http.StatusCreated {
+		t.Errorf("expected status 201, got %d", postRec.Code)
+	}
+	if postRec.Body.String() != "post-echo: payload" {
+		t.Errorf("expected 'post-echo: payload', got %q", postRec.Body.String())
+	}
+	if got := <-seen; got.method != http.MethodPost || got.uri != "/submit" {
+		t.Errorf("target got %s %s", got.method, got.uri)
+	}
+
+	mu.Lock()
+	defer mu.Unlock()
+	if len(dialedAddresses) == 0 {
+		t.Fatal("expected a dial")
+	}
+	for _, address := range dialedAddresses {
+		if address != virtualHost {
+			t.Errorf("dialed %q, want %q", address, virtualHost)
+		}
 	}
 }
