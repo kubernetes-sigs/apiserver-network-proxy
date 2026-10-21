@@ -19,6 +19,7 @@ package server
 import (
 	"bufio"
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -32,6 +33,7 @@ import (
 
 	"github.com/google/uuid"
 	"go.uber.org/mock/gomock"
+	"k8s.io/apimachinery/pkg/util/wait"
 
 	"sigs.k8s.io/apiserver-network-proxy/konnectivity-client/proto/client"
 	"sigs.k8s.io/apiserver-network-proxy/pkg/server/metrics"
@@ -599,6 +601,16 @@ func TestTunnel_ServeHTTP_NonConnect_GetAndPost(t *testing.T) {
 
 	targetURL, _ := url.Parse(targetServer.URL)
 	const virtualHost = "service.example:8080"
+	nextSeen := func() seenRequest {
+		t.Helper()
+		select {
+		case r := <-seen:
+			return r
+		case <-time.After(dialTestTimeout):
+			t.Fatal("timed out waiting for the target to receive the request")
+			return seenRequest{}
+		}
+	}
 
 	var dialedAddresses []string
 	var mu sync.Mutex
@@ -616,8 +628,10 @@ func TestTunnel_ServeHTTP_NonConnect_GetAndPost(t *testing.T) {
 		},
 	}
 
-	// 1. Test GET
-	getReq := httptest.NewRequest(http.MethodGet, "http://"+virtualHost+"/hello?q=1", nil)
+	// 1. Test GET. The query includes parameters net/url cannot parse; they
+	// are forwarded unchanged.
+	const getURI = "/hello?q=1&semi=a;b&bad=%zz"
+	getReq := httptest.NewRequest(http.MethodGet, "http://"+virtualHost+getURI, nil)
 	getReq.Header.Set("Proxy-Authorization", "Basic c2VjcmV0")
 	getReq.Header.Set("X-Custom", "kept")
 	getRec := httptest.NewRecorder()
@@ -632,9 +646,9 @@ func TestTunnel_ServeHTTP_NonConnect_GetAndPost(t *testing.T) {
 	if getRec.Header().Get("X-Target") != "yes" {
 		t.Errorf("expected response header from target, got %v", getRec.Header())
 	}
-	got := <-seen
-	if got.uri != "/hello?q=1" || got.host != virtualHost {
-		t.Errorf("target got request URI %q host %q, want %q host %q", got.uri, got.host, "/hello?q=1", virtualHost)
+	got := nextSeen()
+	if got.uri != getURI || got.host != virtualHost {
+		t.Errorf("target got request URI %q host %q, want %q host %q", got.uri, got.host, getURI, virtualHost)
 	}
 	if got.header.Get("Proxy-Authorization") != "" {
 		t.Error("Proxy-Authorization was forwarded to the target")
@@ -654,7 +668,7 @@ func TestTunnel_ServeHTTP_NonConnect_GetAndPost(t *testing.T) {
 	if postRec.Body.String() != "post-echo: payload" {
 		t.Errorf("expected 'post-echo: payload', got %q", postRec.Body.String())
 	}
-	if got := <-seen; got.method != http.MethodPost || got.uri != "/submit" {
+	if got := nextSeen(); got.method != http.MethodPost || got.uri != "/submit" {
 		t.Errorf("target got %s %s", got.method, got.uri)
 	}
 
@@ -666,6 +680,125 @@ func TestTunnel_ServeHTTP_NonConnect_GetAndPost(t *testing.T) {
 	for _, address := range dialedAddresses {
 		if address != virtualHost {
 			t.Errorf("dialed %q, want %q", address, virtualHost)
+		}
+	}
+}
+
+// Forward proxied requests reuse pooled connections through an agent, but not
+// once the agent is draining; a new request then goes through another agent.
+func TestTunnel_ServeHTTP_NonConnect_DrainingAgentConnectionsAreNotReused(t *testing.T) {
+	server := newDialTestServer()
+	a := newDialTestAgent(t, server, nil)
+	tunnel := &Tunnel{Server: server}
+
+	serve := func(path string) <-chan *httptest.ResponseRecorder {
+		done := make(chan *httptest.ResponseRecorder, 1)
+		go func() {
+			rec := httptest.NewRecorder()
+			tunnel.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "http://service.example:8080"+path, nil))
+			done <- rec
+		}()
+		return done
+	}
+	waitServed := func(done <-chan *httptest.ResponseRecorder) *httptest.ResponseRecorder {
+		t.Helper()
+		select {
+		case rec := <-done:
+			return rec
+		case <-time.After(dialTestTimeout):
+			t.Fatal("timed out waiting for the forward proxied request")
+			return nil
+		}
+	}
+	const connID int64 = 11
+	respond := func(path string) {
+		t.Helper()
+		if got := string(a.expectSent(client.PacketType_DATA).GetData().Data); !strings.HasPrefix(got, "GET "+path+" HTTP/1.1\r\n") {
+			t.Fatalf("agent got request %q, want GET %s", got, path)
+		}
+		a.data(connID, "HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\nok")
+	}
+
+	done := serve("/one")
+	dialReq := a.expectSent(client.PacketType_DIAL_REQ).GetDialRequest()
+	if dialReq.Address != "service.example:8080" {
+		t.Errorf("dialed %q, want %q", dialReq.Address, "service.example:8080")
+	}
+	a.dialResponse(dialReq.Random, connID, "")
+	respond("/one")
+	if rec := waitServed(done); rec.Code != http.StatusOK || rec.Body.String() != "ok" {
+		t.Fatalf("got %d %q, want 200 \"ok\"", rec.Code, rec.Body.String())
+	}
+	// The connection returns to the pool once the response body is read.
+	time.Sleep(100 * time.Millisecond)
+
+	// The pooled connection is reused.
+	done = serve("/two")
+	respond("/two")
+	if rec := waitServed(done); rec.Code != http.StatusOK {
+		t.Fatalf("got %d, want 200", rec.Code)
+	}
+	time.Sleep(100 * time.Millisecond)
+
+	b := newDialTestAgent(t, server, nil)
+	server.markBackendDraining(a.backend)
+	done = serve("/three")
+	dialReq = b.expectSent(client.PacketType_DIAL_REQ).GetDialRequest()
+	b.dialResponse(dialReq.Random, 0, "connection refused")
+	if rec := waitServed(done); rec.Code != http.StatusBadGateway {
+		t.Errorf("got %d, want %d", rec.Code, http.StatusBadGateway)
+	}
+	a.expectNothingSent(50 * time.Millisecond)
+
+	// The connection pool of an agent is discarded once it disconnects.
+	a.stop()
+	if err := wait.PollUntilContextTimeout(context.Background(), 10*time.Millisecond, dialTestTimeout, true, func(context.Context) (bool, error) {
+		tunnel.transportsMu.Lock()
+		defer tunnel.transportsMu.Unlock()
+		_, ok := tunnel.transports[a.backend]
+		return !ok, nil
+	}); err != nil {
+		t.Error("the connection pool of a disconnected agent was kept")
+	}
+}
+
+// Without a backend dial timeout, forward proxy dials are bounded anyway:
+// http.Transport does not cancel a dial when its request is cancelled.
+func TestTunnel_ForwardDialTimeout(t *testing.T) {
+	server := newDialTestServer()
+	tunnel := &Tunnel{Server: server}
+	hasDeadline := func() bool {
+		var ok bool
+		transport := tunnel.newTransport(func(ctx context.Context, _, _ string) (net.Conn, error) {
+			_, ok = ctx.Deadline()
+			return nil, errors.New("not dialed")
+		})
+		_, _ = transport.DialContext(context.Background(), "tcp", "service.example:80")
+		return ok
+	}
+	if !hasDeadline() {
+		t.Error("expected a dial deadline without a backend dial timeout")
+	}
+	// A backend dial timeout bounds the dial instead.
+	server.SetBackendDialTimeout(time.Second)
+	if hasDeadline() {
+		t.Error("expected no added dial deadline with a backend dial timeout")
+	}
+}
+
+func TestCanonicalHTTPAddr(t *testing.T) {
+	for raw, want := range map[string]string{
+		"http://example.com/x":      "example.com:80",
+		"http://example.com:8080/x": "example.com:8080",
+		"http://[::1]/x":            "[::1]:80",
+		"http://[::1]:81/x":         "[::1]:81",
+	} {
+		u, err := url.Parse(raw)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got := canonicalHTTPAddr(u); got != want {
+			t.Errorf("canonicalHTTPAddr(%q) = %q, want %q", raw, got, want)
 		}
 	}
 }
