@@ -81,6 +81,13 @@ type Backend struct {
 	// yet. Maintained by PendingDialManager.
 	dialsInFlight atomic.Int64
 
+	// queueMu guards queued and queueSending. queued holds the packets
+	// queueSend has accepted and sendQueued has not yet sent; queueSending is
+	// set while a sendQueued goroutine runs.
+	queueMu      sync.Mutex
+	queued       []*client.Packet
+	queueSending bool
+
 	dialLatencyMu sync.Mutex
 	// dialLatency is a moving average of the completed dials' latency as seen
 	// by the server; dialLatencyAt is when it was last updated.
@@ -196,6 +203,41 @@ func (b *Backend) SendContext(ctx context.Context, p *client.Packet) error {
 
 func (b *Backend) Send(p *client.Packet) error {
 	return b.SendContext(b.Context(), p)
+}
+
+// queueSend sends p to the agent without waiting for the send to complete.
+// Queued packets are sent in order by at most one goroutine per backend, so
+// while the agent stream is stalled they accumulate as packets rather than as
+// a blocked goroutine each. Once the agent connection ends, sending them fails
+// and they are discarded.
+func (b *Backend) queueSend(p *client.Packet) {
+	b.queueMu.Lock()
+	defer b.queueMu.Unlock()
+	b.queued = append(b.queued, p)
+	if !b.queueSending {
+		b.queueSending = true
+		go b.sendQueued()
+	}
+}
+
+func (b *Backend) sendQueued() {
+	for {
+		b.queueMu.Lock()
+		if len(b.queued) == 0 {
+			b.queued = nil
+			b.queueSending = false
+			b.queueMu.Unlock()
+			return
+		}
+		p := b.queued[0]
+		b.queued[0] = nil
+		b.queued = b.queued[1:]
+		b.queueMu.Unlock()
+
+		if err := b.Send(p); err != nil {
+			klog.V(5).ErrorS(err, "Failed to send queued packet to agent", "agentID", b.id, "type", p.Type)
+		}
+	}
 }
 
 func (b *Backend) Recv() (*client.Packet, error) {
