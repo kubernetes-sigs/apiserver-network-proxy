@@ -319,6 +319,14 @@ func (s *ProxyServer) DialContext(ctx context.Context, network, address string) 
 		metrics.Metrics.ObserveDialFailure(metrics.DialFailureNoAgent)
 		return nil, err
 	}
+	return s.dialBackend(ctx, backend, network, address)
+}
+
+// dialBackend connects to the address on the named network via backend.
+func (s *ProxyServer) dialBackend(ctx context.Context, backend *Backend, network, address string) (net.Conn, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	agentID := backend.GetAgentID()
 
 	random := rand.Int63() /* #nosec G404 */
@@ -349,15 +357,16 @@ func (s *ProxyServer) DialContext(ctx context.Context, network, address string) 
 
 	// failDial observes a dial failure detected here, unless the dial was
 	// already claimed by the agent's response, which observes its own
-	// outcome. If the agent may still be dialing, it is told to stop. That is
-	// sent asynchronously, so that a blocked backend does not delay the caller.
+	// outcome. If the agent received the DIAL_REQ, it is told to stop
+	// dialing. That is queued, so that a stalled backend does not delay the
+	// caller or hold a goroutine per abandoned dial.
 	failDial := func(reason metrics.DialFailureReason, tellAgent bool) {
 		if s.PendingDial.Remove(random) == nil {
 			return
 		}
 		metrics.Metrics.ObserveDialFailure(reason)
 		if tellAgent {
-			go s.sendBackendDialClose(backend, random, string(reason))
+			backend.queueSend(newDialClosePacket(random))
 		}
 	}
 
@@ -379,11 +388,14 @@ func (s *ProxyServer) DialContext(ctx context.Context, network, address string) 
 
 	if err := s.sendDialRequestToBackend(ctx, backend, dialRequest); err != nil {
 		klog.ErrorS(err, "DIAL_REQ to Backend failed", "dialAddress", address, "dialID", random, "agentID", agentID)
+		// The agent has not received the DIAL_REQ, so it is not told to stop
+		// dialing. If an abandoned send still delivers it, the agent's
+		// DIAL_RSP is unrecognized, and the connection it reports is closed.
 		switch {
 		case ctx.Err() != nil:
-			failDial(metrics.DialFailureFrontendClose, true)
+			failDial(metrics.DialFailureFrontendClose, false)
 		case errors.Is(err, errBackendDialTimeout):
-			failDial(metrics.DialFailureBackendDialTimeout, true)
+			failDial(metrics.DialFailureBackendDialTimeout, false)
 		default:
 			failDial(metrics.DialFailureBackendClose, false)
 		}
@@ -1324,9 +1336,8 @@ func (s *ProxyServer) serveRecvBackend(backend *Backend, agentID string, recvCh 
 	klog.V(3).InfoS("Close backend of agent", "agentID", agentID)
 }
 
-func (s *ProxyServer) sendBackendClose(backend *Backend, connectID int64, random int64, reason string) {
-	agentID := backend.GetAgentID()
-	pkt := &client.Packet{
+func newCloseRequestPacket(connectID int64) *client.Packet {
+	return &client.Packet{
 		Type: client.PacketType_CLOSE_REQ,
 		Payload: &client.Packet_CloseRequest{
 			CloseRequest: &client.CloseRequest{
@@ -1334,14 +1345,10 @@ func (s *ProxyServer) sendBackendClose(backend *Backend, connectID int64, random
 			},
 		},
 	}
-	if err := backend.Send(pkt); err != nil {
-		klog.V(5).ErrorS(err, "Failed to send close to agent", "closeReason", reason, "dialID", random, "agentID", agentID, "connectionID", connectID)
-	}
 }
 
-func (s *ProxyServer) sendBackendDialClose(backend *Backend, random int64, reason string) {
-	agentID := backend.GetAgentID()
-	pkt := &client.Packet{
+func newDialClosePacket(random int64) *client.Packet {
+	return &client.Packet{
 		Type: client.PacketType_DIAL_CLS,
 		Payload: &client.Packet_CloseDial{
 			CloseDial: &client.CloseDial{
@@ -1349,6 +1356,19 @@ func (s *ProxyServer) sendBackendDialClose(backend *Backend, random int64, reaso
 			},
 		},
 	}
+}
+
+func (s *ProxyServer) sendBackendClose(backend *Backend, connectID int64, random int64, reason string) {
+	agentID := backend.GetAgentID()
+	pkt := newCloseRequestPacket(connectID)
+	if err := backend.Send(pkt); err != nil {
+		klog.V(5).ErrorS(err, "Failed to send close to agent", "closeReason", reason, "dialID", random, "agentID", agentID, "connectionID", connectID)
+	}
+}
+
+func (s *ProxyServer) sendBackendDialClose(backend *Backend, random int64, reason string) {
+	agentID := backend.GetAgentID()
+	pkt := newDialClosePacket(random)
 	if err := backend.Send(pkt); err != nil {
 		klog.V(5).ErrorS(err, "Failed to send dial close to agent", "closeReason", reason, "dialID", random, "agentID", agentID)
 	}

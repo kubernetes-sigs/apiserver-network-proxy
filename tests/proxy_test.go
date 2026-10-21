@@ -737,23 +737,31 @@ func TestProxy_HTTPForwardProxy(t *testing.T) {
 	defer transport.CloseIdleConnections()
 	client := &http.Client{Transport: transport, Timeout: wait.ForeverTestTimeout}
 
-	doRequest := func(t *testing.T, method, path string, body []byte) []byte {
-		t.Helper()
+	// tryRequest may be called from any goroutine.
+	tryRequest := func(method, path string, body []byte) ([]byte, error) {
 		req, err := http.NewRequest(method, server.URL+path, bytes.NewReader(body))
 		if err != nil {
-			t.Fatal(err)
+			return nil, err
 		}
 		resp, err := client.Do(req)
 		if err != nil {
-			t.Fatalf("%s request failed: %v", method, err)
+			return nil, fmt.Errorf("%s request failed: %w", method, err)
 		}
 		defer resp.Body.Close()
 		got, err := io.ReadAll(resp.Body)
 		if err != nil {
-			t.Fatalf("reading %s body failed: %v", method, err)
+			return nil, fmt.Errorf("reading %s body failed: %w", method, err)
 		}
 		if resp.StatusCode != http.StatusOK {
-			t.Fatalf("expected status 200, got %d: %s", resp.StatusCode, got)
+			return nil, fmt.Errorf("expected status 200, got %d: %s", resp.StatusCode, got)
+		}
+		return got, nil
+	}
+	doRequest := func(t *testing.T, method, path string, body []byte) []byte {
+		t.Helper()
+		got, err := tryRequest(method, path, body)
+		if err != nil {
+			t.Fatal(err)
 		}
 		return got
 	}
@@ -797,7 +805,10 @@ func TestProxy_HTTPForwardProxy(t *testing.T) {
 			go func(i int) {
 				defer wg.Done()
 				want := fmt.Sprintf("echo: request %d", i)
-				if got := doRequest(t, http.MethodPost, "/concurrent", []byte(fmt.Sprintf("request %d", i))); string(got) != want {
+				got, err := tryRequest(http.MethodPost, "/concurrent", []byte(fmt.Sprintf("request %d", i)))
+				if err != nil {
+					t.Errorf("request %d: %v", i, err)
+				} else if string(got) != want {
 					t.Errorf("expected %q, got %q", want, got)
 				}
 			}(i)

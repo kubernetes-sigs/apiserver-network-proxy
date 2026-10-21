@@ -23,7 +23,9 @@ import (
 	"io"
 	"net"
 	"os"
+	"runtime"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -507,7 +509,8 @@ func TestDialResponseAfterDialerGaveUp(t *testing.T) {
 	assertServerDialFailure(t, metrics.DialFailureSendResponse, 1)
 }
 
-// Close must return promptly while a Write is blocked sending to the agent.
+// Close must return promptly while a Write is blocked sending to the agent,
+// and must end that Write as well as one waiting to send.
 func TestServerConnCloseDoesNotWaitForBlockedWrite(t *testing.T) {
 	server := newDialTestServer()
 	writeBlocked := make(chan struct{})
@@ -521,9 +524,10 @@ func TestServerConnCloseDoesNotWaitForBlockedWrite(t *testing.T) {
 	const connID int64 = 5
 	conn := dialEstablished(t, a, connID)
 
+	stuck := []byte("stuck")
 	firstWrite := make(chan error, 1)
 	go func() {
-		_, err := conn.Write([]byte("stuck"))
+		_, err := conn.Write(stuck)
 		firstWrite <- err
 	}()
 	select {
@@ -548,24 +552,158 @@ func TestServerConnCloseDoesNotWaitForBlockedWrite(t *testing.T) {
 	case <-time.After(dialTestTimeout):
 		t.Fatal("Close blocked behind a blocked Write")
 	}
-	select {
-	case err := <-secondWrite:
-		if !errors.Is(err, net.ErrClosed) {
-			t.Errorf("expected net.ErrClosed for a write waiting to send, got %v", err)
+	for name, writeCh := range map[string]chan error{"blocked": firstWrite, "waiting": secondWrite} {
+		select {
+		case err := <-writeCh:
+			if !errors.Is(err, net.ErrClosed) {
+				t.Errorf("expected net.ErrClosed for the %s write, got %v", name, err)
+			}
+		case <-time.After(dialTestTimeout):
+			t.Fatalf("the %s write was not ended by Close", name)
 		}
-	case <-time.After(dialTestTimeout):
-		t.Fatal("write waiting to send was not aborted by Close")
 	}
+	// The abandoned send must not see the caller reuse its buffer.
+	copy(stuck, "xxxxx")
 
 	close(release)
-	if err := <-firstWrite; err != nil {
-		t.Errorf("blocked write: %v", err)
+	if got := string(a.expectSent(client.PacketType_DATA).GetData().Data); got != "stuck" {
+		t.Errorf("expected the abandoned DATA %q, got %q", "stuck", got)
 	}
-	a.expectSent(client.PacketType_DATA)
 	if got := a.expectSent(client.PacketType_CLOSE_REQ).GetCloseRequest().ConnectID; got != connID {
 		t.Errorf("expected CLOSE_REQ for %d, got %d", connID, got)
 	}
 	assertNoPendingOrEstablished(t, server)
+}
+
+// A write deadline set while a Write is blocked ends that Write. Since the
+// abandoned DATA may still reach the agent, later Writes fail too.
+func TestServerConnWriteDeadlineEndsBlockedWrite(t *testing.T) {
+	server := newDialTestServer()
+	writeBlocked := make(chan struct{})
+	release := make(chan struct{})
+	a := newDialTestAgent(t, server, func(pkt *client.Packet) {
+		if pkt.Type == client.PacketType_DATA && string(pkt.GetData().Data) == "stuck" {
+			close(writeBlocked)
+			<-release
+		}
+	})
+	conn := dialEstablished(t, a, 5)
+	defer conn.Close()
+
+	writeDone := make(chan error, 1)
+	go func() {
+		_, err := conn.Write([]byte("stuck"))
+		writeDone <- err
+	}()
+	select {
+	case <-writeBlocked:
+	case <-time.After(dialTestTimeout):
+		t.Fatal("timed out waiting for the blocked write")
+	}
+	if err := conn.SetWriteDeadline(time.Now().Add(50 * time.Millisecond)); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case err := <-writeDone:
+		if !errors.Is(err, os.ErrDeadlineExceeded) {
+			t.Errorf("expected os.ErrDeadlineExceeded, got %v", err)
+		}
+	case <-time.After(dialTestTimeout):
+		t.Fatal("the write deadline did not end the blocked write")
+	}
+
+	close(release)
+	a.expectSent(client.PacketType_DATA)
+	if err := conn.SetWriteDeadline(time.Time{}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := conn.Write([]byte("after timeout")); !errors.Is(err, os.ErrDeadlineExceeded) {
+		t.Errorf("expected os.ErrDeadlineExceeded after a timed out write, got %v", err)
+	}
+	a.expectNothingSent(50 * time.Millisecond)
+}
+
+// Dials abandoned while the agent stream is stalled must not each leave a
+// goroutine blocked on the backend, and the agent is not told to stop dials
+// it never received.
+func TestDialContextTimeoutsOnStalledBackendDoNotAccumulateGoroutines(t *testing.T) {
+	server := newDialTestServer()
+	server.SetBackendDialTimeout(20 * time.Millisecond)
+	stalled := make(chan struct{})
+	release := make(chan struct{})
+	var stallOnce sync.Once
+	a := newDialTestAgent(t, server, func(*client.Packet) {
+		stallOnce.Do(func() {
+			close(stalled)
+			<-release
+		})
+	})
+
+	// The first DIAL_REQ stalls the agent stream.
+	first := startDial(context.Background(), server, "127.0.0.1:8080")
+	select {
+	case <-stalled:
+	case <-time.After(dialTestTimeout):
+		t.Fatal("timed out waiting for the agent stream to stall")
+	}
+	if r := waitDial(t, first); !errors.Is(r.err, errBackendDialTimeout) {
+		t.Fatalf("expected errBackendDialTimeout, got conn=%v err=%v", r.conn, r.err)
+	}
+
+	before := runtime.NumGoroutine()
+	const dials = 50
+	for i := 0; i < dials; i++ {
+		if r := waitDial(t, startDial(context.Background(), server, "127.0.0.1:8080")); !errors.Is(r.err, errBackendDialTimeout) {
+			t.Fatalf("dial %d: expected errBackendDialTimeout, got conn=%v err=%v", i, r.conn, r.err)
+		}
+	}
+	if err := wait.PollUntilContextTimeout(context.Background(), 10*time.Millisecond, dialTestTimeout, true, func(context.Context) (bool, error) {
+		return runtime.NumGoroutine()-before < dials/2, nil
+	}); err != nil {
+		t.Errorf("goroutines grew from %d to %d over %d abandoned dials", before, runtime.NumGoroutine(), dials)
+	}
+
+	close(release)
+	a.expectSent(client.PacketType_DIAL_REQ)
+	a.expectNothingSent(100 * time.Millisecond)
+	assertNoPendingOrEstablished(t, server)
+	assertServerDialFailure(t, metrics.DialFailureBackendDialTimeout, dials+1)
+}
+
+// queueSend sends packets in order from a single goroutine, however many are
+// queued while the agent stream is stalled.
+func TestBackendQueueSend(t *testing.T) {
+	server := newDialTestServer()
+	stalled := make(chan struct{})
+	release := make(chan struct{})
+	var stallOnce sync.Once
+	a := newDialTestAgent(t, server, func(*client.Packet) {
+		stallOnce.Do(func() {
+			close(stalled)
+			<-release
+		})
+	})
+
+	before := runtime.NumGoroutine()
+	const packets = 50
+	for i := int64(1); i <= packets; i++ {
+		a.backend.queueSend(newCloseRequestPacket(i))
+	}
+	select {
+	case <-stalled:
+	case <-time.After(dialTestTimeout):
+		t.Fatal("timed out waiting for the queued send")
+	}
+	if grown := runtime.NumGoroutine() - before; grown > 2 {
+		t.Errorf("queueing %d packets started %d goroutines", packets, grown)
+	}
+
+	close(release)
+	for i := int64(1); i <= packets; i++ {
+		if got := a.expectSent(client.PacketType_CLOSE_REQ).GetCloseRequest().ConnectID; got != i {
+			t.Fatalf("expected CLOSE_REQ for %d, got %d", i, got)
+		}
+	}
 }
 
 // Data from the agent is buffered up to a bound; beyond it, delivery waits
@@ -727,4 +865,33 @@ func TestServerConnDeadlines(t *testing.T) {
 		t.Errorf("Write: %v", err)
 	}
 	a.expectSent(client.PacketType_DATA)
+}
+
+// Dial failures the server reports itself keep their identity.
+func TestDialResponseError(t *testing.T) {
+	for _, want := range []error{errBackendClosedWhileDialing, errBackendDialTimeout} {
+		if got := dialResponseError(want.Error()); !errors.Is(got, want) {
+			t.Errorf("dialResponseError(%q) = %v, want %v", want.Error(), got, want)
+		}
+	}
+	if got := dialResponseError("connection refused"); got.Error() != "connection refused" {
+		t.Errorf("got %v, want connection refused", got)
+	}
+}
+
+// A locally closed connection discards unread data.
+func TestServerConnReadAfterClose(t *testing.T) {
+	server := newDialTestServer()
+	a := newDialTestAgent(t, server, nil)
+	conn := dialEstablished(t, a, 5)
+	if err := conn.Send(&client.Packet{
+		Type:    client.PacketType_DATA,
+		Payload: &client.Packet_Data{Data: &client.Data{ConnectID: 5, Data: []byte("unread")}},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	_ = conn.Close()
+	if _, err := conn.Read(make([]byte, 10)); !errors.Is(err, net.ErrClosed) {
+		t.Errorf("expected net.ErrClosed, got %v", err)
+	}
 }

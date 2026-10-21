@@ -27,6 +27,7 @@ import (
 	"net"
 	"net/http"
 	"net/http/httputil"
+	"net/url"
 	"strings"
 	"sync"
 	"time"
@@ -57,17 +58,36 @@ var bufferPool = sync.Pool{
 	},
 }
 
+// defaultForwardDialTimeout bounds a forward proxy dial when no backend dial
+// timeout is configured. http.Transport does not cancel a dial when the
+// request that started it is cancelled, so without a bound a dial the agent
+// never answers would hold its goroutines until the agent disconnects.
+const defaultForwardDialTimeout = 30 * time.Second
+
 // Tunnel implements Proxy based on HTTP Connect, which tunnels the traffic to
 // the agent registered in ProxyServer.
 type Tunnel struct {
 	Server *ProxyServer
 
-	// dialContext overrides Server.DialContext for forward proxied requests.
+	// dialContext, when set, replaces agent selection and dialing for
+	// forward proxied requests, which then share a single connection pool.
 	// It is only set by tests.
 	dialContext func(ctx context.Context, network, address string) (net.Conn, error)
 
 	proxy    *httputil.ReverseProxy
 	initOnce sync.Once
+
+	// transports holds the connection pool of each agent that forward
+	// proxied requests have been sent through.
+	transportsMu sync.Mutex
+	transports   map[*Backend]*http.Transport
+}
+
+// roundTripperFunc adapts a function to http.RoundTripper.
+type roundTripperFunc func(*http.Request) (*http.Response, error)
+
+func (f roundTripperFunc) RoundTrip(req *http.Request) (*http.Response, error) {
+	return f(req)
 }
 
 // getReverseProxy returns the forward proxy used for requests other than
@@ -75,19 +95,16 @@ type Tunnel struct {
 // sent to the target over a connection dialed through an agent.
 func (t *Tunnel) getReverseProxy() *httputil.ReverseProxy {
 	t.initOnce.Do(func() {
-		dialContext := t.dialContext
-		if dialContext == nil {
-			dialContext = t.Server.DialContext
-		}
-		transport := &http.Transport{
-			// Never chain to a proxy from the environment.
-			Proxy:           nil,
-			DialContext:     dialContext,
-			MaxIdleConns:    100,
-			IdleConnTimeout: 90 * time.Second,
+		var transport http.RoundTripper = roundTripperFunc(t.roundTrip)
+		if t.dialContext != nil {
+			transport = t.newTransport(t.dialContext)
 		}
 		errorHandler := func(rw http.ResponseWriter, req *http.Request, err error) {
-			klog.ErrorS(err, "Forward proxy request failed", "url", req.URL, "host", req.Host)
+			if errors.Is(err, context.Canceled) {
+				klog.V(2).InfoS("Forward proxy request cancelled", "url", req.URL, "host", req.Host, "error", err)
+			} else {
+				klog.ErrorS(err, "Forward proxy request failed", "url", req.URL, "host", req.Host)
+			}
 			statusCode := mapDialErrorToHTTPStatus(err.Error())
 			if errors.Is(err, context.DeadlineExceeded) || errors.Is(err, errBackendDialTimeout) {
 				statusCode = http.StatusGatewayTimeout
@@ -95,13 +112,89 @@ func (t *Tunnel) getReverseProxy() *httputil.ReverseProxy {
 			http.Error(rw, fmt.Sprintf("Proxy error: %v", err), statusCode)
 		}
 		t.proxy = &httputil.ReverseProxy{
-			// The request already carries the absolute target URL.
-			Rewrite:      func(*httputil.ProxyRequest) {},
+			// The request already carries the absolute target URL. Client
+			// supplied Forwarded and X-Forwarded-* headers are not passed
+			// on, since this proxy cannot vouch for them.
+			Rewrite: func(pr *httputil.ProxyRequest) {
+				// ReverseProxy drops query parameters it cannot parse, such
+				// as ones containing a semicolon, before calling Rewrite.
+				// Forward the query exactly as the client sent it.
+				pr.Out.URL.RawQuery = pr.In.URL.RawQuery
+			},
 			Transport:    transport,
 			ErrorHandler: errorHandler,
 		}
 	})
 	return t.proxy
+}
+
+// roundTrip sends a forward proxied request through an agent chosen for it,
+// the way each CONNECT tunnel is. Connections are pooled per agent, so that a
+// request never reuses a connection through an agent that is draining or no
+// longer selected for the target.
+func (t *Tunnel) roundTrip(req *http.Request) (*http.Response, error) {
+	address := canonicalHTTPAddr(req.URL)
+	backend, err := t.Server.getBackend(address)
+	if err != nil {
+		klog.ErrorS(err, "Failed to get a backend", "dialAddress", address)
+		metrics.Metrics.ObserveDialFailure(metrics.DialFailureNoAgent)
+		return nil, err
+	}
+	return t.transportFor(backend).RoundTrip(req)
+}
+
+// transportFor returns the connection pool for backend. It is discarded, and
+// its idle connections closed, once the agent connection ends.
+func (t *Tunnel) transportFor(backend *Backend) *http.Transport {
+	t.transportsMu.Lock()
+	defer t.transportsMu.Unlock()
+	if transport, ok := t.transports[backend]; ok {
+		return transport
+	}
+	transport := t.newTransport(func(ctx context.Context, network, address string) (net.Conn, error) {
+		return t.Server.dialBackend(ctx, backend, network, address)
+	})
+	if t.transports == nil {
+		t.transports = make(map[*Backend]*http.Transport)
+	}
+	t.transports[backend] = transport
+	context.AfterFunc(backend.Context(), func() {
+		t.transportsMu.Lock()
+		delete(t.transports, backend)
+		t.transportsMu.Unlock()
+		transport.CloseIdleConnections()
+	})
+	return transport
+}
+
+func (t *Tunnel) newTransport(dial func(ctx context.Context, network, address string) (net.Conn, error)) *http.Transport {
+	dialTimeout := defaultForwardDialTimeout
+	if t.Server != nil && t.Server.backendDialTimeout > 0 {
+		dialTimeout = 0
+	}
+	return &http.Transport{
+		// Never chain to a proxy from the environment.
+		Proxy: nil,
+		DialContext: func(ctx context.Context, network, address string) (net.Conn, error) {
+			if dialTimeout > 0 {
+				var cancel context.CancelFunc
+				ctx, cancel = context.WithTimeout(ctx, dialTimeout)
+				defer cancel()
+			}
+			return dial(ctx, network, address)
+		},
+		MaxIdleConns:    100,
+		IdleConnTimeout: 90 * time.Second,
+	}
+}
+
+// canonicalHTTPAddr returns the host:port an http:// URL addresses.
+func canonicalHTTPAddr(u *url.URL) string {
+	port := u.Port()
+	if port == "" {
+		port = "80"
+	}
+	return net.JoinHostPort(u.Hostname(), port)
 }
 
 // serveForwardProxy serves a request other than CONNECT.

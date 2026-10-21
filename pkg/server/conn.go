@@ -17,6 +17,7 @@ limitations under the License.
 package server
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -25,8 +26,6 @@ import (
 	"os"
 	"sync"
 	"time"
-
-	"k8s.io/klog/v2"
 
 	"sigs.k8s.io/apiserver-network-proxy/konnectivity-client/proto/client"
 	"sigs.k8s.io/apiserver-network-proxy/pkg/server/metrics"
@@ -57,8 +56,9 @@ type serverConn struct {
 	agentID     string
 	dialAddress string
 
-	// ctx is cancelled by Close. It aborts writes that are waiting for the
-	// backend send lock and stops the closeWithBackend watcher.
+	// ctx is cancelled by Close. It ends writes in progress, aborts their
+	// sends if they have not reached the agent stream yet, and stops the
+	// closeWithBackend watcher.
 	ctx    context.Context
 	cancel context.CancelFunc
 
@@ -68,15 +68,26 @@ type serverConn struct {
 	connID int64
 	// buffer holds DATA payloads received from the agent and not yet read.
 	// It holds at most maxBuffered payloads; once full, Send blocks until
-	// Read drains it or the connection is closed.
-	buffer        [][]byte
-	maxBuffered   int
-	rdata         []byte
-	closed        bool
+	// Read drains it or the connection is closed. Send runs on the agent's
+	// receive loop, so as with a full HTTP-CONNECT write queue, a reader that
+	// stops reading stalls every connection on that agent.
+	buffer      [][]byte
+	maxBuffered int
+	rdata       []byte
+	closed      bool
+	// localClosed is set by Close. Unlike a close by the agent, it discards
+	// data that has not been read.
+	localClosed   bool
 	closeErr      error
 	readDeadline  time.Time
 	writeDeadline time.Time
-	readTimer     *time.Timer
+	// writeDeadlineChanged is closed and replaced when the write deadline
+	// changes, so that a Write in progress applies the new deadline.
+	writeDeadlineChanged chan struct{}
+	// writeErr is set once a Write has timed out. Every later Write fails
+	// with it, because the abandoned DATA packet may still reach the agent.
+	writeErr  error
+	readTimer *time.Timer
 
 	// connected is closed once a successful DIAL_RSP has been accepted.
 	connected chan struct{}
@@ -102,6 +113,8 @@ func newServerConn(server *ProxyServer, backend *Backend, dialID int64, dialAddr
 		maxBuffered: max(server.frontendWriteChannelSize, 1),
 		connected:   make(chan struct{}),
 		dialErrCh:   make(chan error, 1),
+
+		writeDeadlineChanged: make(chan struct{}),
 	}
 	sc.cond = sync.NewCond(&sc.mu)
 	return sc
@@ -121,12 +134,24 @@ func (sc *serverConn) Send(pkt *client.Packet) error {
 	case client.PacketType_DIAL_RSP:
 		resp := pkt.GetDialResponse()
 		if resp.Error != "" {
-			sc.handleDialError(errors.New(resp.Error))
+			sc.handleDialError(dialResponseError(resp.Error))
 			return nil
 		}
 		return sc.handleDialSuccess(resp.ConnectID)
 	}
 	return fmt.Errorf("attempt to send via unrecognized packet type %v", pkt.Type)
+}
+
+// dialResponseError returns the error a failed DIAL_RSP reports. The server
+// itself fails pending dials with DIAL_RSPs carrying these errors, which are
+// returned as themselves so that callers can match them with errors.Is.
+func dialResponseError(msg string) error {
+	for _, err := range []error{errBackendClosedWhileDialing, errBackendDialTimeout} {
+		if msg == err.Error() {
+			return err
+		}
+	}
+	return errors.New(msg)
 }
 
 func (sc *serverConn) Recv() (*client.Packet, error) {
@@ -199,6 +224,13 @@ func (sc *serverConn) Read(b []byte) (n int, err error) {
 	defer sc.mu.Unlock()
 
 	for {
+		if sc.localClosed {
+			return 0, net.ErrClosed
+		}
+		if !sc.readDeadline.IsZero() && !time.Now().Before(sc.readDeadline) {
+			return 0, os.ErrDeadlineExceeded
+		}
+
 		if len(sc.rdata) > 0 {
 			n = copy(b, sc.rdata)
 			sc.rdata = sc.rdata[n:]
@@ -224,57 +256,109 @@ func (sc *serverConn) Read(b []byte) (n int, err error) {
 			return 0, io.EOF
 		}
 
-		if !sc.readDeadline.IsZero() && !time.Now().Before(sc.readDeadline) {
-			return 0, os.ErrDeadlineExceeded
-		}
-
 		sc.cond.Wait()
 	}
 }
 
+// Write sends b to the agent in DATA packets of at most
+// maxConnDataPacketSize bytes.
 func (sc *serverConn) Write(b []byte) (n int, err error) {
-	sc.mu.Lock()
-	if sc.closed {
-		sc.mu.Unlock()
-		return 0, net.ErrClosed
-	}
-	connID := sc.connID
-	deadline := sc.writeDeadline
-	sc.mu.Unlock()
-
-	ctx := sc.ctx
-	if !deadline.IsZero() {
-		if !time.Now().Before(deadline) {
-			return 0, os.ErrDeadlineExceeded
-		}
-		var cancel context.CancelFunc
-		ctx, cancel = context.WithDeadline(ctx, deadline)
-		defer cancel()
-	}
-
 	for n < len(b) {
 		chunk := b[n:min(len(b), n+maxConnDataPacketSize)]
-		packet := &client.Packet{
-			Type: client.PacketType_DATA,
-			Payload: &client.Packet_Data{
-				Data: &client.Data{
-					ConnectID: connID,
-					Data:      chunk,
-				},
-			},
-		}
-		if err := sc.backend.SendContext(ctx, packet); err != nil {
-			switch {
-			case sc.ctx.Err() != nil:
-				err = net.ErrClosed
-			case errors.Is(err, context.DeadlineExceeded):
-				err = os.ErrDeadlineExceeded
-			}
+		if err := sc.writePacket(chunk); err != nil {
 			return n, err
 		}
 		n += len(chunk)
 	}
 	return n, nil
+}
+
+// writePacket sends data to the agent in one DATA packet. It returns once the
+// packet is sent, the connection is closed, or the write deadline passes.
+//
+// Once a gRPC Send has started it cannot be interrupted short of ending the
+// agent stream, which would break every connection on the agent. The send
+// therefore runs in its own goroutine, which is left to finish when
+// writePacket gives up. If it had not reached the agent stream yet, the
+// cancelled context aborts it; otherwise it is the single send holding the
+// backend send lock, and ends with the stream if it does not complete.
+func (sc *serverConn) writePacket(data []byte) error {
+	sc.mu.Lock()
+	if sc.closed {
+		sc.mu.Unlock()
+		return net.ErrClosed
+	}
+	if sc.writeErr != nil {
+		err := sc.writeErr
+		sc.mu.Unlock()
+		return err
+	}
+	if !sc.writeDeadline.IsZero() && !time.Now().Before(sc.writeDeadline) {
+		// Nothing has been sent, so unlike a timeout of a send in progress,
+		// this does not fail later Writes.
+		sc.mu.Unlock()
+		return os.ErrDeadlineExceeded
+	}
+	connID := sc.connID
+	sc.mu.Unlock()
+
+	// An abandoned send outlives this call, so it must not reference the
+	// caller's buffer.
+	packet := &client.Packet{
+		Type: client.PacketType_DATA,
+		Payload: &client.Packet_Data{
+			Data: &client.Data{
+				ConnectID: connID,
+				Data:      bytes.Clone(data),
+			},
+		},
+	}
+	ctx, cancel := context.WithCancel(sc.ctx)
+	defer cancel()
+	errCh := make(chan error, 1)
+	go func() {
+		errCh <- sc.backend.SendContext(ctx, packet)
+	}()
+
+	for {
+		sc.mu.Lock()
+		deadline := sc.writeDeadline
+		deadlineChanged := sc.writeDeadlineChanged
+		sc.mu.Unlock()
+
+		var timer *time.Timer
+		var expired <-chan time.Time
+		if !deadline.IsZero() {
+			timer = time.NewTimer(time.Until(deadline))
+			expired = timer.C
+		}
+		select {
+		case err := <-errCh:
+			if timer != nil {
+				timer.Stop()
+			}
+			if err != nil && sc.ctx.Err() != nil {
+				return net.ErrClosed
+			}
+			return err
+		case <-sc.ctx.Done():
+			if timer != nil {
+				timer.Stop()
+			}
+			return net.ErrClosed
+		case <-expired:
+			sc.mu.Lock()
+			if sc.writeErr == nil {
+				sc.writeErr = os.ErrDeadlineExceeded
+			}
+			sc.mu.Unlock()
+			return os.ErrDeadlineExceeded
+		case <-deadlineChanged:
+			if timer != nil {
+				timer.Stop()
+			}
+		}
+	}
 }
 
 // Close closes the connection locally and tells the agent to close it. It
@@ -284,6 +368,7 @@ func (sc *serverConn) Close() error {
 	sc.closeOnce.Do(func() {
 		sc.mu.Lock()
 		sc.closed = true
+		sc.localClosed = true
 		if sc.closeErr == nil {
 			sc.closeErr = net.ErrClosed
 		}
@@ -309,20 +394,7 @@ func (sc *serverConn) Close() error {
 			return
 		}
 		metrics.Metrics.ObserveEstablishedConnectionsClosed(metrics.ConnectionClosedFrontendClose, 1)
-		packet := &client.Packet{
-			Type: client.PacketType_CLOSE_REQ,
-			Payload: &client.Packet_CloseRequest{
-				CloseRequest: &client.CloseRequest{
-					ConnectID: connID,
-				},
-			},
-		}
-		go func() {
-			if err := sc.backend.Send(packet); err != nil {
-				klog.V(5).ErrorS(err, "Failed to send close to agent",
-					"dialID", sc.dialID, "agentID", sc.agentID, "connectionID", connID)
-			}
-		}()
+		sc.backend.queueSend(newCloseRequestPacket(connID))
 	})
 	return nil
 }
@@ -363,11 +435,15 @@ func (sc *serverConn) SetReadDeadline(t time.Time) error {
 	return nil
 }
 
-// SetWriteDeadline sets the deadline for future Write calls. A Write that is
-// already in progress keeps the deadline it started with.
+// SetWriteDeadline sets the deadline for Write calls, including one that is
+// already in progress. After a Write has timed out, the stream of DATA sent
+// to the agent may be incomplete, so all later Writes fail; as with tls.Conn,
+// a new deadline does not make the connection writable again.
 func (sc *serverConn) SetWriteDeadline(t time.Time) error {
 	sc.mu.Lock()
 	defer sc.mu.Unlock()
 	sc.writeDeadline = t
+	close(sc.writeDeadlineChanged)
+	sc.writeDeadlineChanged = make(chan struct{})
 	return nil
 }
