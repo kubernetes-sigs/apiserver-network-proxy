@@ -33,20 +33,32 @@ import (
 	client "sigs.k8s.io/apiserver-network-proxy/konnectivity-client/proto/client"
 	"sigs.k8s.io/apiserver-network-proxy/pkg/server/metrics"
 	"sigs.k8s.io/apiserver-network-proxy/pkg/server/proxystrategies"
-	"sigs.k8s.io/apiserver-network-proxy/proto/agent"
 	"sigs.k8s.io/apiserver-network-proxy/proto/header"
 )
 
+// AgentStream is the backend half of a proxy session: the bidirectional packet
+// stream between the proxy server and a connected Konnectivity agent.
+//
+// The generated gRPC agent.AgentService_ConnectServer satisfies it directly.
+// Keeping Backend on this interface rather than on the generated type lets
+// alternative agent transports be adapted the same way HTTP-CONNECT frontends
+// are adapted to ProxyStream.
+type AgentStream interface {
+	Send(*client.Packet) error
+	Recv() (*client.Packet, error)
+	Context() context.Context
+	SendHeader(metadata.MD) error
+}
+
 // Backend abstracts a connected Konnectivity agent.
 //
-// In the only currently supported case (gRPC), it wraps an
-// agent.AgentService_ConnectServer, provides synchronization and
-// emits common stream metrics.
+// It wraps an AgentStream, provides synchronization and emits common stream
+// metrics.
 type Backend struct {
-	sendLock   sync.Mutex
+	sendLock   chan struct{}
 	recvLock   sync.Mutex
 	retireOnce sync.Once
-	conn       agent.AgentService_ConnectServer
+	conn       AgentStream
 
 	// cached from conn.Context()
 	id     string
@@ -60,6 +72,57 @@ type Backend struct {
 	// recvCh is assigned before the backend is published and is immutable
 	// afterward. It is observed only to measure receive-path pressure.
 	recvCh <-chan *client.Packet
+
+	// receivedEOF is set before a clean receive-loop exit ends the gRPC
+	// handler. Its context cancellation must not abort buffered responses.
+	receivedEOF atomic.Bool
+
+	// dialsInFlight counts DIAL_REQs sent over this backend without a DIAL_RSP
+	// yet. Maintained by PendingDialManager.
+	dialsInFlight atomic.Int64
+
+	dialLatencyMu sync.Mutex
+	// dialLatency is a moving average of the completed dials' latency as seen
+	// by the server; dialLatencyAt is when it was last updated.
+	dialLatency   time.Duration
+	dialLatencyAt time.Time
+}
+
+const (
+	// dialLatencyWindow is how long a dial latency sample influences backend
+	// selection. A slow agent is tried again after it.
+	dialLatencyWindow = 30 * time.Second
+	// dialLatencyFloor is the latency below which agents are equally fast.
+	dialLatencyFloor = 5 * time.Millisecond
+)
+
+// observeDial records the latency of a dial completed over this backend.
+func (b *Backend) observeDial(d time.Duration, now time.Time) {
+	b.dialLatencyMu.Lock()
+	defer b.dialLatencyMu.Unlock()
+	if b.dialLatencyAt.IsZero() || now.Sub(b.dialLatencyAt) > dialLatencyWindow {
+		b.dialLatency = d
+	} else {
+		b.dialLatency = (b.dialLatency + d) / 2
+	}
+	b.dialLatencyAt = now
+}
+
+// dialCost estimates how long a new dial over this backend takes: the recent
+// dial latency, scaled by the dials already waiting on the agent. With no
+// sample in the last dialLatencyWindow the agent is assumed fast.
+func (b *Backend) dialCost(now time.Time) time.Duration {
+	latency := dialLatencyFloor
+	b.dialLatencyMu.Lock()
+	if !b.dialLatencyAt.IsZero() && now.Sub(b.dialLatencyAt) <= dialLatencyWindow && b.dialLatency > latency {
+		latency = b.dialLatency
+	}
+	b.dialLatencyMu.Unlock()
+	inFlight := b.dialsInFlight.Load()
+	if inFlight < 0 {
+		inFlight = 0
+	}
+	return latency * time.Duration(inFlight+1)
 }
 
 // IsDraining returns true if the backend is draining
@@ -96,9 +159,31 @@ func (b *Backend) Done() <-chan struct{} {
 	return b.done
 }
 
-func (b *Backend) Send(p *client.Packet) error {
-	b.sendLock.Lock()
-	defer b.sendLock.Unlock()
+func (b *Backend) lockSend(ctx context.Context) error {
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case b.sendLock <- struct{}{}:
+		return nil
+	}
+}
+
+func (b *Backend) unlockSend() {
+	<-b.sendLock
+}
+
+func (b *Backend) SendContext(ctx context.Context, p *client.Packet) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if err := b.lockSend(ctx); err != nil {
+		return err
+	}
+	defer b.unlockSend()
+
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 
 	const segment = commonmetrics.SegmentToAgent
 	metrics.Metrics.ObservePacket(segment, p.Type)
@@ -107,6 +192,10 @@ func (b *Backend) Send(p *client.Packet) error {
 		metrics.Metrics.ObserveStreamError(segment, err, p.Type)
 	}
 	return err
+}
+
+func (b *Backend) Send(p *client.Packet) error {
+	return b.SendContext(b.Context(), p)
 }
 
 func (b *Backend) Recv() (*client.Packet, error) {
@@ -138,7 +227,7 @@ func (b *Backend) GetAgentIdentifiers() header.Identifiers {
 	return b.idents
 }
 
-func getAgentID(stream agent.AgentService_ConnectServer) (string, error) {
+func getAgentID(stream AgentStream) (string, error) {
 	md, ok := metadata.FromIncomingContext(stream.Context())
 	if !ok {
 		return "", fmt.Errorf("failed to get context")
@@ -150,7 +239,7 @@ func getAgentID(stream agent.AgentService_ConnectServer) (string, error) {
 	return agentIDs[0], nil
 }
 
-func getAgentIdentifiers(conn agent.AgentService_ConnectServer) (header.Identifiers, error) {
+func getAgentIdentifiers(conn AgentStream) (header.Identifiers, error) {
 	var agentIdentifiers header.Identifiers
 	md, ok := metadata.FromIncomingContext(conn.Context())
 	if !ok {
@@ -167,7 +256,7 @@ func getAgentIdentifiers(conn agent.AgentService_ConnectServer) (header.Identifi
 	return header.GenAgentIdentifiers(agentIdent[0])
 }
 
-func NewBackend(conn agent.AgentService_ConnectServer) (*Backend, error) {
+func NewBackend(conn AgentStream) (*Backend, error) {
 	agentID, err := getAgentID(conn)
 	if err != nil {
 		return nil, err
@@ -176,7 +265,13 @@ func NewBackend(conn agent.AgentService_ConnectServer) (*Backend, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &Backend{conn: conn, id: agentID, idents: agentIdentifiers, done: make(chan struct{})}, nil
+	return &Backend{
+		conn:     conn,
+		id:       agentID,
+		idents:   agentIdentifiers,
+		done:     make(chan struct{}),
+		sendLock: make(chan struct{}, 1),
+	}, nil
 }
 
 // BackendStorage is an interface to manage the storage of the backend
@@ -475,9 +570,26 @@ func (s *DefaultBackendStorage) lessOccupiedBackend(first, second *Backend) *Bac
 	return second
 }
 
+// preferredBackend returns the candidate expected to complete a new dial
+// sooner. A backend whose dial cost is at least twice the other's loses;
+// otherwise receive-channel pressure and then chance decide, so that agents
+// of similar speed keep sharing the load. The caller must hold s.mu.
+func (s *DefaultBackendStorage) preferredBackend(first, second *Backend) *Backend {
+	now := time.Now()
+	firstCost, secondCost := first.dialCost(now), second.dialCost(now)
+	if secondCost >= 2*firstCost {
+		return first
+	}
+	if firstCost >= 2*secondCost {
+		return second
+	}
+	return s.lessOccupiedBackend(first, second)
+}
+
 // GetRandomBackend samples two distinct non-draining agents and prefers the
-// primary backend with less receive-channel pressure. A sole non-draining
-// agent is used directly; draining agents are used only as a last resort.
+// primary backend expected to dial sooner, see preferredBackend. A sole
+// non-draining agent is used directly; draining agents are used only as a
+// last resort.
 // The storage must maintain the random-routing index; otherwise this method
 // returns ErrNotFound even when backends are registered.
 func (s *DefaultBackendStorage) GetRandomBackend() (*Backend, error) {
@@ -516,7 +628,7 @@ func (s *DefaultBackendStorage) GetRandomBackend() (*Backend, error) {
 			continue
 		}
 
-		selected := s.lessOccupiedBackend(first, second)
+		selected := s.preferredBackend(first, second)
 		klog.V(3).InfoS("Pick agent as backend", "agentID", selected.GetAgentID())
 		return selected, nil
 	}

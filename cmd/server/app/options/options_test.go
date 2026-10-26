@@ -50,6 +50,7 @@ func TestDefaultServerOptions(t *testing.T) {
 	assertDefaultValue(t, "AdminPort", defaultServerOptions.AdminPort, 8095)
 	assertDefaultValue(t, "AdminBindAddress", defaultServerOptions.AdminBindAddress, "127.0.0.1")
 	assertDefaultValue(t, "KeepaliveTime", defaultServerOptions.KeepaliveTime, 1*time.Hour)
+	assertDefaultValue(t, "KeepaliveTimeout", defaultServerOptions.KeepaliveTimeout, 20*time.Second)
 	assertDefaultValue(t, "FrontendKeepaliveTime", defaultServerOptions.FrontendKeepaliveTime, 1*time.Hour)
 	assertDefaultValue(t, "EnableProfiling", defaultServerOptions.EnableProfiling, false)
 	assertDefaultValue(t, "EnableContentionProfiling", defaultServerOptions.EnableContentionProfiling, false)
@@ -64,6 +65,7 @@ func TestDefaultServerOptions(t *testing.T) {
 	assertDefaultValue(t, "CipherSuites", defaultServerOptions.CipherSuites, make([]string, 0))
 	assertDefaultValue(t, "TLSMinVersion", defaultServerOptions.TLSMinVersion, "")
 	assertDefaultValue(t, "XfrChannelSize", defaultServerOptions.XfrChannelSize, 10)
+	assertDefaultValue(t, "FrontendWriteChannelSize", defaultServerOptions.FrontendWriteChannelSize, 10)
 	assertDefaultValue(t, "APIContentType", defaultServerOptions.APIContentType, "application/vnd.kubernetes.protobuf")
 	assertDefaultValue(t, "GracefulShutdownTimeout", defaultServerOptions.GracefulShutdownTimeout, 0*time.Second)
 	assertDefaultValue(t, "BackendDialTimeout", defaultServerOptions.BackendDialTimeout, 0*time.Second)
@@ -206,6 +208,16 @@ func TestValidate(t *testing.T) {
 			value:    -10,
 			expected: fmt.Errorf("channel size -10 must be greater than 0"),
 		},
+		"ZeroFrontendWriteChannelSize": {
+			field:    "FrontendWriteChannelSize",
+			value:    0,
+			expected: fmt.Errorf("frontend write channel size 0 must be greater than 0"),
+		},
+		"NegativeFrontendWriteChannelSize": {
+			field:    "FrontendWriteChannelSize",
+			value:    -10,
+			expected: fmt.Errorf("frontend write channel size -10 must be greater than 0"),
+		},
 		"NegativeGracefulShutdownTimeout": {
 			field:    "GracefulShutdownTimeout",
 			value:    -1 * time.Second,
@@ -234,6 +246,16 @@ func TestValidate(t *testing.T) {
 		"PositiveBackendDialTimeout": {
 			field:    "BackendDialTimeout",
 			value:    30 * time.Second,
+			expected: nil,
+		},
+		"ZeroKeepaliveTimeout": {
+			field:    "KeepaliveTimeout",
+			value:    0 * time.Second,
+			expected: fmt.Errorf("keepalive-timeout must be > 0, got 0s"),
+		},
+		"PositiveKeepaliveTimeout": {
+			field:    "KeepaliveTimeout",
+			value:    5 * time.Second,
 			expected: nil,
 		},
 	} {

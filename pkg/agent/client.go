@@ -186,9 +186,8 @@ func (a *Client) Connect() (int, error) {
 		header.AgentIdentifiers, a.agentIdentifiers)
 	if a.serviceAccountTokenPath != "" {
 		if ctx, err = a.initializeAuthContext(ctx); err != nil {
-			err := conn.Close()
-			if err != nil {
-				klog.ErrorS(err, "failed to close gRPC connection", "agentID", a.agentID)
+			if cerr := conn.Close(); cerr != nil {
+				klog.ErrorS(cerr, "failed to close gRPC connection", "agentID", a.agentID)
 			}
 			return 0, err
 		}
@@ -219,10 +218,11 @@ func (a *Client) Connect() (int, error) {
 func (a *Client) Close() {
 	if a.conn == nil {
 		klog.Errorln("Unexpected empty AgentClient.conn")
-	}
-	err := a.conn.Close()
-	if err != nil {
-		klog.ErrorS(err, "failed to close gRPC connection", "serverID", a.serverID, "agentID", a.agentID)
+	} else {
+		err := a.conn.Close()
+		if err != nil {
+			klog.ErrorS(err, "failed to close gRPC connection", "serverID", a.serverID, "agentID", a.agentID)
+		}
 	}
 	close(a.stopCh)
 }
@@ -237,7 +237,9 @@ func (a *Client) Send(pkt *client.Packet) error {
 	if err != nil && err != io.EOF {
 		metrics.Metrics.ObserveServerFailureDeprecated(metrics.DirectionToServer)
 		metrics.Metrics.ObserveStreamError(segment, err, pkt.Type)
-		a.cs.RemoveClient(a.serverID)
+		if a.cs.removeClient(a) {
+			metrics.Metrics.ObserveServerConnectionLost(metrics.ServerConnectionLostSendError)
+		}
 	}
 	return err
 }
@@ -313,7 +315,7 @@ func (a *Client) initializeAuthContext(ctx context.Context) (context.Context, er
 // The requests include things like opening a connection to a server,
 // streaming data and close the connection.
 func (a *Client) Serve() {
-	defer a.cs.RemoveClient(a.serverID)
+	defer a.cs.removeClient(a)
 	defer func() {
 		// close all of conns with remote when Client exits
 		for _, eConn := range a.connManager.List() {
@@ -347,20 +349,27 @@ func (a *Client) Serve() {
 
 		pkt, err := a.Recv()
 		if err != nil {
-			if err == io.EOF {
-				klog.V(2).InfoS("received EOF, exit", "serverID", a.serverID, "agentID", a.agentID)
+			select {
+			case <-a.stopCh:
+				// The agent closed this client itself (shutdown, send failure or probe).
+				klog.V(5).InfoS("could not read stream because agent client is shutting down", "serverID", a.serverID, "agentID", a.agentID, "err", err)
 				return
+			default:
 			}
-			if status.Code(err) == codes.Canceled {
+			var reason metrics.ServerConnectionLostReason
+			switch {
+			case err == io.EOF:
+				klog.V(2).InfoS("received EOF, exit", "serverID", a.serverID, "agentID", a.agentID)
+				reason = metrics.ServerConnectionLostEOF
+			case status.Code(err) == codes.Canceled:
 				klog.V(2).InfoS("stream canceled", "serverID", a.serverID, "agentID", a.agentID)
-			} else {
-				select {
-				case <-a.stopCh:
-					klog.V(5).InfoS("could not read stream because agent client is shutting down", "serverID", a.serverID, "agentID", a.agentID, "err", err)
-				default:
-					// If stopCh is not closed, this is a legitimate, unexpected error.
-					klog.ErrorS(err, "could not read stream", "serverID", a.serverID, "agentID", a.agentID)
-				}
+				reason = metrics.ServerConnectionLostCancelled
+			default:
+				klog.ErrorS(err, "could not read stream", "serverID", a.serverID, "agentID", a.agentID)
+				reason = metrics.ServerConnectionLostRecvError
+			}
+			if a.cs.removeClient(a) {
+				metrics.Metrics.ObserveServerConnectionLost(reason)
 			}
 			return
 		}
@@ -644,7 +653,9 @@ func (a *Client) probe() {
 			}
 		}
 		klog.V(1).InfoS("Removing client used for server connection", "state", a.conn.GetState(), "serverID", a.serverID)
-		a.cs.RemoveClient(a.serverID)
+		if a.cs.removeClient(a) {
+			metrics.Metrics.ObserveServerConnectionLost(metrics.ServerConnectionLostProbe)
+		}
 		return
 	}
 }

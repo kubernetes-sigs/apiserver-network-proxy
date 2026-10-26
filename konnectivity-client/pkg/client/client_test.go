@@ -263,14 +263,14 @@ func TestClose(t *testing.T) {
 		t.Error(err)
 	}
 
-	if ts.packets[1].Type != client.PacketType_CLOSE_REQ {
-		t.Fatalf("expect packet.type %v; got %v", client.PacketType_CLOSE_REQ, ts.packets[1].Type)
-	}
-	if ts.packets[1].GetCloseRequest().ConnectID != 100 {
-		t.Errorf("expect connectID=100; got %d", ts.packets[1].GetCloseRequest().ConnectID)
+	// Close returns once CLOSE_REQ is sent; the server sees it and answers
+	// asynchronously, and the tunnel is released on the CLOSE_RSP.
+	<-tunnel.Done()
+	ts.assertPacketType(1, client.PacketType_CLOSE_REQ)
+	if got := ts.packet(1).GetCloseRequest().ConnectID; got != 100 {
+		t.Errorf("expect connectID=100; got %d", got)
 	}
 
-	<-tunnel.Done()
 	if err := metricstest.ExpectClientConnections(map[metrics.ClientConnectionStatus]int{
 		metrics.ClientConnectionStatusCreated: 0,
 		metrics.ClientConnectionStatusDialing: 0,
@@ -281,6 +281,45 @@ func TestClose(t *testing.T) {
 	metrics.Metrics.Reset() // For clean shutdown.
 }
 
+// TestCloseAfterTunnelClosed covers a tunnel that ended before the caller
+// closed the connection: Close reports it and returns at once.
+func TestCloseAfterTunnelClosed(t *testing.T) {
+	expectCleanShutdown(t)
+
+	ctx := context.Background()
+	s, ps := pipe()
+	ts := testServer(ps, 100)
+
+	defer ps.Close()
+	defer s.Close()
+
+	tunnel := newUnstartedTunnel(s, s.conn())
+
+	go tunnel.serve(ctx)
+	go ts.serve()
+
+	conn, err := tunnel.DialContext(ctx, "tcp", "127.0.0.1:80")
+	if err != nil {
+		t.Fatalf("expect nil; got %v", err)
+	}
+
+	// The transport under the tunnel goes away.
+	s.Close()
+	<-tunnel.Done()
+
+	start := time.Now()
+	if err := conn.Close(); !errors.Is(err, errConnTunnelClosed) {
+		t.Errorf("expected %v from Close on an ended tunnel, got %v", errConnTunnelClosed, err)
+	}
+	if elapsed := time.Since(start); elapsed > time.Second {
+		t.Errorf("Close blocked for %v on an ended tunnel; expected it to return at once", elapsed)
+	}
+	metrics.Metrics.Reset() // For clean shutdown.
+}
+
+// TestCloseTimeout covers a backend that never answers the CLOSE_REQ: Close
+// must return at once (net/http calls it synchronously when a request's
+// context ends) and the tunnel must still be released after CloseTimeout.
 func TestCloseTimeout(t *testing.T) {
 	if testing.Short() {
 		t.Skip()
@@ -310,19 +349,34 @@ func TestCloseTimeout(t *testing.T) {
 		t.Fatalf("expect nil; got %v", err)
 	}
 
+	readDone := make(chan error, 1)
 	go func() {
 		buf := make([]byte, 10)
-		_, err = conn.Read(buf)
-		if err != io.EOF {
-			t.Errorf("expected %v: got %v", io.EOF, err)
-		}
+		_, err := conn.Read(buf)
+		readDone <- err
 	}()
 
-	if err := conn.Close(); err != errConnCloseTimeout {
-		t.Errorf("expected %v but got %v", errConnCloseTimeout, err)
+	start := time.Now()
+	if err := conn.Close(); err != nil {
+		t.Errorf("expected nil from Close, got %v", err)
+	}
+	if elapsed := time.Since(start); elapsed > time.Second {
+		t.Errorf("Close blocked for %v waiting for a CLOSE_RSP that never comes; expected it to return at once", elapsed)
 	}
 
-	<-tunnel.Done()
+	// The tunnel is released in the background once CloseTimeout expires.
+	select {
+	case <-tunnel.Done():
+	case <-time.After(CloseTimeout + 5*time.Second):
+		t.Fatal("tunnel was not released after CloseTimeout")
+	}
+	if elapsed := time.Since(start); elapsed < CloseTimeout {
+		t.Errorf("tunnel released after %v, before CloseTimeout (%v) without a CLOSE_RSP", elapsed, CloseTimeout)
+	}
+	ts.assertPacketType(1, client.PacketType_CLOSE_REQ)
+	if err := <-readDone; err != io.EOF {
+		t.Errorf("expected %v from Read after close: got %v", io.EOF, err)
+	}
 	if err := metricstest.ExpectClientConnections(map[metrics.ClientConnectionStatus]int{
 		metrics.ClientConnectionStatusCreated: 0,
 		metrics.ClientConnectionStatusDialing: 0,
@@ -702,6 +756,16 @@ func (s *proxyServer) assertPacketType(index int, expectedType client.PacketType
 	if actual != expectedType {
 		s.t.Errorf("Unexpected packet[%d].type: got %v, expected %v", index, actual, expectedType)
 	}
+}
+
+// packet returns the index-th packet the server received, or nil.
+func (s *proxyServer) packet(index int) *client.Packet {
+	s.packetsLock.Lock()
+	defer s.packetsLock.Unlock()
+	if index >= len(s.packets) {
+		return nil
+	}
+	return s.packets[index]
 }
 
 type handler func(pkt *client.Packet) *client.Packet

@@ -38,7 +38,6 @@ import (
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials"
 	"google.golang.org/grpc/keepalive"
-	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/client-go/kubernetes"
 	coordinationv1lister "k8s.io/client-go/listers/coordination/v1"
 	"k8s.io/client-go/rest"
@@ -138,6 +137,7 @@ func (a *Agent) runProxyConnection(o *options.GrpcProxyAgentOptions, drainCh, st
 		grpc.WithTransportCredentials(credentials.NewTLS(tlsConfig)),
 		grpc.WithKeepaliveParams(keepalive.ClientParameters{
 			Time:                o.KeepaliveTime,
+			Timeout:             o.KeepaliveTimeout,
 			PermitWithoutStream: true,
 		}),
 	}
@@ -167,11 +167,10 @@ func (a *Agent) runProxyConnection(o *options.GrpcProxyAgentOptions, drainCh, st
 		go leaseInformer.Run(stopCh)
 		cache.WaitForCacheSync(stopCh, leaseInformer.HasSynced)
 		leaseLister := coordinationv1lister.NewLeaseLister(leaseInformer.GetIndexer())
-		serverLeaseSelector, _ := labels.Parse(o.LeaseLabel)
 		leaseCounter = agent.NewServerLeaseCounter(
 			clock.RealClock{},
 			leaseLister,
-			serverLeaseSelector,
+			o.LeaseLabelSelector,
 		)
 	}
 

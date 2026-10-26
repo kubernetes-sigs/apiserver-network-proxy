@@ -1,0 +1,59 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: knp-webhook
+  namespace: webhook-load
+spec:
+  replicas: 1
+  selector:
+    matchLabels: {app: knp-webhook}
+  template:
+    metadata:
+      labels: {app: knp-webhook}
+    spec:
+      nodeSelector:
+        kubernetes.io/hostname: __NODE__
+      containers:
+      - name: webhook
+        image: __IMAGE__
+        ports:
+        - {containerPort: 8443, name: https}
+        - {containerPort: 9090, name: metrics}
+        volumeMounts:
+        - {name: certs, mountPath: /certs, readOnly: true}
+        readinessProbe:
+          httpGet: {path: /healthz, port: 8443, scheme: HTTPS}
+      volumes:
+      - name: certs
+        secret: {secretName: knp-webhook-certs}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: knp-webhook
+  namespace: webhook-load
+spec:
+  selector: {app: knp-webhook}
+  ports:
+  - {port: 443, targetPort: 8443}
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingWebhookConfiguration
+metadata:
+  name: knp-webhook
+webhooks:
+- name: knp-webhook.webhook-load.svc
+  admissionReviewVersions: ["v1"]
+  sideEffects: None
+  failurePolicy: Ignore
+  timeoutSeconds: 10
+  namespaceSelector:
+    matchLabels: {kubernetes.io/metadata.name: webhook-load}
+  rules:
+  - apiGroups: [""]
+    apiVersions: ["v1"]
+    operations: ["CREATE"]
+    resources: ["configmaps"]
+  clientConfig:
+    service: {name: knp-webhook, namespace: webhook-load, path: /validate, port: 443}
+    caBundle: __CA_BUNDLE__

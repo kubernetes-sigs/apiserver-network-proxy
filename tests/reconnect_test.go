@@ -19,6 +19,7 @@ package tests
 import (
 	"testing"
 
+	agentmetrics "sigs.k8s.io/apiserver-network-proxy/pkg/agent/metrics"
 	"sigs.k8s.io/apiserver-network-proxy/pkg/server"
 	"sigs.k8s.io/apiserver-network-proxy/tests/framework"
 )
@@ -42,8 +43,16 @@ func TestServerRestartAgentReconnect(t *testing.T) {
 	defer a.Stop()
 
 	waitForConnectedServerCount(t, 1, a)
+	// Earlier tests stop servers under live agents; those losses are recorded asynchronously.
+	resetAllMetrics()
 	ps.Stop()
 	waitForConnectedServerCount(t, 0, a)
+
+	// Stopping the server closes the transport under the agent's stream.
+	expect := map[agentmetrics.ServerConnectionLostReason]int{agentmetrics.ServerConnectionLostRecvError: 1}
+	if err := a.Metrics().ExpectAgentServerConnectionsLost(expect); err != nil {
+		t.Error(err)
+	}
 
 	ps2, err := Framework.ProxyServerRunner.Start(t, opts)
 	if err != nil {
@@ -52,4 +61,5 @@ func TestServerRestartAgentReconnect(t *testing.T) {
 	defer ps2.Stop()
 
 	waitForConnectedServerCount(t, 1, a)
+	resetAllMetrics() // For clean shutdown.
 }

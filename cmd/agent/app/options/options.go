@@ -17,6 +17,7 @@ limitations under the License.
 package options
 
 import (
+	"cmp"
 	"fmt"
 	"net"
 	"net/url"
@@ -27,6 +28,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/spf13/pflag"
 	"google.golang.org/grpc"
+	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/klog/v2"
 
@@ -68,6 +70,10 @@ type GrpcProxyAgentOptions struct {
 	// After a duration of this time if the agent doesn't see any activity it
 	// pings the server to see if the transport is still alive.
 	KeepaliveTime time.Duration
+	// After having pinged for keepalive check, the agent waits for a duration
+	// of KeepaliveTimeout and if no activity is seen even after that the
+	// connection is closed.
+	KeepaliveTimeout time.Duration
 
 	// file contains service account authorization token for enabling proxy-server token based authorization
 	ServiceAccountTokenPath string
@@ -87,8 +93,8 @@ type GrpcProxyAgentOptions struct {
 	CountServerLeases bool
 	// Namespace where lease objects are managed.
 	LeaseNamespace string
-	// Labels on which lease objects are managed.
-	LeaseLabel string
+	// Label selector for leases to take into account when counting servers.
+	LeaseLabelSelector labels.Selector
 	// ServerCountSource describes how server counts should be combined.
 	ServerCountSource string
 	// Path to kubeconfig (used by kubernetes client for lease listing)
@@ -109,6 +115,7 @@ func (o *GrpcProxyAgentOptions) ClientSetConfig(dialOptions ...grpc.DialOption) 
 		ServiceAccountTokenPath: o.ServiceAccountTokenPath,
 		WarnOnChannelLimit:      o.WarnOnChannelLimit,
 		SyncForever:             o.SyncForever,
+		CountServerLeases:       o.CountServerLeases,
 		XfrChannelSize:          o.XfrChannelSize,
 		ServerCountSource:       o.ServerCountSource,
 	}
@@ -132,15 +139,19 @@ func (o *GrpcProxyAgentOptions) Flags() *pflag.FlagSet {
 	flags.DurationVar(&o.SyncInterval, "sync-interval", o.SyncInterval, "The initial interval by which the agent periodically checks if it has connections to all instances of the proxy server.")
 	flags.DurationVar(&o.ProbeInterval, "probe-interval", o.ProbeInterval, "The interval by which the agent periodically checks if its connections to the proxy server are ready.")
 	flags.DurationVar(&o.SyncIntervalCap, "sync-interval-cap", o.SyncIntervalCap, "The maximum interval for the SyncInterval to back off to when unable to connect to the proxy server")
-	flags.DurationVar(&o.KeepaliveTime, "keepalive-time", o.KeepaliveTime, "Time for gRPC agent server keepalive.")
+	flags.DurationVar(&o.KeepaliveTime, "keepalive-time", o.KeepaliveTime, "Time without activity after which the agent pings the proxy server. Must be at least the server's keepalive enforcement minimum (30s), or the server closes the connection.")
+	flags.DurationVar(&o.KeepaliveTimeout, "keepalive-timeout", o.KeepaliveTimeout, "Time the agent waits for the proxy server to acknowledge a keepalive ping (an HTTP/2 PING frame) before closing the connection. Detects a server that went away without a reset reaching the agent, also through a balancer.")
 	flags.StringVar(&o.ServiceAccountTokenPath, "service-account-token-path", o.ServiceAccountTokenPath, "If non-empty proxy agent uses this token to prove its identity to the proxy server.")
 	flags.StringVar(&o.AgentIdentifiers, "agent-identifiers", o.AgentIdentifiers, "Identifiers of the agent that will be used by the server when choosing agent. N.B. the list of identifiers must be in URL encoded format. e.g.,host=localhost&host=node1.mydomain.com&cidr=127.0.0.1/16&ipv4=1.2.3.4&ipv4=5.6.7.8&ipv6=:::::&default-route=true")
 	flags.BoolVar(&o.WarnOnChannelLimit, "warn-on-channel-limit", o.WarnOnChannelLimit, "Turns on a warning if the system is going to push to a full channel. The check involves an unsafe read.")
-	flags.BoolVar(&o.SyncForever, "sync-forever", o.SyncForever, "If true, the agent continues syncing, in order to support server count changes.")
+	flags.BoolVar(&o.SyncForever, "sync-forever", o.SyncForever, "If true, the agent continues syncing, in order to support server count changes. With --count-server-leases the agent stops dialing while it is connected to every server in the lease count.")
 	flags.IntVar(&o.XfrChannelSize, "xfr-channel-size", 150, "Set the size of the channel for transferring data between the agent and the proxy server.")
 	flags.BoolVar(&o.CountServerLeases, "count-server-leases", o.CountServerLeases, "Enables lease counting system to determine the number of proxy servers to connect to.")
 	flags.StringVar(&o.LeaseNamespace, "lease-namespace", o.LeaseNamespace, "Namespace where lease objects are managed.")
-	flags.StringVar(&o.LeaseLabel, "lease-label", o.LeaseLabel, "The labels on which the lease objects are managed.")
+	flags.VarP(labelSelectorFlag{&o.LeaseLabelSelector}, "lease-label-selector", "", "Label selector for leases to take into account when counting servers.")
+	leaseLabelFlag := flags.VarPF(labelSelectorFlag{&o.LeaseLabelSelector}, "lease-label", "", "")
+	leaseLabelFlag.Hidden = true
+	leaseLabelFlag.Deprecated = "Use --lease-label-selector instead"
 	flags.StringVar(&o.ServerCountSource, "server-count-source", o.ServerCountSource, "Defines how the server counts from lease and from server responses are combined. Possible values: 'default' to use only one source (server or leases depending on other flags), 'max' to take the larger value.")
 	flags.StringVar(&o.KubeconfigPath, "kubeconfig", o.KubeconfigPath, "Path to the kubeconfig file")
 	flags.StringVar(&o.APIContentType, "kube-api-content-type", o.APIContentType, "Content type of requests sent to apiserver.")
@@ -165,13 +176,14 @@ func (o *GrpcProxyAgentOptions) Print() {
 	klog.V(1).Infof("ProbeInterval set to %v.\n", o.ProbeInterval)
 	klog.V(1).Infof("SyncIntervalCap set to %v.\n", o.SyncIntervalCap)
 	klog.V(1).Infof("Keepalive time set to %v.\n", o.KeepaliveTime)
+	klog.V(1).Infof("Keepalive timeout set to %v.\n", o.KeepaliveTimeout)
 	klog.V(1).Infof("ServiceAccountTokenPath set to %q.\n", o.ServiceAccountTokenPath)
 	klog.V(1).Infof("AgentIdentifiers set to %s.\n", util.PrettyPrintURL(o.AgentIdentifiers))
 	klog.V(1).Infof("WarnOnChannelLimit set to %t.\n", o.WarnOnChannelLimit)
 	klog.V(1).Infof("SyncForever set to %v.\n", o.SyncForever)
 	klog.V(1).Infof("CountServerLeases set to %v.\n", o.CountServerLeases)
 	klog.V(1).Infof("LeaseNamespace set to %s.\n", o.LeaseNamespace)
-	klog.V(1).Infof("LeaseLabel set to %s.\n", o.LeaseLabel)
+	klog.V(1).Infof("LeaseLabelSelector set to %s.\n", o.LeaseLabelSelector)
 	klog.V(1).Infof("ServerCountSource set to %s.\n", o.ServerCountSource)
 	klog.V(1).Infof("ChannelSize set to %d.\n", o.XfrChannelSize)
 	klog.V(1).Infof("APIContentType set to %v.\n", o.APIContentType)
@@ -208,6 +220,9 @@ func (o *GrpcProxyAgentOptions) Validate() error {
 	if o.AdminServerPort <= 0 {
 		return fmt.Errorf("admin server port %d must be greater than 0", o.AdminServerPort)
 	}
+	if o.KeepaliveTimeout <= 0 {
+		return fmt.Errorf("keepalive-timeout must be > 0, got %v", o.KeepaliveTimeout)
+	}
 	if o.XfrChannelSize <= 0 {
 		return fmt.Errorf("channel size %d must be greater than 0", o.XfrChannelSize)
 	}
@@ -231,12 +246,6 @@ func (o *GrpcProxyAgentOptions) Validate() error {
 		}
 	}
 	// Validate labels provided.
-	if o.CountServerLeases {
-		_, err := util.ParseLabels(o.LeaseLabel)
-		if err != nil {
-			return err
-		}
-	}
 	if o.ServerCountSource != "" {
 		if o.ServerCountSource != "default" && o.ServerCountSource != "max" {
 			return fmt.Errorf("--server-count-source must be one of '', 'default', 'max', got %v", o.ServerCountSource)
@@ -284,13 +293,14 @@ func NewGrpcProxyAgentOptions() *GrpcProxyAgentOptions {
 		ProbeInterval:             1 * time.Second,
 		SyncIntervalCap:           10 * time.Second,
 		KeepaliveTime:             1 * time.Hour,
+		KeepaliveTimeout:          20 * time.Second,
 		ServiceAccountTokenPath:   "",
 		WarnOnChannelLimit:        false,
 		SyncForever:               false,
 		XfrChannelSize:            150,
 		CountServerLeases:         false,
 		LeaseNamespace:            "kube-system",
-		LeaseLabel:                "k8s-app=konnectivity-server",
+		LeaseLabelSelector:        labels.ValidatedSetSelector{"k8s-app": "konnectivity-server"},
 		ServerCountSource:         "default",
 		KubeconfigPath:            "",
 		APIContentType:            runtime.ContentTypeProtobuf,
@@ -305,4 +315,29 @@ func defaultAgentID() string {
 		return id
 	}
 	return uuid.New().String()
+}
+
+type labelSelectorFlag struct {
+	inner *labels.Selector
+}
+
+// Type implements [pflag.Value].
+func (l labelSelectorFlag) Type() string {
+	return "string"
+}
+
+// String implements [pflag.Value].
+func (l labelSelectorFlag) String() string {
+	return cmp.Or(*l.inner, labels.Everything()).String()
+}
+
+// Set implements [pflag.Value].
+func (l labelSelectorFlag) Set(value string) error {
+	parsed, err := labels.Parse(value)
+	if err != nil {
+		return err
+	}
+
+	*l.inner = parsed
+	return nil
 }

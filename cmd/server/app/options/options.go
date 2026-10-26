@@ -65,7 +65,11 @@ type ProxyRunOptions struct {
 	HealthBindAddress string
 	// After a duration of this time if the server doesn't see any activity it
 	// pings the client to see if the transport is still alive.
-	KeepaliveTime         time.Duration
+	KeepaliveTime time.Duration
+	// After having pinged for keepalive check, the server waits for a duration
+	// of KeepaliveTimeout and if no activity is seen even after that the
+	// connection is closed.
+	KeepaliveTimeout      time.Duration
 	FrontendKeepaliveTime time.Duration
 	// Enables pprof at host:AdminPort/debug/pprof.
 	EnableProfiling bool
@@ -109,8 +113,9 @@ type ProxyRunOptions struct {
 	// Minimum TLS version for server connections.
 	// Accepted values: VersionTLS10, VersionTLS11, VersionTLS12, VersionTLS13.
 	// If empty, defaults to VersionTLS12.
-	TLSMinVersion  string
-	XfrChannelSize int
+	TLSMinVersion            string
+	XfrChannelSize           int
+	FrontendWriteChannelSize int
 
 	// Lease controller configuration
 	EnableLeaseController bool
@@ -146,6 +151,7 @@ func (o *ProxyRunOptions) Flags() *pflag.FlagSet {
 	flags.IntVar(&o.HealthPort, "health-port", o.HealthPort, "Port we listen for health connections on.")
 	flags.StringVar(&o.HealthBindAddress, "health-bind-address", o.HealthBindAddress, "Bind address for health connections. If empty, we will bind to all interfaces.")
 	flags.DurationVar(&o.KeepaliveTime, "keepalive-time", o.KeepaliveTime, "Time for gRPC agent server keepalive.")
+	flags.DurationVar(&o.KeepaliveTimeout, "keepalive-timeout", o.KeepaliveTimeout, "Time the gRPC agent server waits for an agent to acknowledge a keepalive ping (an HTTP/2 PING frame) before closing the connection. Detects an agent that went away without a reset reaching the server, also through a balancer.")
 	flags.DurationVar(&o.FrontendKeepaliveTime, "frontend-keepalive-time", o.FrontendKeepaliveTime, "Time for gRPC frontend server keepalive.")
 	flags.BoolVar(&o.EnableProfiling, "enable-profiling", o.EnableProfiling, "enable pprof at host:admin-port/debug/pprof")
 	flags.BoolVar(&o.EnableContentionProfiling, "enable-contention-profiling", o.EnableContentionProfiling, "enable contention profiling at host:admin-port/debug/pprof/block. \"--enable-profiling\" must also be set.")
@@ -162,6 +168,7 @@ func (o *ProxyRunOptions) Flags() *pflag.FlagSet {
 	flags.StringSliceVar(&o.CipherSuites, "cipher-suites", o.CipherSuites, "The comma separated list of allowed cipher suites. Has no effect on TLS1.3. Empty means allow default list.")
 	flags.StringVar(&o.TLSMinVersion, "tls-min-version", o.TLSMinVersion, "Minimum TLS version for server connections. Accepted values: VersionTLS10, VersionTLS11, VersionTLS12, VersionTLS13. Empty defaults to VersionTLS12.")
 	flags.IntVar(&o.XfrChannelSize, "xfr-channel-size", o.XfrChannelSize, "The size of the two KNP server channels used in server for transferring data. One channel is for data coming from the Kubernetes API Server, and the other one is for data coming from the KNP agent.")
+	flags.IntVar(&o.FrontendWriteChannelSize, "frontend-write-channel-size", o.FrontendWriteChannelSize, "The number of packets buffered for each HTTP CONNECT frontend before backend receive processing blocks.")
 	flags.BoolVar(&o.EnableLeaseController, "enable-lease-controller", o.EnableLeaseController, "Enable lease controller to publish and garbage collect proxy server leases.")
 	flags.StringVar(&o.LeaseNamespace, "lease-namespace", o.LeaseNamespace, "The namespace where lease objects are managed by the controller.")
 	flags.StringVar(&o.LeaseLabel, "lease-label", o.LeaseLabel, "The labels on which the lease objects are managed.")
@@ -192,6 +199,7 @@ func (o *ProxyRunOptions) Print() {
 	klog.V(1).Infof("Health port set to %d.\n", o.HealthPort)
 	klog.V(1).Infof("Health bind address set to %q.\n", o.HealthBindAddress)
 	klog.V(1).Infof("Keepalive time set to %v.\n", o.KeepaliveTime)
+	klog.V(1).Infof("Keepalive timeout set to %v.\n", o.KeepaliveTimeout)
 	klog.V(1).Infof("Frontend keepalive time set to %v.\n", o.FrontendKeepaliveTime)
 	klog.V(1).Infof("EnableProfiling set to %v.\n", o.EnableProfiling)
 	klog.V(1).Infof("EnableContentionProfiling set to %v.\n", o.EnableContentionProfiling)
@@ -211,6 +219,7 @@ func (o *ProxyRunOptions) Print() {
 	klog.V(1).Infof("CipherSuites set to %q.\n", o.CipherSuites)
 	klog.V(1).Infof("TLSMinVersion set to %q.\n", o.TLSMinVersion)
 	klog.V(1).Infof("XfrChannelSize set to %d.\n", o.XfrChannelSize)
+	klog.V(1).Infof("FrontendWriteChannelSize set to %d.\n", o.FrontendWriteChannelSize)
 	klog.V(1).Infof("GracefulShutdownTimeout set to %v.\n", o.GracefulShutdownTimeout)
 	klog.V(1).Infof("BackendDialTimeout set to %v.\n", o.BackendDialTimeout)
 }
@@ -340,6 +349,9 @@ func (o *ProxyRunOptions) Validate() error {
 	if o.XfrChannelSize <= 0 {
 		return fmt.Errorf("channel size %d must be greater than 0", o.XfrChannelSize)
 	}
+	if o.FrontendWriteChannelSize <= 0 {
+		return fmt.Errorf("frontend write channel size %d must be greater than 0", o.FrontendWriteChannelSize)
+	}
 	// validate the TLS min version
 	if o.TLSMinVersion != "" {
 		tlsVer, err := util.GetTLSVersion(o.TLSMinVersion)
@@ -368,6 +380,9 @@ func (o *ProxyRunOptions) Validate() error {
 		}
 	}
 
+	if o.KeepaliveTimeout <= 0 {
+		return fmt.Errorf("keepalive-timeout must be > 0, got %v", o.KeepaliveTimeout)
+	}
 	// Validate graceful shutdown timeout
 	if o.GracefulShutdownTimeout < 0 {
 		return fmt.Errorf("graceful-shutdown-timeout must be >= 0, got %v", o.GracefulShutdownTimeout)
@@ -401,6 +416,7 @@ func NewProxyRunOptions() *ProxyRunOptions {
 		AdminPort:                 8095,
 		AdminBindAddress:          "127.0.0.1",
 		KeepaliveTime:             1 * time.Hour,
+		KeepaliveTimeout:          20 * time.Second,
 		FrontendKeepaliveTime:     1 * time.Hour,
 		EnableProfiling:           false,
 		EnableContentionProfiling: false,
@@ -417,6 +433,7 @@ func NewProxyRunOptions() *ProxyRunOptions {
 		CipherSuites:              make([]string, 0),
 		TLSMinVersion:             "",
 		XfrChannelSize:            10,
+		FrontendWriteChannelSize:  10,
 		EnableLeaseController:     false,
 		LeaseNamespace:            "kube-system",
 		LeaseLabel:                "k8s-app=konnectivity-server",

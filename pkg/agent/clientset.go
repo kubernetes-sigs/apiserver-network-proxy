@@ -67,6 +67,11 @@ type ClientSet struct {
 	// 	syncForever is true if we should continue syncing (support dynamic server count).
 	syncForever bool
 
+	// countServerLeases is true when the server count comes from server leases.
+	// New servers then show up in the count without the agent dialing, so the
+	// syncForever dial is skipped while the agent is connected to every server.
+	countServerLeases bool
+
 	// probeInterval is the interval at which the agent
 	// periodically checks if its connections to the proxy server is ready.
 	probeInterval time.Duration
@@ -162,6 +167,24 @@ func (cs *ClientSet) RemoveClient(serverID string) {
 	metrics.Metrics.SetServerConnectionsCount(len(cs.clients))
 }
 
+// removeClient removes c if it is still the registered client for its server.
+// It returns false when c was already removed, or when the sync loop has
+// replaced it with a newer client to the same server; that client is left alone.
+func (cs *ClientSet) removeClient(c *Client) bool {
+	cs.mu.Lock()
+	defer cs.mu.Unlock()
+	if cs.clients[c.serverID] != c {
+		if cs.clients[c.serverID] != nil {
+			klog.V(2).InfoS("Skipping client removal; server already has a newer client registered", "serverID", c.serverID, "agentID", c.agentID)
+		}
+		return false
+	}
+	c.Close()
+	delete(cs.clients, c.serverID)
+	metrics.Metrics.SetServerConnectionsCount(len(cs.clients))
+	return true
+}
+
 type ClientSetConfig struct {
 	Address                 string
 	AgentID                 string
@@ -173,6 +196,7 @@ type ClientSetConfig struct {
 	ServiceAccountTokenPath string
 	WarnOnChannelLimit      bool
 	SyncForever             bool
+	CountServerLeases       bool
 	XfrChannelSize          int
 	ServerCountSource       string
 }
@@ -190,6 +214,7 @@ func (cc *ClientSetConfig) NewAgentClientSet(drainCh, stopCh <-chan struct{}) *C
 		serviceAccountTokenPath: cc.ServiceAccountTokenPath,
 		warnOnChannelLimit:      cc.WarnOnChannelLimit,
 		syncForever:             cc.SyncForever,
+		countServerLeases:       cc.CountServerLeases,
 		drainCh:                 drainCh,
 		xfrChannelSize:          cc.XfrChannelSize,
 		stopCh:                  stopCh,
@@ -265,14 +290,15 @@ func (cs *ClientSet) connectOnce() error {
 
 	serverCount := cs.determineServerCount()
 
-	// If not in syncForever mode, we only connect if we have fewer connections than the server count.
-	if !cs.syncForever && cs.ClientsCount() >= serverCount && serverCount > 0 {
-		return nil // Nothing to do.
+	// Connected to every known server: nothing to do, unless syncForever has to
+	// discover servers that only a response header can reveal.
+	if cs.ClientsCount() >= serverCount && serverCount > 0 && (!cs.syncForever || cs.countServerLeases) {
+		return nil
 	}
 
-	// In syncForever mode, we always try to connect, to discover new servers.
 	c, receivedServerCount, err := cs.newAgentClient()
 	if err != nil {
+		metrics.Metrics.ObserveServerConnectionAttempt(metrics.ServerConnectionAttemptError)
 		return err
 	}
 
@@ -280,6 +306,7 @@ func (cs *ClientSet) connectOnce() error {
 		c.Close()
 		return err // likely *DuplicateServerError
 	}
+	metrics.Metrics.ObserveServerConnectionAttempt(metrics.ServerConnectionAttemptConnected)
 	// SUCCESS: We connected to a new, unique server.
 	// Only now do we update our view of the server count.
 	cs.lastReceivedServerCount = receivedServerCount
