@@ -24,7 +24,7 @@ ALL_ARCH ?= amd64 arm arm64 ppc64le s390x
 # The output type could either be docker (local), or registry.
 OUTPUT_TYPE ?= docker
 GO_TOOLCHAIN ?= golang
-GO_VERSION ?= 1.26.4
+GO_VERSION ?= 1.27.3
 GOTOOLCHAIN ?= go$(GO_VERSION)+auto
 export GOTOOLCHAIN
 BASEIMAGE ?= gcr.io/distroless/static-debian12:nonroot
