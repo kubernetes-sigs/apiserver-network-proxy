@@ -452,7 +452,7 @@ func (a *Client) Serve() {
 				"dialID", strconv.FormatInt(dialReq.Random, 10),
 				"dialAddress", dialReq.Address,
 			)
-			go runpprof.Do(context.Background(), labels, func(context.Context) {
+			go runpprof.Do(context.Background(), labels, func(ctx context.Context) {
 				defer close(dialDone)
 				start := time.Now()
 				conn, err := net.DialTimeout(dialReq.Protocol, dialReq.Address, dialTimeout)
@@ -510,12 +510,12 @@ func (a *Client) Serve() {
 					// So we are invoking it here to force the clean-up to occur.
 					// However, cleanup will block until dialDone is closed.
 					// So placing cleanup on its own goroutine to wait for the deferred close(dialDone) to kick in.
-					go runpprof.Do(context.Background(), labels, func(context.Context) { eConn.cleanup() })
+					go runpprof.Do(ctx, labels, func(context.Context) { eConn.cleanup() })
 					return
 				}
-				go runpprof.Do(context.Background(), labels, func(context.Context) { a.remoteToSendChannel(connID, eConn) })
-				go runpprof.Do(context.Background(), labels, func(context.Context) { a.sendChannelToProxy(connID, eConn) })
-				go runpprof.Do(context.Background(), labels, func(context.Context) { a.dataChannelToRemote(connID, eConn) })
+				go runpprof.Do(ctx, labels, func(context.Context) { a.remoteToSendChannel(connID, eConn) })
+				go runpprof.Do(ctx, labels, func(context.Context) { a.sendChannelToProxy(connID, eConn) })
+				go runpprof.Do(ctx, labels, func(context.Context) { a.dataChannelToRemote(connID, eConn) })
 			})
 
 		case client.PacketType_DATA:
