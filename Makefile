@@ -38,7 +38,7 @@ CFSSL_VERSION ?= 1.6.5
 CFSSL_URL ?= https://github.com/cloudflare/cfssl/releases/download/v$(CFSSL_VERSION)/cfssl_$(CFSSL_VERSION)_$(GOOS)_$(GOARCH); \
 CFSSLJSON_URL ?= https://github.com/cloudflare/cfssl/releases/download/v$(CFSSL_VERSION)/cfssljson_$(CFSSL_VERSION)_$(GOOS)_$(GOARCH)
 INSTALL_LOCATION:=$(shell go env GOPATH)/bin
-GOLANGCI_LINT_VERSION ?= 2.9.0
+GOLANGCI_LINT_VERSION ?= 2.15.0
 GOSEC_VERSION ?= 2.13.1
 
 REGISTRY ?= gcr.io/$(shell gcloud config get-value project)
@@ -141,7 +141,7 @@ bin/proxy-server:
 
 .PHONY: lint
 lint:
-	curl -sSfL https://raw.githubusercontent.com/golangci/golangci-lint/master/install.sh | sh -s -- -b $(INSTALL_LOCATION) v$(GOLANGCI_LINT_VERSION)
+	curl -sSfL https://golangci-lint.run/install.sh | sh -s -- -b $(INSTALL_LOCATION) v$(GOLANGCI_LINT_VERSION)
 	$(INSTALL_LOCATION)/golangci-lint run --config ./.golangci.yaml --verbose
 
 ## --------------------------------------
