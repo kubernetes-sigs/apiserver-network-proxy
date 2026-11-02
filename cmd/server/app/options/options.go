@@ -173,7 +173,7 @@ func (o *ProxyRunOptions) Flags() *pflag.FlagSet {
 	flags.StringVar(&o.LeaseNamespace, "lease-namespace", o.LeaseNamespace, "The namespace where lease objects are managed by the controller.")
 	flags.StringVar(&o.LeaseLabel, "lease-label", o.LeaseLabel, "The labels on which the lease objects are managed.")
 	flags.DurationVar(&o.GracefulShutdownTimeout, "graceful-shutdown-timeout", o.GracefulShutdownTimeout, "Timeout duration for graceful shutdown of the server. The server will wait for active connections to close before forcefully terminating. Set to 0 to disable graceful shutdown (default: 0).")
-	flags.DurationVar(&o.BackendDialTimeout, "backend-dial-timeout", o.BackendDialTimeout, "Timeout duration for sending DIAL_REQ packets to backend agent streams and waiting for DIAL_RSP. Set to 0 to disable timeout (default: 0).")
+	flags.DurationVar(&o.BackendDialTimeout, "backend-dial-timeout", o.BackendDialTimeout, "Timeout duration for sending DIAL_REQ packets to backend agent streams and waiting for DIAL_RSP. Set to 0 to disable timeout (default: 0). Forward HTTP proxy requests use a 30s timeout when this is 0.")
 	flags.Bool("warn-on-channel-limit", true, "This behavior is now thread safe and always on. This flag will be removed in a future release.")
 	flags.MarkDeprecated("warn-on-channel-limit", "This behavior is now thread safe and always on. This flag will be removed in a future release.")
 
