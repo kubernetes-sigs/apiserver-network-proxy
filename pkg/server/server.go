@@ -72,8 +72,23 @@ type Frontend struct {
 }
 
 func (f *Frontend) Send(pkt *client.Packet) error {
+	if f.stream != nil {
+		if ctx := f.stream.Context(); ctx != nil {
+			if err := ctx.Err(); err != nil {
+				return err
+			}
+		}
+	}
 	f.sendLock.Lock()
 	defer f.sendLock.Unlock()
+
+	if f.stream != nil {
+		if ctx := f.stream.Context(); ctx != nil {
+			if err := ctx.Err(); err != nil {
+				return err
+			}
+		}
+	}
 
 	const segment = commonmetrics.SegmentToClient
 	metrics.Metrics.ObservePacket(segment, pkt.Type)
@@ -85,8 +100,23 @@ func (f *Frontend) Send(pkt *client.Packet) error {
 }
 
 func (f *Frontend) Recv() (*client.Packet, error) {
+	if f.stream != nil {
+		if ctx := f.stream.Context(); ctx != nil {
+			if err := ctx.Err(); err != nil {
+				return nil, err
+			}
+		}
+	}
 	f.recvLock.Lock()
 	defer f.recvLock.Unlock()
+
+	if f.stream != nil {
+		if ctx := f.stream.Context(); ctx != nil {
+			if err := ctx.Err(); err != nil {
+				return nil, err
+			}
+		}
+	}
 
 	const segment = commonmetrics.SegmentFromClient
 	pkt, err := f.stream.Recv()
@@ -663,6 +693,33 @@ func (s *ProxyServer) removeEstablishedForStream(streamUID string) []*ProxyClien
 	return ret
 }
 
+// removeEstablishedForDialID removes and returns the established connection
+// associated with dialID on a frontend stream.
+func (s *ProxyServer) removeEstablishedForDialID(streamUID string, dialID int64) *ProxyClientConnection {
+	if dialID == 0 {
+		return nil
+	}
+	s.fmu.Lock()
+	defer s.fmu.Unlock()
+	for agentID, established := range s.established {
+		for connID, f := range established {
+			if streamUID != "" && (f.frontend == nil || f.frontend.streamUID != streamUID) {
+				continue
+			}
+			if f.dialID == dialID {
+				delete(established, connID)
+				if len(established) == 0 {
+					delete(s.established, agentID)
+				}
+				metrics.Metrics.SetEstablishedConnCount(s.getCount(s.established))
+				metrics.Metrics.ObserveConnectionDuration(time.Since(f.establishedAt))
+				return f
+			}
+		}
+	}
+	return nil
+}
+
 // NewProxyServer creates a new ProxyServer instance
 func NewProxyServer(serverID string, proxyStrategies []proxystrategies.ProxyStrategy, serverCount int, agentAuthenticationOptions *AgentTokenAuthenticationOptions, channelSize int) *ProxyServer {
 	var bms []BackendManager
@@ -784,12 +841,24 @@ func (s *ProxyServer) readFrontendToChannel(frontend *Frontend, userAgent []stri
 
 		select {
 		case recvCh <- in: // Send didn't block, carry on.
+		case <-frontend.stream.Context().Done():
+			stopCh <- frontend.stream.Context().Err()
+			return
 		default: // Send blocked; record it and try again.
 			klog.V(2).InfoS("Receive channel from frontend is full", "userAgent", userAgent)
 			fullRecvChannelMetric := metrics.Metrics.FullRecvChannel(metrics.Proxy)
 			fullRecvChannelMetric.Inc()
-			recvCh <- in
+			sent := false
+			select {
+			case recvCh <- in:
+				sent = true
+			case <-frontend.stream.Context().Done():
+				stopCh <- frontend.stream.Context().Err()
+			}
 			fullRecvChannelMetric.Dec()
+			if !sent {
+				return
+			}
 		}
 	}
 }
@@ -914,7 +983,6 @@ func (s *ProxyServer) serveRecvFrontend(frontend *Frontend, recvCh <-chan *clien
 		case client.PacketType_DIAL_CLS:
 			random := pkt.GetCloseDial().Random
 			klog.V(5).InfoS("Received DIAL_CLOSE", "dialID", random)
-			// Currently not worrying about backend as we do not have an established connection,
 			if pd := s.PendingDial.Remove(random); pd != nil {
 				klog.ErrorS(nil, "Dial cancelled (DIAL_CLS) by frontend",
 					"dialID", random,
@@ -922,9 +990,17 @@ func (s *ProxyServer) serveRecvFrontend(frontend *Frontend, recvCh <-chan *clien
 					"dialDuration", time.Since(pd.start),
 				)
 				metrics.Metrics.ObserveDialFailure(metrics.DialFailureFrontendClose)
+			} else if established := s.removeEstablishedForDialID(frontend.streamUID, random); established != nil {
+				klog.V(2).InfoS("Dial cancelled (DIAL_CLS) by frontend after connection established, closing backend connection",
+					"dialID", random,
+					"connectionID", established.connectID,
+					"agentID", established.agentID,
+					"dialAddress", established.dialAddress,
+					"connectionDuration", time.Since(established.establishedAt),
+				)
+				metrics.Metrics.ObserveEstablishedConnectionsClosed(metrics.ConnectionClosedFrontendClose, 1)
+				s.sendBackendClose(established.backend, established.connectID, established.dialID, "dial cancelled by frontend after established")
 			} else {
-				// TODO: Fix the leaked connection due to race (client cancels a pending dial but
-				// server has completed the dial).
 				klog.ErrorS(nil, "Unrecognized dial cancelled (DIAL_CLS) by frontend", "dialID", random)
 			}
 
@@ -1127,12 +1203,29 @@ func (s *ProxyServer) readBackendToChannel(backend *Backend, recvCh chan *client
 
 		select {
 		case recvCh <- in: // Send didn't block, carry on.
+		case <-backend.Context().Done():
+			stopCh <- backend.Context().Err()
+			close(stopCh)
+			return
+		case <-backend.Done():
+			return
 		default: // Send blocked; record it and try again.
 			klog.V(2).InfoS("Receive channel from agent is full", "agentID", agentID)
 			fullRecvChannelMetric := metrics.Metrics.FullRecvChannel(metrics.Connect)
 			fullRecvChannelMetric.Inc()
-			recvCh <- in
+			sent := false
+			select {
+			case recvCh <- in:
+				sent = true
+			case <-backend.Context().Done():
+				stopCh <- backend.Context().Err()
+				close(stopCh)
+			case <-backend.Done():
+			}
 			fullRecvChannelMetric.Dec()
+			if !sent {
+				return
+			}
 		}
 	}
 }
@@ -1304,6 +1397,10 @@ func (s *ProxyServer) serveRecvBackend(backend *Backend, agentID string, recvCh 
 			}
 			if err := frontend.send(pkt); err != nil {
 				klog.ErrorS(err, "send to client stream failure", "agentID", agentID, "connectionID", resp.ConnectID)
+				if s.removeEstablished(agentID, resp.ConnectID) != nil {
+					metrics.Metrics.ObserveEstablishedConnectionsClosed(metrics.ConnectionClosedSendResponse, 1)
+				}
+				s.sendBackendClose(backend, resp.ConnectID, 0, "frontend send failure")
 			} else {
 				klog.V(5).InfoS("DATA sent to frontend")
 			}
