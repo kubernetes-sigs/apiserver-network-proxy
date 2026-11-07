@@ -663,6 +663,28 @@ func (s *ProxyServer) removeEstablishedForStream(streamUID string) []*ProxyClien
 	return ret
 }
 
+// removeEstablishedForDialID removes and returns the established connection
+// associated with dialID on a frontend stream.
+func (s *ProxyServer) removeEstablishedForDialID(streamUID string, dialID int64) *ProxyClientConnection {
+	s.fmu.Lock()
+	defer s.fmu.Unlock()
+	for agentID, established := range s.established {
+		for connID, f := range established {
+			if f.frontend == nil || f.frontend.streamUID != streamUID || f.dialID != dialID {
+				continue
+			}
+			delete(established, connID)
+			if len(established) == 0 {
+				delete(s.established, agentID)
+			}
+			metrics.Metrics.SetEstablishedConnCount(s.getCount(s.established))
+			metrics.Metrics.ObserveConnectionDuration(time.Since(f.establishedAt))
+			return f
+		}
+	}
+	return nil
+}
+
 // NewProxyServer creates a new ProxyServer instance
 func NewProxyServer(serverID string, proxyStrategies []proxystrategies.ProxyStrategy, serverCount int, agentAuthenticationOptions *AgentTokenAuthenticationOptions, channelSize int) *ProxyServer {
 	var bms []BackendManager
@@ -794,8 +816,17 @@ func (s *ProxyServer) readFrontendToChannel(frontend *Frontend, userAgent []stri
 			klog.V(2).InfoS("Receive channel from frontend is full", "userAgent", userAgent)
 			fullRecvChannelMetric := metrics.Metrics.FullRecvChannel(metrics.Proxy)
 			fullRecvChannelMetric.Inc()
-			recvCh <- in
+			sent := false
+			select {
+			case recvCh <- in:
+				sent = true
+			case <-frontend.stream.Context().Done():
+			}
 			fullRecvChannelMetric.Dec()
+			if !sent {
+				klog.V(2).InfoS("Frontend stream closed while receive channel is full", "userAgent", userAgent)
+				return
+			}
 		}
 	}
 }
@@ -920,7 +951,6 @@ func (s *ProxyServer) serveRecvFrontend(frontend *Frontend, recvCh <-chan *clien
 		case client.PacketType_DIAL_CLS:
 			random := pkt.GetCloseDial().Random
 			klog.V(5).InfoS("Received DIAL_CLOSE", "dialID", random)
-			// Currently not worrying about backend as we do not have an established connection,
 			if pd := s.PendingDial.Remove(random); pd != nil {
 				klog.ErrorS(nil, "Dial cancelled (DIAL_CLS) by frontend",
 					"dialID", random,
@@ -928,9 +958,17 @@ func (s *ProxyServer) serveRecvFrontend(frontend *Frontend, recvCh <-chan *clien
 					"dialDuration", time.Since(pd.start),
 				)
 				metrics.Metrics.ObserveDialFailure(metrics.DialFailureFrontendClose)
+			} else if established := s.removeEstablishedForDialID(frontend.streamUID, random); established != nil {
+				klog.V(2).InfoS("Dial cancelled (DIAL_CLS) by frontend after connection established, closing backend connection",
+					"dialID", random,
+					"connectionID", established.connectID,
+					"agentID", established.agentID,
+					"dialAddress", established.dialAddress,
+					"connectionDuration", time.Since(established.establishedAt),
+				)
+				metrics.Metrics.ObserveEstablishedConnectionsClosed(metrics.ConnectionClosedFrontendClose, 1)
+				s.sendBackendClose(established.backend, established.connectID, established.dialID, "dial cancelled by frontend after established")
 			} else {
-				// TODO: Fix the leaked connection due to race (client cancels a pending dial but
-				// server has completed the dial).
 				klog.ErrorS(nil, "Unrecognized dial cancelled (DIAL_CLS) by frontend", "dialID", random)
 			}
 
@@ -1137,8 +1175,18 @@ func (s *ProxyServer) readBackendToChannel(backend *Backend, recvCh chan *client
 			klog.V(2).InfoS("Receive channel from agent is full", "agentID", agentID)
 			fullRecvChannelMetric := metrics.Metrics.FullRecvChannel(metrics.Connect)
 			fullRecvChannelMetric.Inc()
-			recvCh <- in
+			sent := false
+			select {
+			case recvCh <- in:
+				sent = true
+			case <-backend.Context().Done():
+			}
 			fullRecvChannelMetric.Dec()
+			if !sent {
+				klog.V(2).InfoS("Agent stream closed while receive channel is full", "agentID", agentID)
+				close(stopCh)
+				return
+			}
 		}
 	}
 }
@@ -1310,6 +1358,11 @@ func (s *ProxyServer) serveRecvBackend(backend *Backend, agentID string, recvCh 
 			}
 			if err := frontend.send(pkt); err != nil {
 				klog.ErrorS(err, "send to client stream failure", "agentID", agentID, "connectionID", resp.ConnectID)
+				// The frontend stream cleanup sends CLOSE_REQ if it removed the connection first.
+				if s.removeEstablished(agentID, resp.ConnectID) != nil {
+					metrics.Metrics.ObserveEstablishedConnectionsClosed(metrics.ConnectionClosedSendResponse, 1)
+					s.sendBackendClose(backend, resp.ConnectID, 0, "frontend send failure")
+				}
 			} else {
 				klog.V(5).InfoS("DATA sent to frontend")
 			}
