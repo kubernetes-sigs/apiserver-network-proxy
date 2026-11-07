@@ -2082,3 +2082,289 @@ func TestEstablishedConnectionsClosedMetric(t *testing.T) {
 	}
 	assertEstablishedConnsMetric(t, 0)
 }
+
+type testProxyStreamWithCancel struct {
+	ctx    context.Context
+	recvFn func() (*client.Packet, error)
+	sendFn func(*client.Packet) error
+}
+
+func (m *testProxyStreamWithCancel) Send(p *client.Packet) error {
+	if m.sendFn != nil {
+		return m.sendFn(p)
+	}
+	return nil
+}
+func (m *testProxyStreamWithCancel) Recv() (*client.Packet, error) {
+	if m.recvFn != nil {
+		return m.recvFn()
+	}
+	return nil, io.EOF
+}
+func (m *testProxyStreamWithCancel) Context() context.Context {
+	return m.ctx
+}
+
+func TestReadBackendToChannel_ContextCancelledWhenFull(t *testing.T) {
+	metrics.Metrics.Reset()
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	conn := agentmock.NewMockAgentService_ConnectServer(ctrl)
+	conn.EXPECT().Context().AnyTimes().Return(ctx)
+
+	backend := &Backend{
+		conn:     conn,
+		id:       "agent1",
+		done:     make(chan struct{}),
+		sendLock: make(chan struct{}, 1),
+	}
+
+	recvCh := make(chan *client.Packet, 1)
+	stopCh := make(chan error, 1)
+	p := &ProxyServer{}
+
+	pkt1 := dataPkt(1, []byte("pkt1"))
+	pkt2 := dataPkt(1, []byte("pkt2"))
+
+	recvCh <- pkt1 // Fill the 1-slot channel
+
+	conn.EXPECT().Recv().Return(pkt2, nil)
+
+	go p.readBackendToChannel(backend, recvCh, stopCh)
+
+	// Wait until channel full metric is 1
+	err := wait.Poll(10*time.Millisecond, 2*time.Second, func() (bool, error) {
+		val := promtest.ToFloat64(metrics.Metrics.FullRecvChannel(metrics.Connect))
+		return val == 1, nil
+	})
+	if err != nil {
+		t.Fatalf("expected FullRecvChannel to be 1, got error: %v", err)
+	}
+
+	// Now cancel the context
+	cancel()
+
+	// Wait for readBackendToChannel to exit and metric to reset to 0
+	err = wait.Poll(10*time.Millisecond, 2*time.Second, func() (bool, error) {
+		val := promtest.ToFloat64(metrics.Metrics.FullRecvChannel(metrics.Connect))
+		return val == 0, nil
+	})
+	if err != nil {
+		t.Fatalf("expected FullRecvChannel to reset to 0 after cancellation, got error: %v", err)
+	}
+
+	// Verify stopCh received context.Canceled error
+	select {
+	case err := <-stopCh:
+		if !errors.Is(err, context.Canceled) {
+			t.Errorf("expected context.Canceled on stopCh, got %v", err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for stopCh")
+	}
+
+	// Verify recvCh was closed
+	select {
+	case _, ok := <-recvCh:
+		if ok {
+			_, ok2 := <-recvCh
+			if ok2 {
+				t.Fatal("expected recvCh to be closed")
+			}
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for recvCh close")
+	}
+}
+
+func TestReadFrontendToChannel_ContextCancelledWhenFull(t *testing.T) {
+	metrics.Metrics.Reset()
+	ctx, cancel := context.WithCancel(context.Background())
+	pkt1 := dataPkt(1, []byte("pkt1"))
+	pkt2 := dataPkt(1, []byte("pkt2"))
+
+	stream := &testProxyStreamWithCancel{
+		ctx: ctx,
+		recvFn: func() (*client.Packet, error) {
+			return pkt2, nil
+		},
+	}
+	frontend := &Frontend{
+		stream:    stream,
+		streamUID: "uid-1",
+	}
+
+	recvCh := make(chan *client.Packet, 1)
+	stopCh := make(chan error, 1)
+	p := &ProxyServer{}
+
+	recvCh <- pkt1 // Fill 1-slot channel
+
+	go p.readFrontendToChannel(frontend, []string{"test-agent"}, recvCh, stopCh)
+
+	// Wait until channel full metric is 1
+	err := wait.Poll(10*time.Millisecond, 2*time.Second, func() (bool, error) {
+		val := promtest.ToFloat64(metrics.Metrics.FullRecvChannel(metrics.Proxy))
+		return val == 1, nil
+	})
+	if err != nil {
+		t.Fatalf("expected FullRecvChannel to be 1, got error: %v", err)
+	}
+
+	// Now cancel the context
+	cancel()
+
+	// Wait for readFrontendToChannel to exit and metric to reset to 0
+	err = wait.Poll(10*time.Millisecond, 2*time.Second, func() (bool, error) {
+		val := promtest.ToFloat64(metrics.Metrics.FullRecvChannel(metrics.Proxy))
+		return val == 0, nil
+	})
+	if err != nil {
+		t.Fatalf("expected FullRecvChannel to reset to 0 after cancellation, got error: %v", err)
+	}
+
+	// Verify stopCh received context.Canceled error
+	select {
+	case err := <-stopCh:
+		if !errors.Is(err, context.Canceled) {
+			t.Errorf("expected context.Canceled on stopCh, got %v", err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for stopCh")
+	}
+}
+
+func TestServeRecvBackend_DataSendFailureCleansEstablished(t *testing.T) {
+	metrics.Metrics.Reset()
+	const agentID = "agent1"
+	const connID = int64(100)
+
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+
+	agentConn := agentmock.NewMockAgentService_ConnectServer(ctrl)
+	agentConn.EXPECT().Context().AnyTimes().Return(context.Background())
+	// When frontend.send fails, backend.Send should be called with CLOSE_REQ
+	agentConn.EXPECT().Send(gomock.Any()).DoAndReturn(func(p *client.Packet) error {
+		if p.Type != client.PacketType_CLOSE_REQ {
+			t.Errorf("expected CLOSE_REQ, got %v", p.Type)
+		}
+		if p.GetCloseRequest().ConnectID != connID {
+			t.Errorf("expected ConnectID %d, got %d", connID, p.GetCloseRequest().ConnectID)
+		}
+		return nil
+	})
+
+	backend := &Backend{
+		conn:     agentConn,
+		id:       agentID,
+		done:     make(chan struct{}),
+		sendLock: make(chan struct{}, 1),
+	}
+
+	p := NewProxyServer("", []proxystrategies.ProxyStrategy{proxystrategies.ProxyStrategyDefault}, 1, nil, xfrChannelSize)
+
+	stream := &testProxyStreamWithCancel{
+		ctx: context.Background(),
+		sendFn: func(*client.Packet) error {
+			return errors.New("frontend stream broken")
+		},
+	}
+	frontend := &Frontend{
+		stream:    stream,
+		streamUID: "uid-data-fail",
+	}
+
+	p.addEstablished(agentID, connID, &ProxyClientConnection{
+		frontend:  frontend,
+		connectID: connID,
+		backend:   backend,
+	})
+
+	recvCh := make(chan *client.Packet, 2)
+	recvCh <- dataPkt(connID, []byte("data-fail"))
+	close(recvCh)
+
+	p.serveRecvBackend(backend, agentID, recvCh)
+
+	// Verify that the connection is removed from established
+	if f, err := p.getFrontend(agentID, connID); err == nil && f != nil {
+		t.Errorf("expected connection %d to be removed from established after send failure, but found: %v", connID, f)
+	}
+
+	expect := map[metrics.ConnectionClosedReason]int{
+		metrics.ConnectionClosedSendResponse: 1,
+	}
+	if err := metricstest.DefaultTester.ExpectServerEstablishedConnsClosed(expect); err != nil {
+		t.Error(err)
+	}
+}
+
+func TestServerProxyDialClsRace_ClientCancelsAfterServerCompletesDial(t *testing.T) {
+	metrics.Metrics.Reset()
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+
+	const agentID = "agent1"
+	const dialID = int64(888)
+	const connectID = int64(777)
+	const streamUID = "stream-race-uid"
+
+	agentConn := agentmock.NewMockAgentService_ConnectServer(ctrl)
+	agentConn.EXPECT().Context().AnyTimes().Return(context.Background())
+	// The server should send CLOSE_REQ to the backend agent to close the orphaned connection
+	agentConn.EXPECT().Send(gomock.Any()).DoAndReturn(func(p *client.Packet) error {
+		if p.Type != client.PacketType_CLOSE_REQ {
+			t.Errorf("expected CLOSE_REQ to agent, got %v", p.Type)
+		}
+		if p.GetCloseRequest().ConnectID != connectID {
+			t.Errorf("expected ConnectID %d, got %d", connectID, p.GetCloseRequest().ConnectID)
+		}
+		return nil
+	})
+
+	backend := &Backend{
+		conn:     agentConn,
+		id:       agentID,
+		done:     make(chan struct{}),
+		sendLock: make(chan struct{}, 1),
+	}
+
+	p := NewProxyServer("", []proxystrategies.ProxyStrategy{proxystrategies.ProxyStrategyDefault}, 1, nil, xfrChannelSize)
+
+	frontend := &Frontend{
+		stream:    &testProxyStreamWithCancel{ctx: context.Background()},
+		streamUID: streamUID,
+	}
+
+	// Server already completed the dial: it's not in PendingDial, it is in established
+	p.addEstablished(agentID, connectID, &ProxyClientConnection{
+		frontend:    frontend,
+		dialID:      dialID,
+		connectID:   connectID,
+		agentID:     agentID,
+		backend:     backend,
+		dialAddress: "127.0.0.1:8080",
+	})
+
+	// Client sends DIAL_CLS for the dialID it cancelled
+	recvCh := make(chan *client.Packet, 2)
+	recvCh <- dialClosePkt(dialID)
+	close(recvCh)
+
+	p.serveRecvFrontend(frontend, recvCh)
+
+	// Verify that the connection is removed from established (no leak!)
+	if f, err := p.getFrontend(agentID, connectID); err == nil && f != nil {
+		t.Errorf("expected connection %d to be cleaned up from established, but it was leaked: %v", connectID, f)
+	}
+
+	expect := map[metrics.ConnectionClosedReason]int{
+		metrics.ConnectionClosedFrontendClose: 1,
+	}
+	if err := metricstest.DefaultTester.ExpectServerEstablishedConnsClosed(expect); err != nil {
+		t.Error(err)
+	}
+}
