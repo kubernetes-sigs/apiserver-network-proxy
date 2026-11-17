@@ -18,6 +18,7 @@ package framework
 
 import (
 	"fmt"
+	"math/rand/v2"
 	"net"
 	"net/http"
 	"strconv"
@@ -44,23 +45,25 @@ func checkLiveness(addr string) bool {
 	return resp.StatusCode == http.StatusOK
 }
 
-// FreePorts finds [count] available ports.
+// FreePorts finds [count] available ports. It picks ports below the OS
+// ephemeral ranges (32768+ on Linux, 49152+ on macOS) because the server
+// options reject ephemeral ports.
 func FreePorts(count int) ([]int, error) {
-	ports := make([]int, count)
-	for i := 0; i < count; i++ {
-		l, err := net.Listen("tcp", "127.0.0.1:0")
+	const minPort, maxPort = 10000, 32768
+	ports := make([]int, 0, count)
+	var lastErr error
+	for attempts := 0; len(ports) < count; attempts++ {
+		if attempts >= 100 {
+			return nil, fmt.Errorf("failed to reserve %d ports: %w", count, lastErr)
+		}
+		p := minPort + rand.IntN(maxPort-minPort)
+		l, err := net.Listen("tcp", net.JoinHostPort("127.0.0.1", strconv.Itoa(p)))
 		if err != nil {
-			return nil, fmt.Errorf("failed to reserve ports: %w", err)
+			lastErr = err
+			continue
 		}
 		defer l.Close()
-		_, p, err := net.SplitHostPort(l.Addr().String())
-		if err != nil {
-			return nil, fmt.Errorf("failed to reserve ports: %w", err)
-		}
-		ports[i], err = strconv.Atoi(p)
-		if err != nil {
-			return nil, fmt.Errorf("failed to reserve ports: %w", err)
-		}
+		ports = append(ports, p)
 	}
 	return ports, nil
 }

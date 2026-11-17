@@ -149,8 +149,10 @@ func serverOptions(t testing.TB, opts ProxyServerOpts) (*serveropts.ProxyRunOpti
 		o.FrontendWriteChannelSize = *opts.FrontendWriteChannelSize
 	}
 
-	uid := uuid.New().String()
-	o.UdsName = filepath.Join(CertsDir, fmt.Sprintf("server-%s.sock", uid))
+	// Keep the name short. macOS limits socket paths to 104 bytes and
+	// $TMPDIR is long there.
+	uid := uuid.New().String()[:8]
+	o.UdsName = filepath.Join(CertsDir, fmt.Sprintf("s-%s.sock", uid))
 	o.ServerPort = 0 // Required for UDS
 
 	o.ClusterCert = filepath.Join(CertsDir, TestServerCertFile)
