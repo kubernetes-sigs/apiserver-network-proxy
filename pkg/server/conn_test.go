@@ -66,7 +66,7 @@ type dialTestAgent struct {
 func newDialTestAgent(t *testing.T, server *ProxyServer, beforeSend func(*client.Packet)) *dialTestAgent {
 	t.Helper()
 	ctrl := gomock.NewController(t)
-	agentConn := agentmock.NewMockAgentService_ConnectServer(ctrl)
+	agentConn := agentmock.NewMockAgentService_ConnectServer[client.Packet, client.Packet](ctrl)
 	ctx, cancel := context.WithCancel(metadata.NewIncomingContext(context.Background(), metadata.MD{
 		"agentid": []string{uuid.New().String()},
 	}))

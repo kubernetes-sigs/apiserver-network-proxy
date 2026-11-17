@@ -71,13 +71,13 @@ Proto definitions are compiled with `protoc`. Please ensure you have protoc inst
 
 Currently, we are using protoc v36.2 (`libprotoc 36.2`)
 
-Currently, we are using protoc-gen-go@v1.27.1
+Currently, we are using protoc-gen-go@v1.36.12
+ 
+`go install google.golang.org/protobuf/cmd/protoc-gen-go@v1.36.12`
 
-`go install google.golang.org/protobuf/cmd/protoc-gen-go@v1.27.1`
+Currently, we are using protoc-gen-go-grpc@v1.6.2
 
-Currently, we are using protoc-gen-go-grpc@v1.2
-
-`go install google.golang.org/grpc/cmd/protoc-gen-go-grpc@v1.2`
+`go install google.golang.org/grpc/cmd/protoc-gen-go-grpc@v1.6.2`
 
 ### Local builds
 
