@@ -379,6 +379,10 @@ func (p *Proxy) runUDSFrontendServer(ctx context.Context, o *options.ProxyRunOpt
 				Server: s,
 			},
 		}
+		udsListener, err := getUDSListener(ctx, o.UdsName)
+		if err != nil {
+			return nil, fmt.Errorf("failed to get uds listener: %v", err)
+		}
 		stop = func(shutdownCtx context.Context) error {
 			return server.Shutdown(shutdownCtx)
 		}
@@ -387,16 +391,11 @@ func (p *Proxy) runUDSFrontendServer(ctx context.Context, o *options.ProxyRunOpt
 			"udsFile", o.UdsName,
 		)
 		go runpprof.Do(ctx, labels, func(context.Context) {
-			udsListener, err := getUDSListener(ctx, o.UdsName)
-			if err != nil {
-				klog.ErrorS(err, "failed to get uds listener")
-			}
 			defer func() {
 				err := udsListener.Close()
 				klog.ErrorS(err, "failed to close uds listener")
 			}()
-			err = server.Serve(udsListener)
-			if err != nil {
+			if err := server.Serve(udsListener); err != nil {
 				klog.ErrorS(err, "failed to serve uds requests")
 			}
 		})
