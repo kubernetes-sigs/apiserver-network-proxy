@@ -68,6 +68,10 @@ DESIRED_MOCKGEN := "v0.6.0"
 
 PROTOC_VERSION := $(shell protoc --version)
 DESIRED_PROTOC := "libprotoc 36.2"
+PROTOC_GEN_GO_VERSION := $(shell protoc-gen-go --version)
+DESIRED_PROTOC_GEN_GO := "protoc-gen-go v1.36.12"
+PROTOC_GRPC_VERSION := $(shell protoc-gen-go-grpc --version)
+DESIRED_PROTOC_GRPC := "protoc-gen-go-grpc 1.6.2"
 
 ## --------------------------------------
 ## Testing
@@ -163,6 +167,10 @@ gen: mod-download gen-proto mock_gen
 gen-proto:
 	echo "Protoc is set to $(PROTOC_VERSION)"
 	if [ "$(PROTOC_VERSION)" != $(DESIRED_PROTOC) ]; then echo "Error need protoc version $(DESIRED_PROTOC)"; exit 1; fi
+	echo "Proto-gen-go is set to $(PROTOC_GEN_GO_VERSION)"
+	if [ "$(PROTOC_GEN_GO_VERSION)" != $(DESIRED_PROTOC_GEN_GO) ]; then echo "Error need protoc gen go version $(DESIRED_PROTOC_GEN_GO)"; exit 1; fi
+	echo "Proto-gen-go-grpc is set to $(PROTOC_GRPC_VERSION)"
+	if [ "$(PROTOC_GRPC_VERSION)" != $(DESIRED_PROTOC_GRPC) ]; then echo "Error need protoc gen go grpc version $(DESIRED_PROTOC_GRPC)"; exit 1; fi
 	protoc -I . konnectivity-client/proto/client/client.proto --go_out=. --go_opt=paths=source_relative --go-grpc_out=require_unimplemented_servers=false:. --go-grpc_opt=paths=source_relative
 	cat hack/go-license-header.txt konnectivity-client/proto/client/client_grpc.pb.go > konnectivity-client/proto/client/client_grpc.licensed.go
 	mv konnectivity-client/proto/client/client_grpc.licensed.go konnectivity-client/proto/client/client_grpc.pb.go

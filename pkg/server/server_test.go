@@ -169,7 +169,7 @@ func TestAgentTokenAuthenticationErrorsToken(t *testing.T) {
 			ctx := context.Background()
 			defer ctx.Done()
 			ctx = metadata.NewIncomingContext(ctx, md)
-			conn := agentmock.NewMockAgentService_ConnectServer(stub)
+			conn := agentmock.NewMockAgentService_ConnectServer[client.Packet, client.Packet](stub)
 			conn.EXPECT().Context().AnyTimes().Return(ctx)
 
 			// close agent's connection if no error is expected
@@ -1345,7 +1345,7 @@ func TestBackendConnectionDurationMetric(t *testing.T) {
 	defer stub.Finish()
 
 	ctx := metadata.NewIncomingContext(context.Background(), metadata.Pairs(header.AgentID, "agent1"))
-	conn := agentmock.NewMockAgentService_ConnectServer(stub)
+	conn := agentmock.NewMockAgentService_ConnectServer[client.Packet, client.Packet](stub)
 	conn.EXPECT().Context().AnyTimes().Return(ctx)
 	conn.EXPECT().SendHeader(gomock.Any()).Return(nil)
 	conn.EXPECT().Recv().Return(nil, io.EOF)
@@ -1466,10 +1466,10 @@ func TestRemoveEstablishedForStream(t *testing.T) {
 	assertConnectionDurationCount(t, 3)
 }
 
-func prepareFrontendConn(ctrl *gomock.Controller) *agentmock.MockAgentService_ConnectServer {
+func prepareFrontendConn(ctrl *gomock.Controller) *agentmock.MockAgentService_ConnectServer[client.Packet, client.Packet] {
 	// prepare the connection to fontend  of proxy-server
 	// TODO: replace with a mock ProxyService_ProxyServer
-	frontendConn := agentmock.NewMockAgentService_ConnectServer(ctrl)
+	frontendConn := agentmock.NewMockAgentService_ConnectServer[client.Packet, client.Packet](ctrl)
 	frontendConnMD := metadata.MD{
 		":authority":   []string{"127.0.0.1:8090"},
 		"content-type": []string{"application/grpc"},
@@ -1483,12 +1483,12 @@ func prepareFrontendConn(ctrl *gomock.Controller) *agentmock.MockAgentService_Co
 // prepareAgentConn builds the mocked agent side of a connection, without
 // registering a backend for it. Use it when the test lets ProxyServer.Connect
 // register the backend itself.
-func prepareAgentConn(ctrl *gomock.Controller, agentidentifiers []string) *agentmock.MockAgentService_ConnectServer {
+func prepareAgentConn(ctrl *gomock.Controller, agentidentifiers []string) *agentmock.MockAgentService_ConnectServer[client.Packet, client.Packet] {
 	if agentidentifiers == nil {
 		agentidentifiers = []string{}
 	}
 	// prepare the the connection to agent of proxy-server
-	agentConn := agentmock.NewMockAgentService_ConnectServer(ctrl)
+	agentConn := agentmock.NewMockAgentService_ConnectServer[client.Packet, client.Packet](ctrl)
 	agentConnMD := metadata.MD{
 		":authority":       []string{"127.0.0.1:8091"},
 		"agentid":          []string{uuid.New().String()},
@@ -1501,7 +1501,7 @@ func prepareAgentConn(ctrl *gomock.Controller, agentidentifiers []string) *agent
 	return agentConn
 }
 
-func prepareAgentConnMD(t testing.TB, ctrl *gomock.Controller, proxyServer *ProxyServer, agentidentifiers []string) (*agentmock.MockAgentService_ConnectServer, *Backend) {
+func prepareAgentConnMD(t testing.TB, ctrl *gomock.Controller, proxyServer *ProxyServer, agentidentifiers []string) (*agentmock.MockAgentService_ConnectServer[client.Packet, client.Packet], *Backend) {
 	t.Helper()
 	agentConn := prepareAgentConn(ctrl, agentidentifiers)
 	backend, err := NewBackend(agentConn)
@@ -1512,7 +1512,7 @@ func prepareAgentConnMD(t testing.TB, ctrl *gomock.Controller, proxyServer *Prox
 	return agentConn, backend
 }
 
-func baseServerProxyTestWithoutBackend(t *testing.T, validate func(*agentmock.MockAgentService_ConnectServer)) {
+func baseServerProxyTestWithoutBackend(t *testing.T, validate func(*agentmock.MockAgentService_ConnectServer[client.Packet, client.Packet])) {
 	ctrl := gomock.NewController(t)
 	defer ctrl.Finish()
 
@@ -1524,7 +1524,7 @@ func baseServerProxyTestWithoutBackend(t *testing.T, validate func(*agentmock.Mo
 	proxyServer.Proxy(frontendConn)
 }
 
-func baseServerProxyTestWithBackend(t *testing.T, validate func(*agentmock.MockAgentService_ConnectServer, *agentmock.MockAgentService_ConnectServer)) {
+func baseServerProxyTestWithBackend(t *testing.T, validate func(*agentmock.MockAgentService_ConnectServer[client.Packet, client.Packet], *agentmock.MockAgentService_ConnectServer[client.Packet, client.Packet])) {
 	ctrl := gomock.NewController(t)
 	defer ctrl.Finish()
 
@@ -1541,7 +1541,7 @@ func baseServerProxyTestWithBackend(t *testing.T, validate func(*agentmock.MockA
 }
 
 func TestServerProxyNoBackend(t *testing.T) {
-	validate := func(frontendConn *agentmock.MockAgentService_ConnectServer) {
+	validate := func(frontendConn *agentmock.MockAgentService_ConnectServer[client.Packet, client.Packet]) {
 		// receive DIAL_REQ from frontend and proxy to backend
 		dialReq := &client.Packet{
 			Type: client.PacketType_DIAL_REQ,
@@ -1580,7 +1580,7 @@ func TestServerProxyNoBackend(t *testing.T) {
 }
 
 func TestServerProxyNormalClose(t *testing.T) {
-	validate := func(frontendConn, agentConn *agentmock.MockAgentService_ConnectServer) {
+	validate := func(frontendConn, agentConn *agentmock.MockAgentService_ConnectServer[client.Packet, client.Packet]) {
 		const dialID = 111
 		const connectID = 123456
 		// receive DIAL_REQ from frontend and proxy to backend
@@ -1658,7 +1658,7 @@ func TestServerProxyFrontendCloseUpdatesEstablishedMetrics(t *testing.T) {
 }
 
 func TestServerProxyRecvChanFull(t *testing.T) {
-	validate := func(frontendConn, agentConn *agentmock.MockAgentService_ConnectServer) {
+	validate := func(frontendConn, agentConn *agentmock.MockAgentService_ConnectServer[client.Packet, client.Packet]) {
 		const dialID = 111
 		const connectID = 1
 		// receive DIAL_REQ from frontend and proxy to backend
@@ -1738,7 +1738,7 @@ func TestServerProxyRecvChanFull(t *testing.T) {
 }
 
 func TestServerProxyNoDial(t *testing.T) {
-	baseServerProxyTestWithBackend(t, func(frontendConn, _ *agentmock.MockAgentService_ConnectServer) {
+	baseServerProxyTestWithBackend(t, func(frontendConn, _ *agentmock.MockAgentService_ConnectServer[client.Packet, client.Packet]) {
 		const connectID = 123456
 		data := &client.Packet{
 			Type: client.PacketType_DATA,
@@ -1758,7 +1758,7 @@ func TestServerProxyNoDial(t *testing.T) {
 }
 
 func TestServerProxyConnectionMismatch(t *testing.T) {
-	baseServerProxyTestWithBackend(t, func(frontendConn, agentConn *agentmock.MockAgentService_ConnectServer) {
+	baseServerProxyTestWithBackend(t, func(frontendConn, agentConn *agentmock.MockAgentService_ConnectServer[client.Packet, client.Packet]) {
 		const dialID = 111
 		const firstConnectID = 123456
 		const secondConnectID = 654321

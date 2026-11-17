@@ -46,7 +46,7 @@ import (
 // is in production.
 type httpConnectFixture struct {
 	proxyServer *ProxyServer
-	agentConn   *agentmock.MockAgentService_ConnectServer
+	agentConn   *agentmock.MockAgentService_ConnectServer[client.Packet, client.Packet]
 	backend     *Backend
 	// toAgent receives every packet the server sends to the agent.
 	toAgent chan *client.Packet

@@ -147,7 +147,7 @@ func newWriterTestServer(t *testing.T) *writerTestServer {
 	t.Helper()
 	ctx, cancel := context.WithCancel(context.Background())
 	ctrl := gomock.NewController(t)
-	conn := agentmock.NewMockAgentService_ConnectServer(ctrl)
+	conn := agentmock.NewMockAgentService_ConnectServer[client.Packet, client.Packet](ctrl)
 	conn.EXPECT().Context().Return(ctx).AnyTimes()
 	conn.EXPECT().Send(gomock.Any()).Return(nil).AnyTimes()
 	f := &writerTestServer{
