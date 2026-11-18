@@ -197,7 +197,7 @@ func newServerMetrics() *ServerMetrics {
 			Namespace: Namespace,
 			Subsystem: Subsystem,
 			Name:      "full_frontend_write_queues",
-			Help:      "Number of per-connection HTTP CONNECT frontend write queues currently at capacity.",
+			Help:      "Number of per-connection frontend write queues currently at capacity.",
 		},
 		[]string{},
 	)
@@ -206,7 +206,7 @@ func newServerMetrics() *ServerMetrics {
 			Namespace: Namespace,
 			Subsystem: Subsystem,
 			Name:      "blocked_frontend_write_channels",
-			Help:      "Number of backend receive loops currently blocked enqueueing to a full HTTP CONNECT frontend write channel.",
+			Help:      "Number of backend receive loops currently blocked enqueueing to a full frontend write channel.",
 		},
 		[]string{},
 	)
@@ -419,14 +419,14 @@ func (s *ServerMetrics) FullRecvChannel(serviceMethod string) prometheus.Gauge {
 	return s.fullRecvChannels.With(prometheus.Labels{"service_method": serviceMethod})
 }
 
-// FullFrontendWriteQueues returns the number of per-connection HTTP CONNECT
-// frontend write queues currently at capacity.
+// FullFrontendWriteQueues returns the number of per-connection frontend write
+// queues currently at capacity.
 func (s *ServerMetrics) FullFrontendWriteQueues() prometheus.Gauge {
 	return s.fullWriteQueues.WithLabelValues()
 }
 
 // BlockedFrontendWriteChannels returns the number of backend receive loops
-// currently blocked enqueueing to a full HTTP CONNECT frontend write channel.
+// currently blocked enqueueing to a full frontend write channel.
 func (s *ServerMetrics) BlockedFrontendWriteChannels() prometheus.Gauge {
 	return s.blockedWriteChannels.WithLabelValues()
 }
