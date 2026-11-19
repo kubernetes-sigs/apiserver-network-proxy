@@ -485,7 +485,7 @@ func (h *httpConnectStream) isClosed() bool {
 // It also interrupts a blocked socket write and any Send waiting for queue space.
 func (h *httpConnectStream) close() {
 	h.closeOnce.Do(func() {
-		h.stopFrontendWriteQueueMetric()
+		h.writeMetrics.stop()
 		close(h.closed)
 		if err := h.conn.Close(); err != nil {
 			klog.V(4).ErrorS(err, "failed to close hijacked connection", "host", h.host, "dialID", h.dialID)

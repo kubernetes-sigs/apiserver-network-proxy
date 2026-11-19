@@ -139,6 +139,8 @@ type writerTestServer struct {
 	proxy   *ProxyServer
 	backend *Backend
 	packets chan *client.Packet
+	// toAgent records packets sent to the agent, dropping them once full.
+	toAgent chan *client.Packet
 	done    chan struct{}
 	cancel  context.CancelFunc
 }
@@ -149,11 +151,19 @@ func newWriterTestServer(t *testing.T) *writerTestServer {
 	ctrl := gomock.NewController(t)
 	conn := agentmock.NewMockAgentService_ConnectServer[client.Packet, client.Packet](ctrl)
 	conn.EXPECT().Context().Return(ctx).AnyTimes()
-	conn.EXPECT().Send(gomock.Any()).Return(nil).AnyTimes()
+	toAgent := make(chan *client.Packet, 32)
+	conn.EXPECT().Send(gomock.Any()).DoAndReturn(func(pkt *client.Packet) error {
+		select {
+		case toAgent <- pkt:
+		default:
+		}
+		return nil
+	}).AnyTimes()
 	f := &writerTestServer{
 		proxy:   NewProxyServer("test", []proxystrategies.ProxyStrategy{proxystrategies.ProxyStrategyDefault}, 1, nil, 10),
 		backend: &Backend{id: "agent", conn: conn, sendLock: make(chan struct{}, 1)},
 		packets: make(chan *client.Packet),
+		toAgent: toAgent,
 		done:    make(chan struct{}),
 		cancel:  cancel,
 	}
@@ -597,22 +607,22 @@ func TestHTTPConnectWriterFullQueueMetricAfterConcurrentUpdates(t *testing.T) {
 	h := &httpConnectStream{writeCh: make(chan *client.Packet, 1)}
 	pkt := dataPkt(1, []byte("data"))
 	h.writeCh <- pkt
-	h.updateFrontendWriteQueueMetric()
-	defer h.stopFrontendWriteQueueMetric()
+	h.writeMetrics.update(h.writeCh)
+	defer h.writeMetrics.stop()
 	consume, produce := make(chan struct{}), make(chan struct{})
 	done := make(chan struct{}, 2)
 	var wg sync.WaitGroup
 	wg.Go(func() {
 		for range consume {
 			<-h.writeCh
-			h.updateFrontendWriteQueueMetric()
+			h.writeMetrics.update(h.writeCh)
 			done <- struct{}{}
 		}
 	})
 	wg.Go(func() {
 		for range produce {
 			h.writeCh <- pkt
-			h.updateFrontendWriteQueueMetric()
+			h.writeMetrics.update(h.writeCh)
 			done <- struct{}{}
 		}
 	})

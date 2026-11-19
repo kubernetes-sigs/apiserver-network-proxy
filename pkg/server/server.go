@@ -699,8 +699,9 @@ func (s *ProxyServer) SetBackendDialTimeout(timeout time.Duration) {
 	s.backendDialTimeout = timeout
 }
 
-// SetFrontendWriteChannelSize configures HTTP-CONNECT response buffering.
-// A size of zero disables the queue and uses synchronous socket writes.
+// SetFrontendWriteChannelSize configures the per-connection write queue of
+// gRPC and HTTP-CONNECT frontends. A size of zero disables the queue and
+// writes synchronously.
 func (s *ProxyServer) SetFrontendWriteChannelSize(size int) {
 	s.frontendWriteChannelSize = size
 }
@@ -712,7 +713,12 @@ func (s *ProxyServer) Proxy(stream client.ProxyService_ProxyServer) error {
 	metrics.Metrics.ConnectionInc(metrics.Proxy)
 	defer metrics.Metrics.ConnectionDec(metrics.Proxy)
 
-	return s.proxy(stream)
+	if s.frontendWriteChannelSize == 0 {
+		return s.proxy(stream)
+	}
+	queued := newGRPCFrontendStream(stream, s.frontendWriteChannelSize)
+	defer queued.drain()
+	return s.proxy(queued)
 }
 
 // proxy serves a frontend stream, whether it arrived over gRPC or over
