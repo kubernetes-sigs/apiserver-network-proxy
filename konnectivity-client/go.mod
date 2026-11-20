@@ -2,6 +2,8 @@ module sigs.k8s.io/apiserver-network-proxy/konnectivity-client
 
 go 1.24.0
 
+toolchain go1.26.11
+
 // Prefer to keep requirements compatible with the oldest supported
 // k/k minor version, to prevent client backport issues.
 require (
