@@ -41,6 +41,7 @@ func TestDefaultServerOptions(t *testing.T) {
 	assertDefaultValue(t, "AdminServerPort", defaultAgentOptions.AdminServerPort, 8094)
 	assertDefaultValue(t, "EnableProfiling", defaultAgentOptions.EnableProfiling, false)
 	assertDefaultValue(t, "EnableContentionProfiling", defaultAgentOptions.EnableContentionProfiling, false)
+	assertDefaultValue(t, "EnableTLSCertificateReload", defaultAgentOptions.EnableTLSCertificateReload, false)
 	assertDefaultValue(t, "AgentIdentifiers", defaultAgentOptions.AgentIdentifiers, "")
 	assertDefaultValue(t, "SyncInterval", defaultAgentOptions.SyncInterval, 1*time.Second)
 	assertDefaultValue(t, "ProbeInterval", defaultAgentOptions.ProbeInterval, 1*time.Second)

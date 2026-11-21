@@ -45,6 +45,7 @@ import (
 	"sigs.k8s.io/apiserver-network-proxy/konnectivity-client/proto/client"
 	"sigs.k8s.io/apiserver-network-proxy/pkg/server"
 	"sigs.k8s.io/apiserver-network-proxy/pkg/server/leases"
+	"sigs.k8s.io/apiserver-network-proxy/pkg/server/metrics"
 	"sigs.k8s.io/apiserver-network-proxy/pkg/server/proxystrategies"
 	"sigs.k8s.io/apiserver-network-proxy/pkg/util"
 	"sigs.k8s.io/apiserver-network-proxy/proto/agent"
@@ -148,7 +149,7 @@ func (p *Proxy) Run(o *options.ProxyRunOptions, stopCh <-chan struct{}) error {
 	}
 
 	klog.V(1).Infoln("Starting agent server for tunnel connections.")
-	err = p.runAgentServer(o, p.server)
+	err = p.runAgentServer(ctx, o, p.server)
 	if err != nil {
 		return fmt.Errorf("failed to run the agent server: %v", err)
 	}
@@ -437,12 +438,37 @@ func (p *Proxy) getTLSConfig(caFile, certFile, keyFile string, cipherSuites []st
 	return tlsConfig, nil
 }
 
+// getReloadingTLSConfig returns a TLS config that reloads its files when they
+// change. Handshakes use the config from GetConfigForClient. credentials.NewTLS
+// adds h2 to that config, but http.Server.ServeTLS adds http/1.1 only to the
+// config it is given, so an HTTP listener passes http/1.1 in nextProtos.
+func (p *Proxy) getReloadingTLSConfig(ctx context.Context, o *options.ProxyRunOptions, caFile, certFile, keyFile, purpose string, nextProtos []string) (*tls.Config, error) {
+	minVersion, err := util.GetTLSVersion(o.TLSMinVersion)
+	if err != nil {
+		return nil, fmt.Errorf("failed to parse TLS min version: %w", err)
+	}
+	hooks := util.TLSReloadHooks{
+		OnSuccess: func() { metrics.Metrics.ObserveTLSReloadSuccess(purpose) },
+		OnFailure: func() { metrics.Metrics.ObserveTLSReloadFailure(purpose) },
+	}
+	return util.GetReloadingServerTLSConfig(ctx, caFile, certFile, keyFile, nextProtos, tlsCipherSuites(o.CipherSuites), minVersion, hooks)
+}
+
 func (p *Proxy) runMTLSFrontendServer(ctx context.Context, o *options.ProxyRunOptions, s *server.ProxyServer) (StopFunc, error) {
 	var stop StopFunc
 
 	var tlsConfig *tls.Config
 	var err error
-	if tlsConfig, err = p.getTLSConfig(o.ServerCaCert, o.ServerCert, o.ServerKey, o.CipherSuites, o.TLSMinVersion); err != nil {
+	if o.EnableTLSCertificateReload {
+		var nextProtos []string
+		if o.Mode != server.ModeGRPC {
+			nextProtos = []string{"http/1.1"}
+		}
+		tlsConfig, err = p.getReloadingTLSConfig(ctx, o, o.ServerCaCert, o.ServerCert, o.ServerKey, metrics.TLSPurposeFrontend, nextProtos)
+	} else {
+		tlsConfig, err = p.getTLSConfig(o.ServerCaCert, o.ServerCert, o.ServerKey, o.CipherSuites, o.TLSMinVersion)
+	}
+	if err != nil {
 		return nil, err
 	}
 
@@ -497,10 +523,15 @@ func (p *Proxy) runMTLSFrontendServer(ctx context.Context, o *options.ProxyRunOp
 	return stop, nil
 }
 
-func (p *Proxy) runAgentServer(o *options.ProxyRunOptions, server *server.ProxyServer) error {
+func (p *Proxy) runAgentServer(ctx context.Context, o *options.ProxyRunOptions, server *server.ProxyServer) error {
 	var tlsConfig *tls.Config
 	var err error
-	if tlsConfig, err = p.getTLSConfig(o.ClusterCaCert, o.ClusterCert, o.ClusterKey, o.CipherSuites, o.TLSMinVersion); err != nil {
+	if o.EnableTLSCertificateReload {
+		tlsConfig, err = p.getReloadingTLSConfig(ctx, o, o.ClusterCaCert, o.ClusterCert, o.ClusterKey, metrics.TLSPurposeCluster, nil)
+	} else {
+		tlsConfig, err = p.getTLSConfig(o.ClusterCaCert, o.ClusterCert, o.ClusterKey, o.CipherSuites, o.TLSMinVersion)
+	}
+	if err != nil {
 		return err
 	}
 
@@ -523,7 +554,7 @@ func (p *Proxy) runAgentServer(o *options.ProxyRunOptions, server *server.ProxyS
 		"core", "agentListener",
 		"port", strconv.Itoa(o.AgentPort),
 	)
-	go runpprof.Do(context.Background(), labels, func(context.Context) { grpcServer.Serve(lis) })
+	go runpprof.Do(ctx, labels, func(context.Context) { grpcServer.Serve(lis) })
 	p.agentServer = grpcServer
 
 	return nil
