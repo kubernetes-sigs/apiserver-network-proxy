@@ -17,6 +17,8 @@ limitations under the License.
 package server
 
 import (
+	"errors"
+	"net"
 	"sync"
 
 	"k8s.io/klog/v2"
@@ -64,7 +66,53 @@ func newGRPCFrontendStream(stream client.ProxyService_ProxyServer, queueSize int
 
 // Send queues pkt for the writer. It blocks while the queue is full.
 func (g *grpcFrontendStream) Send(pkt *client.Packet) error {
-	return enqueueFrontendWrite(g.writeCh, g.closed, &g.writeMetrics, pkt, "packetType", pkt.Type)
+	return g.enqueue(pkt, nil)
+}
+
+func (g *grpcFrontendStream) enqueue(pkt *client.Packet, abort <-chan struct{}) error {
+	return enqueueFrontendWrite(g.writeCh, g.closed, abort, &g.writeMetrics, pkt, "packetType", pkt.Type)
+}
+
+// sendFromBackend queues a packet from backend's receive loop. Once backend
+// goes away without a clean EOF, it stops waiting for queue space and drops
+// the packet, so the receive loop can exit and run its cleanup. After a clean
+// EOF it waits like Send, so the agent's last packets still reach the
+// frontend.
+func (g *grpcFrontendStream) sendFromBackend(pkt *client.Packet, backend *Backend) error {
+	err := g.enqueue(pkt, backend.Context().Done())
+	if errors.Is(err, errBackendGone) && backend.receivedEOF.Load() {
+		return g.enqueue(pkt, nil)
+	}
+	return err
+}
+
+// sendOnBackendClose queues a packet the server sends because a backend went
+// away. If the queue is full, it queues pkt from a new goroutine instead of
+// waiting, so the cleanup for the other frontends on that backend is not held
+// up. The packet still reaches the frontend after the ones already queued,
+// unless the stream ends first.
+func (g *grpcFrontendStream) sendOnBackendClose(pkt *client.Packet) error {
+	select {
+	case <-g.closed:
+		return net.ErrClosed
+	default:
+	}
+
+	select {
+	case g.writeCh <- pkt:
+		g.writeMetrics.update(g.writeCh)
+		return nil
+	case <-g.closed:
+		return net.ErrClosed
+	default:
+	}
+
+	go func() {
+		if err := g.enqueue(pkt, nil); err != nil {
+			klog.V(2).InfoS("Frontend ended before a packet sent on agent disconnect was queued", "packetType", pkt.Type, "err", err)
+		}
+	}()
+	return nil
 }
 
 func (g *grpcFrontendStream) serveFrontendWrites() {

@@ -72,12 +72,36 @@ type Frontend struct {
 }
 
 func (f *Frontend) Send(pkt *client.Packet) error {
+	return f.send(pkt, f.stream.Send)
+}
+
+// sendFromBackend is Send for a packet from backend's receive loop. A gRPC
+// frontend drops the packet instead of waiting for queue space once backend
+// goes away without a clean EOF. HTTP-CONNECT frontends are interrupted by
+// closeWithBackend instead.
+func (f *Frontend) sendFromBackend(pkt *client.Packet, backend *Backend) error {
+	if g, ok := f.stream.(*grpcFrontendStream); ok {
+		return f.send(pkt, func(pkt *client.Packet) error { return g.sendFromBackend(pkt, backend) })
+	}
+	return f.Send(pkt)
+}
+
+// sendOnBackendClose is Send for a packet the server sends because a backend
+// went away. A gRPC frontend with a full queue does not hold up the caller.
+func (f *Frontend) sendOnBackendClose(pkt *client.Packet) error {
+	if g, ok := f.stream.(*grpcFrontendStream); ok {
+		return f.send(pkt, g.sendOnBackendClose)
+	}
+	return f.Send(pkt)
+}
+
+func (f *Frontend) send(pkt *client.Packet, send func(*client.Packet) error) error {
 	f.sendLock.Lock()
 	defer f.sendLock.Unlock()
 
 	const segment = commonmetrics.SegmentToClient
 	metrics.Metrics.ObservePacket(segment, pkt.Type)
-	err := f.stream.Send(pkt)
+	err := send(pkt)
 	if err != nil {
 		metrics.Metrics.ObserveStreamError(segment, err, pkt.Type)
 	}
@@ -142,9 +166,14 @@ const (
 	destHostKey key = iota
 )
 
-func (c *ProxyClientConnection) send(pkt *client.Packet) error {
+func (c *ProxyClientConnection) sendFromBackend(pkt *client.Packet, backend *Backend) error {
 	defer func(start time.Time) { metrics.Metrics.ObserveFrontendWriteLatency(time.Since(start)) }(time.Now())
-	return c.frontend.Send(pkt)
+	return c.frontend.sendFromBackend(pkt, backend)
+}
+
+func (c *ProxyClientConnection) sendOnBackendClose(pkt *client.Packet) error {
+	defer func(start time.Time) { metrics.Metrics.ObserveFrontendWriteLatency(time.Since(start)) }(time.Now())
+	return c.frontend.sendOnBackendClose(pkt)
 }
 
 func NewPendingDialManager() *PendingDialManager {
@@ -1175,7 +1204,7 @@ func (s *ProxyServer) serveRecvBackend(backend *Backend, agentID string, recvCh 
 					},
 				},
 			}
-			if err := frontend.send(pkt); err != nil {
+			if err := frontend.sendOnBackendClose(pkt); err != nil {
 				klog.V(2).ErrorS(err, "DIAL_RSP for closed agent connection failed",
 					"agentID", agentID, "dialID", frontend.dialID)
 			}
@@ -1200,7 +1229,7 @@ func (s *ProxyServer) serveRecvBackend(backend *Backend, agentID string, recvCh 
 				},
 			}
 			pkt.GetCloseResponse().ConnectID = frontend.connectID
-			if err := frontend.send(pkt); err != nil {
+			if err := frontend.sendOnBackendClose(pkt); err != nil {
 				klog.ErrorS(err, "CLOSE_RSP to frontend failed", "agentID", agentID)
 			}
 		}
@@ -1230,7 +1259,7 @@ func (s *ProxyServer) serveRecvBackend(backend *Backend, agentID string, recvCh 
 					// failure on to the frontend.
 					klog.ErrorS(errors.New(resp.Error), "DIAL_RSP contains failure", "dialID", resp.Random, "agentID", agentID)
 					metrics.Metrics.ObserveDialFailure(metrics.DialFailureErrorResponse)
-					if err := frontend.send(pkt); err != nil {
+					if err := frontend.sendFromBackend(pkt, backend); err != nil {
 						klog.ErrorS(err, "DIAL_RSP send to frontend stream failure",
 							"dialID", resp.Random, "agentID", agentID, "connectionID", resp.ConnectID)
 					}
@@ -1246,7 +1275,7 @@ func (s *ProxyServer) serveRecvBackend(backend *Backend, agentID string, recvCh 
 				// TODO: this connection may be cleaned on serveRecvFrontend exit, make it independent.
 				s.addEstablished(agentID, resp.ConnectID, frontend)
 				frontend.frontend.closeWithBackend(backend)
-				if err := frontend.send(pkt); err != nil {
+				if err := frontend.sendFromBackend(pkt, backend); err != nil {
 					klog.ErrorS(err, "DIAL_RSP send to frontend stream failure",
 						"dialID", resp.Random, "agentID", agentID, "connectionID", resp.ConnectID)
 					metrics.Metrics.ObserveDialFailure(metrics.DialFailureSendResponse)
@@ -1280,7 +1309,7 @@ func (s *ProxyServer) serveRecvBackend(backend *Backend, agentID string, recvCh 
 			if frontend == nil {
 				klog.V(2).InfoS("DIAL_CLS not recognized; dropped", "dialID", resp.Random, "agentID", agentID)
 			} else {
-				if err := frontend.send(pkt); err != nil {
+				if err := frontend.sendFromBackend(pkt, backend); err != nil {
 					klog.ErrorS(err, "DIAL_CLS send to client stream error", "agentID", agentID, "dialID", resp.Random)
 				} else {
 					klog.V(5).InfoS("DIAL_CLS sent to frontend", "dialID", resp.Random)
@@ -1308,7 +1337,7 @@ func (s *ProxyServer) serveRecvBackend(backend *Backend, agentID string, recvCh 
 				s.sendBackendClose(backend, resp.ConnectID, 0, "missing frontend")
 				break
 			}
-			if err := frontend.send(pkt); err != nil {
+			if err := frontend.sendFromBackend(pkt, backend); err != nil {
 				klog.ErrorS(err, "send to client stream failure", "agentID", agentID, "connectionID", resp.ConnectID)
 			} else {
 				klog.V(5).InfoS("DATA sent to frontend")
@@ -1324,7 +1353,7 @@ func (s *ProxyServer) serveRecvBackend(backend *Backend, agentID string, recvCh 
 				break
 			}
 			metrics.Metrics.ObserveEstablishedConnectionsClosed(metrics.ConnectionClosedCloseResponse, 1)
-			if err := frontend.send(pkt); err != nil {
+			if err := frontend.sendFromBackend(pkt, backend); err != nil {
 				// Normal when frontend closes it.
 				klog.ErrorS(err, "CLOSE_RSP send to client stream error", "agentID", agentID, "connectionID", resp.ConnectID)
 			} else {

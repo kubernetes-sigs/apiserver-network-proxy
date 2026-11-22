@@ -92,6 +92,16 @@ func newGRPCWriterTestServer(t *testing.T, queueSize int) *writerTestServer {
 // its dial with connection ID id.
 func (s *writerTestServer) establishGRPC(t *testing.T, id int64) *grpcTestFrontend {
 	t.Helper()
+	f := s.establishGRPCPendingDial(t, id)
+	s.send(t, dialRspPkt(id, id))
+	f.expect(t, client.PacketType_DIAL_RSP, "")
+	return f
+}
+
+// establishGRPCPendingDial serves a gRPC frontend with ProxyServer.Proxy and
+// waits for its dial id to reach the agent, without answering it.
+func (s *writerTestServer) establishGRPCPendingDial(t *testing.T, id int64) *grpcTestFrontend {
+	t.Helper()
 	ctx, cancel := context.WithCancel(metadata.NewIncomingContext(context.Background(),
 		metadata.Pairs(header.UserAgent, "test")))
 	f := &grpcTestFrontend{
@@ -122,9 +132,19 @@ func (s *writerTestServer) establishGRPC(t *testing.T, id int64) *grpcTestFronte
 		}
 		break
 	}
-	s.send(t, dialRspPkt(id, id))
-	f.expect(t, client.PacketType_DIAL_RSP, "")
 	return f
+}
+
+func (f *grpcTestFrontend) expectDialFailure(t *testing.T) {
+	t.Helper()
+	select {
+	case pkt := <-f.sent:
+		if pkt.Type != client.PacketType_DIAL_RSP || pkt.GetDialResponse().GetError() == "" {
+			t.Fatalf("frontend received %v, want a failed DIAL_RSP", pkt)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("frontend did not receive a failed DIAL_RSP")
+	}
 }
 
 func TestGRPCFrontendWriteChannelSize(t *testing.T) {
@@ -264,4 +284,60 @@ func TestGRPCFrontendDrainWaitsForSendInProgress(t *testing.T) {
 		close(f.release)
 		<-drained
 	})
+}
+
+func TestGRPCFrontendWriterBackendDisconnect(t *testing.T) {
+	for _, cleanEOF := range []bool{false, true} {
+		t.Run(fmt.Sprintf("clean-eof=%t", cleanEOF), func(t *testing.T) {
+			s := newGRPCWriterTestServer(t, 1)
+			slow := s.establishGRPC(t, 1)
+			healthy := s.establishGRPC(t, 2)
+
+			// A dial still waiting for its DIAL_RSP on this agent.
+			pending := s.establishGRPCPendingDial(t, 3)
+
+			s.send(t, dataPkt(1, []byte("blocked")))
+			s.send(t, dataPkt(1, []byte("queued")))
+			overflowSent := make(chan struct{})
+			go func() {
+				defer close(overflowSent)
+				s.packets <- dataPkt(1, []byte("overflow"))
+			}()
+			waitWriterSignal(t, overflowSent, "dispatch of the overflow packet")
+			waitWriterMetrics(t, 1, 1)
+
+			// The agent goes away while the receive loop is blocked on the
+			// slow frontend's full queue.
+			if cleanEOF {
+				s.backend.receivedEOF.Store(true)
+			}
+			s.cancel()
+			packets := s.packets
+			s.packets = make(chan *client.Packet)
+			close(packets)
+
+			want := []string{"blocked", "queued"}
+			if cleanEOF {
+				// After a clean EOF the agent's last packets are delivered,
+				// so the loop waits for the slow frontend to read.
+				want = append(want, "overflow")
+			} else {
+				// Otherwise the blocked packet is dropped and the cleanup
+				// runs while the slow frontend is still not reading.
+				waitWriterSignal(t, s.done, "receive loop exit on agent disconnect")
+				healthy.expect(t, client.PacketType_CLOSE_RSP, "")
+				pending.expectDialFailure(t)
+			}
+			for _, payload := range want {
+				slow.expect(t, client.PacketType_DATA, payload)
+			}
+			slow.expect(t, client.PacketType_CLOSE_RSP, "")
+			if cleanEOF {
+				waitWriterSignal(t, s.done, "receive loop exit after clean EOF")
+				healthy.expect(t, client.PacketType_CLOSE_RSP, "")
+				pending.expectDialFailure(t)
+			}
+			waitWriterMetrics(t, 0, 0)
+		})
+	}
 }
