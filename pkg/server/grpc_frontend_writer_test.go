@@ -21,6 +21,7 @@ import (
 	"fmt"
 	"io"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"google.golang.org/grpc/metadata"
@@ -220,4 +221,47 @@ func TestGRPCFrontendWriterCancelUnblocksDispatch(t *testing.T) {
 	s.send(t, dataPkt(2, []byte("healthy")))
 	healthy.expect(t, client.PacketType_DATA, "healthy")
 	waitWriterMetrics(t, 0, 0)
+}
+
+// sendBlockingFrontend is a gRPC frontend stream whose Send ignores its
+// context and blocks until release is closed.
+type sendBlockingFrontend struct {
+	client.ProxyService_ProxyServer
+
+	ctx     context.Context
+	release chan struct{}
+}
+
+func (f *sendBlockingFrontend) Context() context.Context { return f.ctx }
+
+func (f *sendBlockingFrontend) Send(*client.Packet) error {
+	<-f.release
+	return nil
+}
+
+func TestGRPCFrontendDrainWaitsForSendInProgress(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		ctx, cancel := context.WithCancel(context.Background())
+		f := &sendBlockingFrontend{ctx: ctx, release: make(chan struct{})}
+		g := newGRPCFrontendStream(f, 1)
+		if err := g.Send(dataPkt(1, []byte("blocked"))); err != nil {
+			t.Fatal(err)
+		}
+		synctest.Wait() // the writer is in f.Send
+
+		cancel()
+		drained := make(chan struct{})
+		go func() {
+			defer close(drained)
+			g.drain()
+		}()
+		synctest.Wait()
+		select {
+		case <-drained:
+			t.Fatal("drain returned while the writer was in Send")
+		default:
+		}
+		close(f.release)
+		<-drained
+	})
 }

@@ -107,23 +107,23 @@ func (g *grpcFrontendStream) isClosed() bool {
 }
 
 // drain waits for the writer to send the packets already queued, then stops
-// it. It gives up once the stream context ends, which also fails a send in
-// progress.
+// it. It gives up on queued packets once the stream context ends, but still
+// waits for a Send in progress, since gRPC forbids Send after the handler
+// returns. Ending the context fails that Send.
 func (g *grpcFrontendStream) drain() {
-	defer g.stop()
 	done := g.Context().Done()
 	select {
 	case g.writeCh <- nil:
 		g.writeMetrics.update(g.writeCh)
+		select {
+		case <-g.writerDone:
+		case <-done:
+		}
 	case <-g.closed:
-		return
-	case <-done:
-		return
-	}
-	select {
-	case <-g.writerDone:
 	case <-done:
 	}
+	g.stop()
+	<-g.writerDone
 }
 
 // stop ends the writer and fails later Sends, including one waiting for queue
