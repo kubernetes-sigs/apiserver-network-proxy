@@ -45,6 +45,10 @@ import (
 type AgentOpts struct {
 	AgentID    string
 	ServerAddr string
+	// Defaults to the shared CertsDir.
+	CertsDir string
+	// EnableTLSCertificateReload sets --enable-tls-certificate-reload.
+	EnableTLSCertificateReload bool
 }
 
 type AgentRunner interface {
@@ -247,9 +251,14 @@ func agentOptions(t testing.TB, opts AgentOpts) (*agentopts.GrpcProxyAgentOption
 	o.SyncIntervalCap = 1 * time.Second
 	o.ProbeInterval = 100 * time.Millisecond
 
-	o.AgentCert = filepath.Join(CertsDir, TestAgentCertFile)
-	o.AgentKey = filepath.Join(CertsDir, TestAgentKeyFile)
-	o.CaCert = filepath.Join(CertsDir, TestCAFile)
+	certsDir := opts.CertsDir
+	if certsDir == "" {
+		certsDir = CertsDir
+	}
+	o.AgentCert = filepath.Join(certsDir, TestAgentCertFile)
+	o.AgentKey = filepath.Join(certsDir, TestAgentKeyFile)
+	o.CaCert = filepath.Join(certsDir, TestCAFile)
+	o.EnableTLSCertificateReload = opts.EnableTLSCertificateReload
 
 	const localhost = "127.0.0.1"
 	o.HealthServerHost = localhost

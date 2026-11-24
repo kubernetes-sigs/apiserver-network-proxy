@@ -63,6 +63,8 @@ type AgentMetrics struct {
 	leaseLists                *prometheus.CounterVec
 	leaseWatches              *prometheus.CounterVec
 	leaseListLatencies        *prometheus.HistogramVec
+	tlsReloadFailures         *prometheus.CounterVec
+	tlsReloadLastSuccess      *prometheus.GaugeVec
 }
 
 // newAgentMetrics create a new AgentMetrics, configured with default metric names.
@@ -167,8 +169,31 @@ func newAgentMetrics() *AgentMetrics {
 		},
 		[]string{"http_response_code"},
 	)
+	// The TLS reload metrics are vectors without labels, which export nothing
+	// until the first observation. An agent that does not reload its TLS files
+	// therefore does not report them.
+	tlsReloadFailures := prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Namespace: Namespace,
+			Subsystem: Subsystem,
+			Name:      "tls_certificate_reload_failure_total",
+			Help:      "Count of failed TLS certificate reload attempts.",
+		},
+		nil,
+	)
+	tlsReloadLastSuccess := prometheus.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Namespace: Namespace,
+			Subsystem: Subsystem,
+			Name:      "tls_certificate_last_reload_success_timestamp_seconds",
+			Help:      "Unix timestamp of the last TLS certificate reload attempt that confirmed valid files, including attempts that found them unchanged.",
+		},
+		nil,
+	)
 	streamPackets := commonmetrics.MakeStreamPacketsTotalMetric(Namespace, Subsystem)
 	streamErrors := commonmetrics.MakeStreamErrorsTotalMetric(Namespace, Subsystem)
+	prometheus.MustRegister(tlsReloadFailures)
+	prometheus.MustRegister(tlsReloadLastSuccess)
 	prometheus.MustRegister(dialLatencies)
 	prometheus.MustRegister(serverFailures)
 	prometheus.MustRegister(dialFailures)
@@ -196,6 +221,8 @@ func newAgentMetrics() *AgentMetrics {
 		leaseLists:                leaseLists,
 		leaseWatches:              leaseWatches,
 		leaseListLatencies:        leaseListLatencies,
+		tlsReloadFailures:         tlsReloadFailures,
+		tlsReloadLastSuccess:      tlsReloadLastSuccess,
 	}
 
 }
@@ -212,6 +239,21 @@ func (a *AgentMetrics) Reset() {
 	a.streamPackets.Reset()
 	a.streamErrors.Reset()
 	a.leaseLists.Reset()
+	a.tlsReloadFailures.Reset()
+	a.tlsReloadLastSuccess.Reset()
+}
+
+// ObserveTLSReloadFailure records a failed TLS certificate reload attempt.
+func (a *AgentMetrics) ObserveTLSReloadFailure() {
+	a.tlsReloadFailures.WithLabelValues().Inc()
+}
+
+// ObserveTLSReloadSuccess records the time of a TLS certificate reload attempt
+// that found valid files.
+func (a *AgentMetrics) ObserveTLSReloadSuccess() {
+	// Export the failure count from the first load, starting at 0.
+	a.tlsReloadFailures.WithLabelValues()
+	a.tlsReloadLastSuccess.WithLabelValues().SetToCurrentTime()
 }
 
 // ObserveServerFailure records a failure to send to or receive from the proxy

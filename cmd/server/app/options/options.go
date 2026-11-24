@@ -129,6 +129,8 @@ type ProxyRunOptions struct {
 	GracefulShutdownTimeout time.Duration
 	// Backend dial timeout duration for requests from the server to backend agents.
 	BackendDialTimeout time.Duration
+	// Reloads the TLS certificate, key and CA files when they change.
+	EnableTLSCertificateReload bool
 }
 
 func (o *ProxyRunOptions) Flags() *pflag.FlagSet {
@@ -167,6 +169,7 @@ func (o *ProxyRunOptions) Flags() *pflag.FlagSet {
 	flags.StringVar(&o.ProxyStrategies, "proxy-strategies", o.ProxyStrategies, "The list of proxy strategies used by the server to pick an agent/tunnel, available strategies are: default, destHost, defaultRoute.")
 	flags.StringSliceVar(&o.CipherSuites, "cipher-suites", o.CipherSuites, "The comma separated list of allowed cipher suites. Has no effect on TLS1.3. Empty means allow default list.")
 	flags.StringVar(&o.TLSMinVersion, "tls-min-version", o.TLSMinVersion, "Minimum TLS version for server connections. Accepted values: VersionTLS10, VersionTLS11, VersionTLS12, VersionTLS13. Empty defaults to VersionTLS12.")
+	flags.BoolVar(&o.EnableTLSCertificateReload, "enable-tls-certificate-reload", o.EnableTLSCertificateReload, "If true, reload the TLS certificate, key and CA files when they change, without a restart. The files must be regular files or symlinks to them.")
 	flags.IntVar(&o.XfrChannelSize, "xfr-channel-size", o.XfrChannelSize, "The size of the two KNP server channels used in server for transferring data. One channel is for data coming from the Kubernetes API Server, and the other one is for data coming from the KNP agent.")
 	flags.IntVar(&o.FrontendWriteChannelSize, "frontend-write-channel-size", o.FrontendWriteChannelSize, "The number of packets buffered for each HTTP CONNECT frontend before backend receive processing blocks. Set to 0 to disable the queue and write synchronously.")
 	flags.BoolVar(&o.EnableLeaseController, "enable-lease-controller", o.EnableLeaseController, "Enable lease controller to publish and garbage collect proxy server leases.")
@@ -218,6 +221,7 @@ func (o *ProxyRunOptions) Print() {
 	klog.V(1).Infof("LeaseLabel set to %s.\n", o.LeaseLabel)
 	klog.V(1).Infof("CipherSuites set to %q.\n", o.CipherSuites)
 	klog.V(1).Infof("TLSMinVersion set to %q.\n", o.TLSMinVersion)
+	klog.V(1).Infof("EnableTLSCertificateReload set to %v.\n", o.EnableTLSCertificateReload)
 	klog.V(1).Infof("XfrChannelSize set to %d.\n", o.XfrChannelSize)
 	klog.V(1).Infof("FrontendWriteChannelSize set to %d.\n", o.FrontendWriteChannelSize)
 	klog.V(1).Infof("GracefulShutdownTimeout set to %v.\n", o.GracefulShutdownTimeout)

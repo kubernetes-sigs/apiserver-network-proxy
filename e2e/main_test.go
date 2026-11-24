@@ -112,9 +112,16 @@ type CLIFlag struct {
 }
 
 type DeploymentConfig struct {
-	Replicas int
-	Image    string
-	Args     []CLIFlag
+	Replicas      int
+	Image         string
+	Args          []CLIFlag
+	SecretVolumes []SecretVolumeConfig
+}
+
+type SecretVolumeConfig struct {
+	Name       string
+	SecretName string
+	MountPath  string
 }
 
 func renderAndApplyManifests(ctx context.Context, cfg *envconf.Config) (context.Context, error) {

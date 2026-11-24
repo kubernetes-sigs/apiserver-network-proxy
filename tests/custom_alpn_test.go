@@ -66,16 +66,33 @@ func TestCustomALPN(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-
-	addr := strings.TrimPrefix(svr.URL, "https://")
-	conn, err := grpc.Dial(addr, grpc.WithTransportCredentials(credentials.NewTLS(tlsConfig)))
+	reloading, err := util.GetReloadingClientTLSCredentials(t.Context(), ca.Name(), "", "", "", []string{proto}, util.TLSReloadHooks{})
 	if err != nil {
 		t.Fatal(err)
 	}
-	grpcClient := client.NewProxyServiceClient(conn)
 
-	grpcClient.Proxy(context.Background())
-	if atomic.LoadInt32(&protoUsed) != 1 {
-		t.Error("expected custom ALPN protocol to have been used")
+	addr := strings.TrimPrefix(svr.URL, "https://")
+	for _, tc := range []struct {
+		name        string
+		credentials credentials.TransportCredentials
+	}{
+		{name: "static", credentials: credentials.NewTLS(tlsConfig)},
+		{name: "reloading", credentials: reloading},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			before := atomic.LoadInt32(&protoUsed)
+			conn, err := grpc.Dial(addr, grpc.WithTransportCredentials(tc.credentials))
+			if err != nil {
+				t.Fatal(err)
+			}
+			// A connection left open reconnects and counts again.
+			defer conn.Close()
+			grpcClient := client.NewProxyServiceClient(conn)
+
+			grpcClient.Proxy(context.Background())
+			if atomic.LoadInt32(&protoUsed) != before+1 {
+				t.Error("expected custom ALPN protocol to have been used")
+			}
+		})
 	}
 }

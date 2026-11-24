@@ -101,6 +101,8 @@ type GrpcProxyAgentOptions struct {
 	KubeconfigPath string
 	// Content type of requests sent to apiserver.
 	APIContentType string
+	// Reloads the TLS certificate, key and CA files when they change.
+	EnableTLSCertificateReload bool
 }
 
 func (o *GrpcProxyAgentOptions) ClientSetConfig(dialOptions ...grpc.DialOption) *agent.ClientSetConfig {
@@ -126,6 +128,7 @@ func (o *GrpcProxyAgentOptions) Flags() *pflag.FlagSet {
 	flags.StringVar(&o.AgentCert, "agent-cert", o.AgentCert, "If non-empty secure communication with this cert.")
 	flags.StringVar(&o.AgentKey, "agent-key", o.AgentKey, "If non-empty secure communication with this key.")
 	flags.StringVar(&o.CaCert, "ca-cert", o.CaCert, "If non-empty the CAs we use to validate clients.")
+	flags.BoolVar(&o.EnableTLSCertificateReload, "enable-tls-certificate-reload", o.EnableTLSCertificateReload, "If true, reload the TLS certificate, key and CA files when they change, without a restart. The files must be regular files or symlinks to them.")
 	flags.StringVar(&o.ProxyServerHost, "proxy-server-host", o.ProxyServerHost, "The hostname to use to connect to the proxy-server.")
 	flags.IntVar(&o.ProxyServerPort, "proxy-server-port", o.ProxyServerPort, "The port the proxy server is listening on.")
 	flags.StringSliceVar(&o.AlpnProtos, "alpn-proto", o.AlpnProtos, "Additional ALPN protocols to be presented when connecting to the server. Useful to distinguish between network proxy and apiserver connections that share the same destination address.")
@@ -162,6 +165,7 @@ func (o *GrpcProxyAgentOptions) Print() {
 	klog.V(1).Infof("AgentCert set to %q.\n", o.AgentCert)
 	klog.V(1).Infof("AgentKey set to %q.\n", o.AgentKey)
 	klog.V(1).Infof("CACert set to %q.\n", o.CaCert)
+	klog.V(1).Infof("EnableTLSCertificateReload set to %v.\n", o.EnableTLSCertificateReload)
 	klog.V(1).Infof("ProxyServerHost set to %q.\n", o.ProxyServerHost)
 	klog.V(1).Infof("ProxyServerPort set to %d.\n", o.ProxyServerPort)
 	klog.V(1).Infof("ALPNProtos set to %+s.\n", o.AlpnProtos)
