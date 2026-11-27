@@ -25,7 +25,7 @@ import (
 )
 
 func (h *httpConnectStream) enqueueWrite(pkt *client.Packet) error {
-	return enqueueFrontendWrite(h.writeCh, h.closed, &h.writeMetrics, pkt, "host", h.host, "connectionID", h.connectID)
+	return enqueueFrontendWrite(h.writeCh, h.closed, nil, &h.writeMetrics, pkt, "host", h.host, "connectionID", h.connectID)
 }
 
 // serveFrontendWrites owns established socket writes. The HTTP handshake is

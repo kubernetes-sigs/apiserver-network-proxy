@@ -17,6 +17,7 @@ limitations under the License.
 package server
 
 import (
+	"errors"
 	"net"
 	"sync"
 
@@ -28,6 +29,10 @@ import (
 )
 
 const defaultFrontendWriteChannelSize = 10
+
+// errBackendGone is returned when a write is abandoned because the agent that
+// sent the packet went away.
+var errBackendGone = errors.New("agent connection closed")
 
 type frontendWriteQueueMetrics struct {
 	mu   sync.Mutex
@@ -41,11 +46,15 @@ type frontendWriteQueueMetrics struct {
 // common Frontend.Send path. When writeCh fills, it blocks without dropping
 // packets or disconnecting a slow client, until there is room or closed is
 // closed. This delays, rather than eliminates, head-of-line blocking of the
-// shared agent receive loop. logKV identifies the frontend in logs.
-func enqueueFrontendWrite(writeCh chan<- *client.Packet, closed <-chan struct{}, state *frontendWriteQueueMetrics, pkt *client.Packet, logKV ...any) error {
+// shared agent receive loop. A nil abort never fires; otherwise the packet is
+// dropped with errBackendGone once abort is closed. logKV identifies the
+// frontend in logs.
+func enqueueFrontendWrite(writeCh chan<- *client.Packet, closed, abort <-chan struct{}, state *frontendWriteQueueMetrics, pkt *client.Packet, logKV ...any) error {
 	select {
 	case <-closed:
 		return net.ErrClosed
+	case <-abort:
+		return errBackendGone
 	default:
 	}
 
@@ -55,6 +64,8 @@ func enqueueFrontendWrite(writeCh chan<- *client.Packet, closed <-chan struct{},
 		return nil
 	case <-closed:
 		return net.ErrClosed
+	case <-abort:
+		return errBackendGone
 	default:
 	}
 
@@ -69,6 +80,8 @@ func enqueueFrontendWrite(writeCh chan<- *client.Packet, closed <-chan struct{},
 		return nil
 	case <-closed:
 		return net.ErrClosed
+	case <-abort:
+		return errBackendGone
 	}
 }
 
